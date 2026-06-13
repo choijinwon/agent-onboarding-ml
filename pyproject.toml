@@ -4,5 +4,8 @@ version = "0.1.0"
 description = "Console POC for ML Platform onboarding launch modes"
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+deepagents = ["deepagents>=0.6.8"]
+
 [project.scripts]
 ml-agent = "ml_agent:main"
