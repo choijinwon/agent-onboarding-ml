@@ -48,6 +48,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("쉬운 설명", output)
         self.assertIn("권장 조치", output)
         self.assertIn("수정안 미리보기", output)
+        self.assertIn("파일은 수정하지 않았습니다", output)
         self.assertIn("적용하기", output)
         self.assertIn("다시 보기", output)
         self.assertIn("취소하기", output)
@@ -87,6 +88,21 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("대상: requirements.txt", output)
             self.assertIn("Agent 수정 가능: 가능", output)
             self.assertIn("1. 수정안 미리보기로 이동", output)
+
+    def test_beginner_wizard_shows_step5_dry_run_preview(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("Step 5. 수정안 미리보기", output)
+            self.assertIn("dry-run 결과입니다", output)
+            self.assertIn("MLflow 의존성 추가", output)
+            self.assertIn("+ mlflow", output)
+            self.assertIn("MLflow 기록 코드 추가", output)
+            self.assertIn("적용하려면 다음 단계에서 '적용하기'를 선택해야 합니다", output)
 
 
 class ProjectAnalysisTest(unittest.TestCase):
@@ -163,6 +179,21 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(payload["exit_code"], 0)
             self.assertEqual(payload["analysis"]["registration_status"], "등록 가능")
             self.assertTrue(payload["analysis"]["job_template_ready"])
+
+    def test_fix_json_contains_step5_previews(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = handle_advanced_input(f"ml-agent fix {root} --dry-run --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["command"], "fix")
+            self.assertIn("preview_items=2", payload["details"])
+            self.assertEqual(len(payload["fix_previews"]), 2)
+            self.assertEqual(payload["fix_previews"][0]["code"], "ADD_MLFLOW_DEPENDENCY")
+            self.assertTrue(payload["fix_previews"][0]["requires_approval"])
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")

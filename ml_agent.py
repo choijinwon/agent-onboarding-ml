@@ -93,6 +93,26 @@ class ProjectIssue:
 
 
 @dataclass(frozen=True)
+class FixPreview:
+    code: str
+    title: str
+    target: str
+    action: str
+    preview_lines: list[str]
+    requires_approval: bool = True
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "title": self.title,
+            "target": self.target,
+            "action": self.action,
+            "preview_lines": self.preview_lines,
+            "requires_approval": self.requires_approval,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
@@ -135,6 +155,7 @@ class CommandResult:
     details: list[str]
     result_file: str | None = None
     analysis: ProjectAnalysis | None = None
+    fix_previews: list[FixPreview] | None = None
 
     def as_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -147,6 +168,8 @@ class CommandResult:
         }
         if self.analysis:
             payload["analysis"] = self.analysis.as_dict()
+        if self.fix_previews is not None:
+            payload["fix_previews"] = [preview.as_dict() for preview in self.fix_previews]
         return payload
 
 
@@ -264,8 +287,7 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 4. 문제 목록 확인\n"
         f"{format_beginner_issues(analysis)}\n\n"
         "Step 5. 수정안 미리보기\n"
-        "- 파일 수정 전 dry-run 결과를 먼저 보여줍니다.\n"
-        "- 화면에는 명령어 대신 선택지를 제공합니다.\n\n"
+        f"{format_beginner_fix_preview(analysis)}\n\n"
         "Step 6. 사용자 승인\n"
         f"- {profile.approval_policy}\n"
         "- 1. 적용하기\n"
@@ -469,6 +491,56 @@ def build_project_issue(
     )
 
 
+def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
+    if analysis.registration_status == "불가":
+        return []
+
+    previews: list[FixPreview] = []
+    issue_codes = {issue.code for issue in analysis.issue_details if issue.fixable_by_agent}
+    if "DEPENDENCY_FILE_MISSING" in issue_codes:
+        previews.append(
+            FixPreview(
+                code="CREATE_REQUIREMENTS",
+                title="requirements.txt 생성",
+                target="requirements.txt",
+                action="새 패키지 목록 파일을 만듭니다.",
+                preview_lines=[
+                    "+ mlflow",
+                    "+ scikit-learn",
+                    "+ pandas",
+                ],
+            )
+        )
+    if "MLFLOW_DEPENDENCY_MISSING" in issue_codes:
+        target = analysis.requirements_files[0] if analysis.requirements_files else "requirements.txt"
+        previews.append(
+            FixPreview(
+                code="ADD_MLFLOW_DEPENDENCY",
+                title="MLflow 의존성 추가",
+                target=target,
+                action="패키지 목록에 mlflow를 추가합니다.",
+                preview_lines=["+ mlflow"],
+            )
+        )
+    if "MLFLOW_CODE_MISSING" in issue_codes:
+        target = analysis.entrypoint_candidates[0] if analysis.entrypoint_candidates else "train.py"
+        previews.append(
+            FixPreview(
+                code="ADD_MLFLOW_TRACKING_SNIPPET",
+                title="MLflow 기록 코드 추가",
+                target=target,
+                action="학습 시작 지점 주변에 MLflow 기록 예시를 추가합니다.",
+                preview_lines=[
+                    "+ import mlflow",
+                    "+ with mlflow.start_run():",
+                    "+     mlflow.log_param('source', 'ml-agent')",
+                    "+     # 기존 학습 코드 실행 후 metric/artifact 기록",
+                ],
+            )
+        )
+    return previews
+
+
 def find_requirements_files(root: Path) -> list[Path]:
     candidates = [root / "requirements.txt", root / "pyproject.toml"]
     return [path for path in candidates if path.exists() and path.is_file()]
@@ -577,6 +649,43 @@ def format_beginner_issues(analysis: ProjectAnalysis) -> str:
     return "\n".join(issue_rows)
 
 
+def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
+    previews = build_fix_previews(analysis)
+    if analysis.registration_status == "불가":
+        return (
+            "- 현재는 수정안을 만들 수 없습니다.\n"
+            "- 먼저 프로젝트 경로나 폴더 구조를 확인해야 합니다.\n"
+            "- 파일은 수정하지 않았습니다."
+        )
+    if not previews:
+        return (
+            "- 자동 수정이 필요한 항목이 없습니다.\n"
+            "- 파일은 수정하지 않았습니다.\n"
+            "- 다음 단계에서 리포트 생성 또는 재검증을 진행할 수 있습니다."
+        )
+    rows = [
+        "- dry-run 결과입니다. 아직 파일은 수정하지 않았습니다.",
+        f"- 미리보기 항목: {len(previews)}개",
+    ]
+    for index, preview in enumerate(previews, start=1):
+        rows.extend(
+            [
+                f"- [{index}] {preview.title}",
+                f"  대상 파일: {preview.target}",
+                f"  작업 내용: {preview.action}",
+                "  변경 미리보기:",
+            ]
+        )
+        rows.extend(f"    {line}" for line in preview.preview_lines)
+    rows.extend(
+        [
+            "- 적용하려면 다음 단계에서 '적용하기'를 선택해야 합니다.",
+            "- '다시 보기' 또는 '취소하기'를 선택하면 파일을 수정하지 않습니다.",
+        ]
+    )
+    return "\n".join(rows)
+
+
 def format_severity(severity: str) -> str:
     labels = {
         "blocker": "필수 확인",
@@ -679,6 +788,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     status = "ok"
     exit_code = 0
     analysis = analyze_project(path)
+    fix_previews = build_fix_previews(analysis) if command in {"fix", "apply"} else None
 
     if command in {"analyze", "validate", "fix", "apply", "report"}:
         details.append(f"path={target}")
@@ -690,6 +800,8 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     if command == "apply":
         details.append("explicit_apply=true")
         details.append("approved changes would be applied in a full implementation")
+    if command == "fix":
+        details.append(f"preview_items={len(fix_previews or [])}")
     if command == "report":
         result_file = str(target / "ml-agent-report.json")
         details.append(f"result_file={result_file}")
@@ -705,7 +817,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     elif command == "validate" and analysis.issues:
         status = "needs_action"
         exit_code = 1
-    return CommandResult(command, path, status, exit_code, details, result_file, analysis)
+    return CommandResult(command, path, status, exit_code, details, result_file, analysis, fix_previews)
 
 
 def format_command_result(result: CommandResult) -> str:
