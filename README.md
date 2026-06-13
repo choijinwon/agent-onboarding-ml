@@ -33,6 +33,22 @@ py -3 ml_agent.py
 - Python 3.10 이상
 - 폐쇄망 환경에서는 Python 설치 파일과 이 저장소를 사전에 반입
 
+처음 셋팅할 때는 샘플 환경 파일을 복사한 뒤 내부 Qwen endpoint 값을 수정합니다.
+
+Linux/macOS:
+
+```bash
+cp .env.example .env
+python3 ml_agent.py init
+```
+
+Windows 10/11:
+
+```powershell
+copy .env.example .env
+.\ml-agent.cmd init
+```
+
 Python 확인:
 
 ```powershell
@@ -57,6 +73,8 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ./ml-agent report ./project
 ./ml-agent chat
 ./ml-agent profile
+./ml-agent config
+./ml-agent init
 ```
 
 Windows 10/11:
@@ -69,6 +87,8 @@ Windows 10/11:
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd chat
 .\ml-agent.cmd profile
+.\ml-agent.cmd config
+.\ml-agent.cmd init
 ```
 
 JSON 출력이 필요한 경우 `--json` 옵션을 사용할 수 있습니다.
@@ -94,9 +114,39 @@ Windows 10/11:
 - skills: MLflow 등록 점검, Job Template 초안, 폐쇄망 검증 절차
 - memory: 등록 규칙과 팀 Job Template 컨벤션을 별도 메모리 경로로 선언
 - context policy: 긴 분석 결과는 요약하고 상세 증거는 리포트 산출물로 남김
+- skills 저장소: `SKILL_STORE_DIR` 값으로 지정하며 기본값은 `skills`
 
 현재 구현은 폐쇄망 POC를 위해 외부 런타임 의존성을 강제하지 않는 독립 프로파일입니다.
 나중에 실제 LLM 런타임을 연결할 때 `deepagents.create_deep_agent`의 `tools`, `subagents`, `skills`, `permissions`, `memory` 설정으로 옮길 수 있습니다.
+
+## 환경 변수
+
+`.env.example`에는 폐쇄망 Qwen endpoint, 모델 목록, Deep Agent 옵션, 작업 디렉터리, 등록 패키지, 리포트 경로 샘플이 포함되어 있습니다.
+
+주요 값:
+
+- `QWEN_API_KEY`: 내부 Qwen API 키
+- `QWEN_BASE_URL`: 내부 OpenAI-compatible Qwen endpoint
+- `QWEN_MODEL`: 기본 모델
+- `QWEN_MODELS`: 선택 가능한 모델 목록
+- `ENABLE_MULTI_AGENT`: sub-agent 분담 사용 여부
+- `ENABLE_HARNESS_SKILLS`: Deep Agent skill 저장/로드 사용 여부
+- `SKILL_STORE_DIR`: skill 저장 경로, 기본값 `skills`
+- `CHAT_WORKSPACE_DIR`: agent 작업 공간
+- `REGISTRATION_PACKAGE_DIR`: 등록 패키지 산출물 경로
+- `FIX_REPORT_DIR`: 수정 리포트 경로
+
+설정 요약 확인:
+
+```bash
+./ml-agent config
+```
+
+Windows 10/11:
+
+```powershell
+.\ml-agent.cmd config
+```
 
 ## 모드 전환
 

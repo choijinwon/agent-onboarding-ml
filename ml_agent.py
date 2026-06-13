@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from app_config import AppConfig, ensure_runtime_layout, format_config_summary
 from deep_agent_profile import build_ml_platform_profile, format_profile
 
 
@@ -239,6 +240,10 @@ def handle_advanced_input(command: str) -> str:
         return ADVANCED_INTRO
     if parts[0] == "chat":
         return "chat: Agent 대화 모드 진입"
+    if parts[0] == "config":
+        return format_config_summary(AppConfig.load())
+    if parts[0] == "init":
+        return initialize_runtime_layout()
     if parts[0] == "profile":
         as_json = "--json" in parts
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -246,7 +251,7 @@ def handle_advanced_input(command: str) -> str:
             return json.dumps(profile.as_dict(), ensure_ascii=False, indent=2)
         return format_profile(profile)
     if parts[0] not in {"analyze", "validate", "fix", "apply", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile"
+        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -291,6 +296,18 @@ def format_command_result(result: CommandResult) -> str:
     )
 
 
+def initialize_runtime_layout() -> str:
+    config = AppConfig.load()
+    directories = ensure_runtime_layout(config)
+    rows = "\n".join(f"- {directory}" for directory in directories)
+    return (
+        "runtime layout initialized\n"
+        f"skill_store_dir: {config.skill_store_dir()}\n"
+        "directories:\n"
+        f"{rows}"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agent")
     subparsers = parser.add_subparsers(dest="command")
@@ -302,6 +319,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser("chat")
+    subparsers.add_parser("config")
+    subparsers.add_parser("init")
     profile_parser = subparsers.add_parser("profile")
     profile_parser.add_argument("--json", action="store_true")
     return parser
@@ -317,6 +336,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "chat":
         ConsoleAssistant().run()
+        return 0
+    if args.command == "config":
+        print(format_config_summary(AppConfig.load()))
+        return 0
+    if args.command == "init":
+        print(initialize_runtime_layout())
         return 0
     if args.command == "profile":
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -404,7 +429,9 @@ fix        수정안 생성
 apply      승인된 수정안 적용
 report     분석 리포트 생성
 chat       Agent 대화 모드 진입
-profile    Deep Agent 프로파일 확인"""
+profile    Deep Agent 프로파일 확인
+config     .env 설정 요약
+init       런타임/스킬 저장 디렉터리 생성"""
 
 
 if __name__ == "__main__":

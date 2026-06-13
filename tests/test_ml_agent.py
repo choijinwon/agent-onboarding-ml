@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
+from app_config import AppConfig, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
 from ml_agent import (
     MODE_ADVANCED,
@@ -83,6 +85,13 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertIn("project-scanner", output)
         self.assertIn("Human-in-the-loop", output)
 
+    def test_config_command_outputs_env_summary(self):
+        output = handle_advanced_input("ml-agent config")
+
+        self.assertIn("Environment Config", output)
+        self.assertIn("qwen_model=qwen3.5", output)
+        self.assertIn("skill_store_dir", output)
+
 
 class DeepAgentProfileTest(unittest.TestCase):
     def test_profile_contains_deepagents_harness_concepts(self):
@@ -107,6 +116,26 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertTrue(wrapper.exists())
         self.assertIn("py -3", wrapper.read_text())
+
+
+class AppConfigTest(unittest.TestCase):
+    def test_env_example_contains_qwen_and_skill_store(self):
+        env_example = Path(__file__).resolve().parents[1] / ".env.example"
+        content = env_example.read_text(encoding="utf-8")
+
+        self.assertIn("QWEN_API_KEY=your-internal-qwen-key", content)
+        self.assertIn("QWEN_BASE_URL=http://xxx.xxx.xxx.xxx:port/v1", content)
+        self.assertIn("SKILL_STORE_DIR=skills", content)
+
+    def test_runtime_layout_creates_skill_store(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = AppConfig.load(root_dir=root)
+            directories = ensure_runtime_layout(config)
+
+            self.assertIn(root / "skills", directories)
+            self.assertTrue((root / "skills" / "README.md").exists())
+            self.assertTrue((root / "agent_workspace" / "registered").exists())
 
 
 if __name__ == "__main__":
