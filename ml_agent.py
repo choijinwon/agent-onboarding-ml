@@ -113,6 +113,24 @@ class FixPreview:
 
 
 @dataclass(frozen=True)
+class ApprovalOption:
+    key: str
+    label: str
+    description: str
+    will_modify_files: bool
+    enabled: bool = True
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "description": self.description,
+            "will_modify_files": self.will_modify_files,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
@@ -156,6 +174,7 @@ class CommandResult:
     result_file: str | None = None
     analysis: ProjectAnalysis | None = None
     fix_previews: list[FixPreview] | None = None
+    approval_options: list[ApprovalOption] | None = None
 
     def as_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -170,6 +189,8 @@ class CommandResult:
             payload["analysis"] = self.analysis.as_dict()
         if self.fix_previews is not None:
             payload["fix_previews"] = [preview.as_dict() for preview in self.fix_previews]
+        if self.approval_options is not None:
+            payload["approval_options"] = [option.as_dict() for option in self.approval_options]
         return payload
 
 
@@ -289,10 +310,7 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 5. 수정안 미리보기\n"
         f"{format_beginner_fix_preview(analysis)}\n\n"
         "Step 6. 사용자 승인\n"
-        f"- {profile.approval_policy}\n"
-        "- 1. 적용하기\n"
-        "- 2. 다시 보기\n"
-        "- 3. 취소하기\n\n"
+        f"{format_beginner_approval(analysis, profile.approval_policy)}\n\n"
         "Step 7. 파일 생성 또는 수정\n"
         "- 사용자가 '적용하기'를 선택한 경우에만 파일을 생성하거나 수정합니다.\n"
         "- 삭제 작업은 수행하지 않습니다.\n\n"
@@ -541,6 +559,32 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
     return previews
 
 
+def build_approval_options(analysis: ProjectAnalysis) -> list[ApprovalOption]:
+    previews = build_fix_previews(analysis)
+    can_apply = bool(previews) and analysis.registration_status != "불가"
+    return [
+        ApprovalOption(
+            key="apply",
+            label="적용하기",
+            description="Step 5의 미리보기 항목만 적용합니다.",
+            will_modify_files=True,
+            enabled=can_apply,
+        ),
+        ApprovalOption(
+            key="review",
+            label="다시 보기",
+            description="파일을 수정하지 않고 Step 5 미리보기를 다시 확인합니다.",
+            will_modify_files=False,
+        ),
+        ApprovalOption(
+            key="cancel",
+            label="취소하기",
+            description="이번 작업을 종료하고 파일을 그대로 둡니다.",
+            will_modify_files=False,
+        ),
+    ]
+
+
 def find_requirements_files(root: Path) -> list[Path]:
     candidates = [root / "requirements.txt", root / "pyproject.toml"]
     return [path for path in candidates if path.exists() and path.is_file()]
@@ -686,6 +730,28 @@ def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
     return "\n".join(rows)
 
 
+def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) -> str:
+    options = build_approval_options(analysis)
+    rows = [
+        f"- {approval_policy}",
+        "- 승인 전 상태: 파일은 아직 수정되지 않았습니다.",
+        "- 적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.",
+    ]
+    for index, option in enumerate(options, start=1):
+        state = "선택 가능" if option.enabled else "선택 불가"
+        modifies = "파일 수정 있음" if option.will_modify_files else "파일 수정 없음"
+        rows.extend(
+            [
+                f"- {index}. {option.label} ({state})",
+                f"  설명: {option.description}",
+                f"  결과: {modifies}",
+            ]
+        )
+    if not options[0].enabled:
+        rows.append("- 적용하기는 수정안이 있을 때만 선택할 수 있습니다.")
+    return "\n".join(rows)
+
+
 def format_severity(severity: str) -> str:
     labels = {
         "blocker": "필수 확인",
@@ -789,6 +855,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     exit_code = 0
     analysis = analyze_project(path)
     fix_previews = build_fix_previews(analysis) if command in {"fix", "apply"} else None
+    approval_options = build_approval_options(analysis) if command in {"fix", "apply"} else None
 
     if command in {"analyze", "validate", "fix", "apply", "report"}:
         details.append(f"path={target}")
@@ -802,6 +869,8 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         details.append("approved changes would be applied in a full implementation")
     if command == "fix":
         details.append(f"preview_items={len(fix_previews or [])}")
+        details.append("approval_required=true")
+        details.append("apply_choice=explicit")
     if command == "report":
         result_file = str(target / "ml-agent-report.json")
         details.append(f"result_file={result_file}")
@@ -817,7 +886,17 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     elif command == "validate" and analysis.issues:
         status = "needs_action"
         exit_code = 1
-    return CommandResult(command, path, status, exit_code, details, result_file, analysis, fix_previews)
+    return CommandResult(
+        command,
+        path,
+        status,
+        exit_code,
+        details,
+        result_file,
+        analysis,
+        fix_previews,
+        approval_options,
+    )
 
 
 def format_command_result(result: CommandResult) -> str:

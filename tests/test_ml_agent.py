@@ -52,6 +52,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("적용하기", output)
         self.assertIn("다시 보기", output)
         self.assertIn("취소하기", output)
+        self.assertIn("승인 전 상태", output)
         self.assertIn("삭제 작업은 수행하지 않습니다", output)
         self.assertIn("재검증", output)
 
@@ -103,6 +104,37 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("+ mlflow", output)
             self.assertIn("MLflow 기록 코드 추가", output)
             self.assertIn("적용하려면 다음 단계에서 '적용하기'를 선택해야 합니다", output)
+
+    def test_beginner_wizard_shows_step6_approval_choices(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("Step 6. 사용자 승인", output)
+            self.assertIn("적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.", output)
+            self.assertIn("1. 적용하기 (선택 가능)", output)
+            self.assertIn("결과: 파일 수정 있음", output)
+            self.assertIn("2. 다시 보기 (선택 가능)", output)
+            self.assertIn("3. 취소하기 (선택 가능)", output)
+
+    def test_beginner_wizard_disables_apply_without_preview(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text(
+                "import mlflow\n"
+                "if __name__ == \"__main__\":\n"
+                "    mlflow.log_param('x', 1)\n"
+            )
+            (root / "model.onnx").write_text("sample")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("1. 적용하기 (선택 불가)", output)
+            self.assertIn("적용하기는 수정안이 있을 때만 선택할 수 있습니다.", output)
 
 
 class ProjectAnalysisTest(unittest.TestCase):
@@ -194,6 +226,22 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(len(payload["fix_previews"]), 2)
             self.assertEqual(payload["fix_previews"][0]["code"], "ADD_MLFLOW_DEPENDENCY")
             self.assertTrue(payload["fix_previews"][0]["requires_approval"])
+
+    def test_fix_json_contains_step6_approval_options(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = handle_advanced_input(f"ml-agent fix {root} --dry-run --json")
+            payload = json.loads(output)
+
+            self.assertIn("approval_required=true", payload["details"])
+            self.assertEqual(payload["approval_options"][0]["key"], "apply")
+            self.assertTrue(payload["approval_options"][0]["enabled"])
+            self.assertTrue(payload["approval_options"][0]["will_modify_files"])
+            self.assertEqual(payload["approval_options"][1]["key"], "review")
+            self.assertFalse(payload["approval_options"][1]["will_modify_files"])
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")
