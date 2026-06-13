@@ -45,6 +45,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
         self.assertIn("project-scanner", output)
         self.assertIn("read-only scan", output)
+        self.assertIn("파일은 수정하지 않았습니다", output)
         self.assertIn("등록 상태", output)
         self.assertIn("문제 수", output)
         self.assertIn("쉬운 설명", output)
@@ -74,6 +75,9 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("등록 상태: 등록 가능", output)
+            self.assertIn("Step 2. 프로젝트 자동 스캔", output)
+            self.assertIn("파일 수:", output)
+            self.assertIn("모델 artifact 후보: 1개", output)
             self.assertIn("MLflow 의존성: 확인됨", output)
             self.assertIn("Job Template 초안 준비: 가능", output)
             self.assertIn("문제 수: 0개", output)
@@ -162,6 +166,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual(analysis.registration_status, "등록 가능")
             self.assertIn("등록 상태: 등록 가능", output)
             self.assertIn("heavy-model.onnx", output)
+            self.assertIn("1.0 KiB", output)
+            self.assertEqual(analysis.scan.model_artifacts[0].size_bytes, 1024)
 
     def test_heavy_model_alias_creates_sample_project(self):
         with TemporaryDirectory() as tmpdir:
@@ -253,6 +259,17 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(payload["exit_code"], 0)
             self.assertEqual(payload["analysis"]["registration_status"], "등록 가능")
             self.assertTrue(payload["analysis"]["job_template_ready"])
+
+    def test_validate_json_contains_step2_scan(self):
+        with TemporaryDirectory() as tmpdir:
+            sample = create_heavy_model_sample(Path(tmpdir) / "heavy-model", artifact_size_bytes=2048)
+
+            output = handle_advanced_input(f"ml-agent validate {sample} --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["path"], "model/heavy-model.onnx")
+            self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size_bytes"], 2048)
+            self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size"], "2.0 KiB")
 
     def test_fix_json_contains_step5_previews(self):
         with TemporaryDirectory() as tmpdir:

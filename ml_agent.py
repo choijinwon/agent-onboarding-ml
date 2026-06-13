@@ -162,10 +162,53 @@ class AppliedChange:
 
 
 @dataclass(frozen=True)
+class FileStat:
+    path: str
+    size_bytes: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "size_bytes": self.size_bytes,
+            "size": format_bytes(self.size_bytes),
+        }
+
+
+@dataclass(frozen=True)
+class ProjectScan:
+    path: str
+    exists: bool
+    is_directory: bool
+    file_count: int
+    directory_count: int
+    total_bytes: int
+    python_file_count: int
+    model_artifacts: list[FileStat]
+    largest_files: list[FileStat]
+    scan_note: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "exists": self.exists,
+            "is_directory": self.is_directory,
+            "file_count": self.file_count,
+            "directory_count": self.directory_count,
+            "total_bytes": self.total_bytes,
+            "total_size": format_bytes(self.total_bytes),
+            "python_file_count": self.python_file_count,
+            "model_artifacts": [artifact.as_dict() for artifact in self.model_artifacts],
+            "largest_files": [file.as_dict() for file in self.largest_files],
+            "scan_note": self.scan_note,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
     is_directory: bool
+    scan: ProjectScan
     registration_status: str
     requirements_files: list[str]
     has_mlflow_dependency: bool
@@ -182,6 +225,7 @@ class ProjectAnalysis:
             "path": self.path,
             "exists": self.exists,
             "is_directory": self.is_directory,
+            "scan": self.scan.as_dict(),
             "registration_status": self.registration_status,
             "requirements_files": self.requirements_files,
             "has_mlflow_dependency": self.has_mlflow_dependency,
@@ -397,7 +441,7 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 1. 프로젝트 선택\n"
         f"- 선택된 경로: {display_path}\n\n"
         "Step 2. 프로젝트 자동 스캔\n"
-        f"- {profile.subagents[0].name}가 현재는 read-only scan만 수행합니다.\n\n"
+        f"{format_beginner_scan(analysis.scan, profile.subagents[0].name)}\n\n"
         "Step 3. 등록 가능 여부 분석\n"
         f"{format_beginner_analysis(analysis)}\n\n"
         "Step 4. 문제 목록 확인\n"
@@ -418,12 +462,14 @@ def build_beginner_wizard(project_path: str) -> str:
 def analyze_project(project_path: str) -> ProjectAnalysis:
     target = Path(project_path or ".")
     display_path = str(target)
+    scan = scan_project(target)
 
     if not target.exists():
         return ProjectAnalysis(
             path=display_path,
             exists=False,
             is_directory=False,
+            scan=scan,
             registration_status="불가",
             requirements_files=[],
             has_mlflow_dependency=False,
@@ -450,6 +496,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             path=display_path,
             exists=True,
             is_directory=False,
+            scan=scan,
             registration_status="불가",
             requirements_files=[],
             has_mlflow_dependency=False,
@@ -570,6 +617,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         path=display_path,
         exists=True,
         is_directory=True,
+        scan=scan,
         registration_status=registration_status,
         requirements_files=[relative_path(path, target) for path in requirements_files],
         has_mlflow_dependency=has_mlflow_dependency,
@@ -601,6 +649,86 @@ def build_project_issue(
         recommendation=recommendation,
         fixable_by_agent=fixable_by_agent,
     )
+
+
+def scan_project(root: Path) -> ProjectScan:
+    display_path = str(root)
+    if not root.exists():
+        return ProjectScan(
+            path=display_path,
+            exists=False,
+            is_directory=False,
+            file_count=0,
+            directory_count=0,
+            total_bytes=0,
+            python_file_count=0,
+            model_artifacts=[],
+            largest_files=[],
+            scan_note="프로젝트 경로를 찾을 수 없습니다.",
+        )
+    if not root.is_dir():
+        size = file_size(root)
+        file_stat = FileStat(str(root), size)
+        return ProjectScan(
+            path=display_path,
+            exists=True,
+            is_directory=False,
+            file_count=1,
+            directory_count=0,
+            total_bytes=size,
+            python_file_count=1 if root.suffix.lower() == ".py" else 0,
+            model_artifacts=[],
+            largest_files=[file_stat],
+            scan_note="선택한 경로가 폴더가 아닙니다.",
+        )
+
+    file_count = 0
+    directory_count = 0
+    total_bytes = 0
+    python_file_count = 0
+    model_artifacts: list[FileStat] = []
+    largest_files: list[FileStat] = []
+    ignored_dirs = {".git", ".venv", "__pycache__", "node_modules", "registration_packages", "sample_projects"}
+    for path in root.rglob("*"):
+        if any(part in ignored_dirs for part in path.relative_to(root).parts):
+            continue
+        if path.is_dir():
+            directory_count += 1
+            continue
+        if not path.is_file():
+            continue
+        size = file_size(path)
+        relative = relative_path(path, root)
+        stat = FileStat(relative, size)
+        file_count += 1
+        total_bytes += size
+        if path.suffix.lower() == ".py":
+            python_file_count += 1
+        if path.suffix.lower() in MODEL_ARTIFACT_SUFFIXES:
+            model_artifacts.append(stat)
+        largest_files.append(stat)
+
+    largest_files = sorted(largest_files, key=lambda item: item.size_bytes, reverse=True)[:5]
+    model_artifacts = sorted(model_artifacts, key=lambda item: item.size_bytes, reverse=True)[:10]
+    return ProjectScan(
+        path=display_path,
+        exists=True,
+        is_directory=True,
+        file_count=file_count,
+        directory_count=directory_count,
+        total_bytes=total_bytes,
+        python_file_count=python_file_count,
+        model_artifacts=model_artifacts,
+        largest_files=largest_files,
+        scan_note="read-only scan 완료. 파일 내용은 필요한 텍스트 파일만 제한적으로 읽습니다.",
+    )
+
+
+def file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
@@ -864,6 +992,38 @@ def dedupe(values: list[str]) -> list[str]:
     return result
 
 
+def format_beginner_scan(scan: ProjectScan, scanner_name: str) -> str:
+    if not scan.exists:
+        return (
+            f"- {scanner_name}가 read-only scan을 시도했습니다.\n"
+            "- 결과: 프로젝트 경로를 찾을 수 없습니다.\n"
+            "- 파일은 수정하지 않았습니다."
+        )
+    if not scan.is_directory:
+        return (
+            f"- {scanner_name}가 read-only scan을 시도했습니다.\n"
+            "- 결과: 선택한 경로가 폴더가 아닙니다.\n"
+            f"- 크기: {format_bytes(scan.total_bytes)}\n"
+            "- 파일은 수정하지 않았습니다."
+        )
+    rows = [
+        f"- {scanner_name}가 read-only scan을 완료했습니다.",
+        "- 파일은 수정하지 않았습니다.",
+        f"- 파일 수: {scan.file_count}개",
+        f"- 폴더 수: {scan.directory_count}개",
+        f"- 전체 크기: {format_bytes(scan.total_bytes)}",
+        f"- Python 파일: {scan.python_file_count}개",
+        f"- 모델 artifact 후보: {len(scan.model_artifacts)}개",
+    ]
+    if scan.model_artifacts:
+        rows.append("- 모델 artifact:")
+        rows.extend(f"  - {item.path} ({format_bytes(item.size_bytes)})" for item in scan.model_artifacts[:3])
+    if scan.largest_files:
+        rows.append("- 큰 파일 상위:")
+        rows.extend(f"  - {item.path} ({format_bytes(item.size_bytes)})" for item in scan.largest_files[:3])
+    return "\n".join(rows)
+
+
 def format_beginner_analysis(analysis: ProjectAnalysis) -> str:
     return "\n".join(
         [
@@ -1005,6 +1165,17 @@ def format_count(values: list[str]) -> str:
     if len(values) > 3:
         preview += f" 외 {len(values) - 3}개"
     return preview
+
+
+def format_bytes(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:
+        if value < 1024 or unit == "TiB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size_bytes} B"
 
 
 def handle_intermediate_request(request: str) -> str:
