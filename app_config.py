@@ -12,7 +12,6 @@ DEFAULT_ENV = {
     "QWEN_BASE_URL": "http://xxx.xxx.xxx.xxx:port/v1",
     "QWEN_MODEL": "qwen3.5",
     "QWEN_MODELS": "qwen3.5,gpt20,gamma",
-    "DEEPAGENT_MESSAGES_MODE": "string",
     "ENABLE_MULTI_AGENT": "true",
     "ENABLE_HARNESS_SKILLS": "true",
     "ENABLE_RICH_CONSOLE": "true",
