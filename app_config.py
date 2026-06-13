@@ -15,8 +15,7 @@ DEFAULT_ENV = {
     "ENABLE_MULTI_AGENT": "true",
     "ENABLE_HARNESS_SKILLS": "true",
     "PROMPT_STORE_PATH": "prompt_templates.json",
-    "CHAT_WORKSPACE_DIR": "agent_workspace",
-    "REGISTERED_WORKSPACE_DIR": "agent_workspace/registered",
+    "REGISTERED_WORKSPACE_DIR": "registered",
     "CHAT_ERROR_DIR": "chat_errors",
     "MASK_SENSITIVE_LOGS": "true",
     "REGISTRATION_PACKAGE_DIR": "registration_packages",
@@ -25,7 +24,6 @@ DEFAULT_ENV = {
 }
 
 DIRECTORY_KEYS = (
-    "CHAT_WORKSPACE_DIR",
     "REGISTERED_WORKSPACE_DIR",
     "CHAT_ERROR_DIR",
     "REGISTRATION_PACKAGE_DIR",

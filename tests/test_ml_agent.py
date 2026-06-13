@@ -149,7 +149,7 @@ class AppConfigTest(unittest.TestCase):
 
             self.assertIn(root / "skills", directories)
             self.assertTrue((root / "skills" / "README.md").exists())
-            self.assertTrue((root / "agent_workspace" / "registered").exists())
+            self.assertTrue((root / "registered").exists())
 
 
 class PromptAndSkillStoreTest(unittest.TestCase):

@@ -140,7 +140,6 @@ Windows 10/11:
 - `QWEN_MODELS`: 선택 가능한 모델 목록
 - `ENABLE_MULTI_AGENT`: sub-agent 분담 사용 여부
 - `ENABLE_HARNESS_SKILLS`: Deep Agent skill 저장/로드 사용 여부
-- `CHAT_WORKSPACE_DIR`: agent 작업 공간
 - `REGISTERED_WORKSPACE_DIR`: 등록 완료 workspace 경로
 - `CHAT_ERROR_DIR`: 에러 로그 저장 경로
 - `MASK_SENSITIVE_LOGS`: 에러 로그 민감정보 마스킹 여부

@@ -56,8 +56,7 @@ QWEN_MODELS=qwen3.5,gpt20,gamma
 생성되는 주요 경로:
 
 ```text
-agent_workspace/
-agent_workspace/registered/
+registered/
 skills/
 chat_errors/
 fix_reports/
