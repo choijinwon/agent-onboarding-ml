@@ -1,0 +1,8 @@
+[project]
+name = "agent-onboarding-ml"
+version = "0.1.0"
+description = "Console POC for ML Platform onboarding launch modes"
+requires-python = ">=3.10"
+
+[project.scripts]
+ml-agent = "ml_agent:main"
