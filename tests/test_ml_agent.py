@@ -44,6 +44,9 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("project-scanner", output)
         self.assertIn("read-only scan", output)
         self.assertIn("등록 상태", output)
+        self.assertIn("문제 수", output)
+        self.assertIn("쉬운 설명", output)
+        self.assertIn("권장 조치", output)
         self.assertIn("수정안 미리보기", output)
         self.assertIn("적용하기", output)
         self.assertIn("다시 보기", output)
@@ -69,6 +72,21 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("등록 상태: 등록 가능", output)
             self.assertIn("MLflow 의존성: 확인됨", output)
             self.assertIn("Job Template 초안 준비: 가능", output)
+            self.assertIn("문제 수: 0개", output)
+
+    def test_beginner_wizard_lists_step4_issue_details(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("Step 4. 문제 목록 확인", output)
+            self.assertIn("MLflow 패키지 누락", output)
+            self.assertIn("대상: requirements.txt", output)
+            self.assertIn("Agent 수정 가능: 가능", output)
+            self.assertIn("1. 수정안 미리보기로 이동", output)
 
 
 class ProjectAnalysisTest(unittest.TestCase):
@@ -78,6 +96,7 @@ class ProjectAnalysisTest(unittest.TestCase):
         self.assertEqual(analysis.registration_status, "불가")
         self.assertFalse(analysis.exists)
         self.assertIn("프로젝트 경로를 찾을 수 없습니다.", analysis.issues)
+        self.assertEqual(analysis.issue_details[0].code, "PROJECT_PATH_NOT_FOUND")
 
     def test_project_with_missing_mlflow_needs_action(self):
         with TemporaryDirectory() as tmpdir:
@@ -90,6 +109,7 @@ class ProjectAnalysisTest(unittest.TestCase):
             self.assertEqual(analysis.registration_status, "보완 필요")
             self.assertFalse(analysis.has_mlflow_dependency)
             self.assertIn("train.py", analysis.entrypoint_candidates)
+            self.assertTrue(any(issue.code == "MLFLOW_DEPENDENCY_MISSING" for issue in analysis.issue_details))
 
 
 class IntermediateModeTest(unittest.TestCase):
@@ -124,6 +144,7 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertEqual(payload["exit_code"], 2)
         self.assertIn("agent_profile=ai-ml-onboarding-assistant", payload["details"])
         self.assertEqual(payload["analysis"]["registration_status"], "불가")
+        self.assertEqual(payload["analysis"]["issue_details"][0]["code"], "PROJECT_PATH_NOT_FOUND")
 
     def test_validate_json_contains_step3_analysis(self):
         with TemporaryDirectory() as tmpdir:

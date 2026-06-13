@@ -71,6 +71,28 @@ MODEL_ARTIFACT_SUFFIXES = {
 
 
 @dataclass(frozen=True)
+class ProjectIssue:
+    code: str
+    severity: str
+    title: str
+    target: str
+    explanation: str
+    recommendation: str
+    fixable_by_agent: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "severity": self.severity,
+            "title": self.title,
+            "target": self.target,
+            "explanation": self.explanation,
+            "recommendation": self.recommendation,
+            "fixable_by_agent": self.fixable_by_agent,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
@@ -83,6 +105,7 @@ class ProjectAnalysis:
     model_artifacts: list[str]
     job_template_ready: bool
     issues: list[str]
+    issue_details: list[ProjectIssue]
     next_actions: list[str]
 
     def as_dict(self) -> dict[str, object]:
@@ -98,6 +121,7 @@ class ProjectAnalysis:
             "model_artifacts": self.model_artifacts,
             "job_template_ready": self.job_template_ready,
             "issues": self.issues,
+            "issue_details": [issue.as_dict() for issue in self.issue_details],
             "next_actions": self.next_actions,
         }
 
@@ -274,6 +298,17 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             model_artifacts=[],
             job_template_ready=False,
             issues=["프로젝트 경로를 찾을 수 없습니다."],
+            issue_details=[
+                build_project_issue(
+                    "PROJECT_PATH_NOT_FOUND",
+                    "blocker",
+                    "프로젝트 경로 없음",
+                    display_path,
+                    "입력한 위치에 프로젝트 폴더가 없습니다.",
+                    "올바른 프로젝트 폴더 경로를 다시 입력하세요.",
+                    False,
+                )
+            ],
             next_actions=["올바른 프로젝트 폴더 경로를 다시 입력하세요."],
         )
     if not target.is_dir():
@@ -289,6 +324,17 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             model_artifacts=[],
             job_template_ready=False,
             issues=["선택한 경로가 폴더가 아닙니다."],
+            issue_details=[
+                build_project_issue(
+                    "PROJECT_PATH_NOT_DIRECTORY",
+                    "blocker",
+                    "프로젝트 폴더가 아님",
+                    display_path,
+                    "선택한 경로가 파일이어서 프로젝트 구조를 스캔할 수 없습니다.",
+                    "학습 코드가 들어 있는 프로젝트 폴더를 선택하세요.",
+                    False,
+                )
+            ],
             next_actions=["학습 코드가 들어 있는 프로젝트 폴더를 선택하세요."],
         )
 
@@ -303,21 +349,77 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
     ]
 
     issues: list[str] = []
+    issue_details: list[ProjectIssue] = []
     next_actions: list[str] = []
     if not requirements_files:
         issues.append("requirements.txt 또는 pyproject.toml을 찾지 못했습니다.")
+        issue_details.append(
+            build_project_issue(
+                "DEPENDENCY_FILE_MISSING",
+                "warning",
+                "패키지 목록 파일 없음",
+                "requirements.txt 또는 pyproject.toml",
+                "플랫폼은 학습 실행 전에 어떤 Python 패키지를 설치해야 하는지 알아야 합니다.",
+                "학습에 필요한 패키지 목록을 requirements.txt 또는 pyproject.toml에 정리하세요.",
+                True,
+            )
+        )
         next_actions.append("학습에 필요한 패키지 목록을 requirements.txt 또는 pyproject.toml에 정리하세요.")
     if requirements_files and not has_mlflow_dependency:
         issues.append("패키지 목록에서 mlflow 의존성을 찾지 못했습니다.")
+        issue_details.append(
+            build_project_issue(
+                "MLFLOW_DEPENDENCY_MISSING",
+                "warning",
+                "MLflow 패키지 누락",
+                ", ".join(relative_path(path, target) for path in requirements_files),
+                "MLflow가 패키지 목록에 없으면 실행 환경에서 실험 기록 코드가 실패할 수 있습니다.",
+                "MLflow를 사용한다면 requirements.txt 또는 pyproject.toml에 mlflow를 추가하세요.",
+                True,
+            )
+        )
         next_actions.append("MLflow를 사용한다면 requirements.txt 또는 pyproject.toml에 mlflow를 추가하세요.")
     if not entrypoint_candidates:
         issues.append("학습 시작 파일 후보를 찾지 못했습니다.")
+        issue_details.append(
+            build_project_issue(
+                "ENTRYPOINT_MISSING",
+                "blocker",
+                "학습 시작 파일 없음",
+                "train.py 또는 main.py",
+                "플랫폼 Job Template은 어떤 파일을 실행해야 하는지 알아야 합니다.",
+                "train.py 또는 main.py처럼 실행 진입점을 확인할 수 있는 파일을 준비하세요.",
+                False,
+            )
+        )
         next_actions.append("train.py 또는 main.py처럼 실행 진입점을 확인할 수 있는 파일을 준비하세요.")
     if not mlflow_usage_files:
         issues.append("학습 코드에서 MLflow 사용 흔적을 찾지 못했습니다.")
+        issue_details.append(
+            build_project_issue(
+                "MLFLOW_CODE_MISSING",
+                "warning",
+                "MLflow 기록 코드 미확인",
+                "Python 학습 코드",
+                "실험 지표나 모델 artifact를 플랫폼에서 추적하려면 학습 코드 안의 MLflow 기록이 필요합니다.",
+                "mlflow.start_run, mlflow.log_metric, mlflow.log_artifact 같은 기록 코드를 확인하세요.",
+                True,
+            )
+        )
         next_actions.append("mlflow.start_run, mlflow.log_metric, mlflow.log_artifact 같은 기록 코드를 확인하세요.")
     if not model_artifacts:
         issues.append("모델 산출물 후보 파일을 찾지 못했습니다.")
+        issue_details.append(
+            build_project_issue(
+                "MODEL_ARTIFACT_MISSING",
+                "warning",
+                "모델 산출물 없음",
+                "model artifact",
+                "등록 패키지에는 학습 결과로 만들어진 모델 파일이나 저장 경로가 필요합니다.",
+                "학습 후 생성되는 모델 파일 경로를 확인하거나 샘플 artifact를 준비하세요.",
+                False,
+            )
+        )
         next_actions.append("학습 후 생성되는 모델 파일 경로를 확인하거나 샘플 artifact를 준비하세요.")
 
     job_template_ready = bool(entrypoint_candidates and requirements_files)
@@ -342,7 +444,28 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         model_artifacts=model_artifacts,
         job_template_ready=job_template_ready,
         issues=issues,
+        issue_details=issue_details,
         next_actions=dedupe(next_actions),
+    )
+
+
+def build_project_issue(
+    code: str,
+    severity: str,
+    title: str,
+    target: str,
+    explanation: str,
+    recommendation: str,
+    fixable_by_agent: bool,
+) -> ProjectIssue:
+    return ProjectIssue(
+        code=code,
+        severity=severity,
+        title=title,
+        target=target,
+        explanation=explanation,
+        recommendation=recommendation,
+        fixable_by_agent=fixable_by_agent,
     )
 
 
@@ -426,12 +549,41 @@ def format_beginner_analysis(analysis: ProjectAnalysis) -> str:
 
 
 def format_beginner_issues(analysis: ProjectAnalysis) -> str:
-    if not analysis.issues:
-        return "- 큰 문제를 찾지 못했습니다.\n- 다음 단계에서 수정 없이 미리보기를 확인할 수 있습니다."
-    issue_rows = [f"- {issue}" for issue in analysis.issues[:5]]
-    if analysis.next_actions:
-        issue_rows.append("- 다음 조치: " + analysis.next_actions[0])
+    if not analysis.issue_details:
+        return (
+            "- 문제 수: 0개\n"
+            "- 큰 문제를 찾지 못했습니다.\n"
+            "- 다음 단계에서 수정 없이 미리보기를 확인할 수 있습니다."
+        )
+    issue_rows = [f"- 문제 수: {len(analysis.issue_details)}개"]
+    for index, issue in enumerate(analysis.issue_details[:5], start=1):
+        issue_rows.extend(
+            [
+                f"- [{index}] {format_severity(issue.severity)}: {issue.title}",
+                f"  대상: {issue.target}",
+                f"  쉬운 설명: {issue.explanation}",
+                f"  권장 조치: {issue.recommendation}",
+                f"  Agent 수정 가능: {'가능' if issue.fixable_by_agent else '검토 필요'}",
+            ]
+        )
+    issue_rows.extend(
+        [
+            "- 다음 선택:",
+            "  1. 수정안 미리보기로 이동",
+            "  2. 프로젝트 경로를 다시 확인",
+            "  3. 취소",
+        ]
+    )
     return "\n".join(issue_rows)
+
+
+def format_severity(severity: str) -> str:
+    labels = {
+        "blocker": "필수 확인",
+        "warning": "보완 권장",
+        "info": "참고",
+    }
+    return labels.get(severity, severity)
 
 
 def format_count(values: list[str]) -> str:
