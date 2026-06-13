@@ -131,6 +131,22 @@ class ApprovalOption:
 
 
 @dataclass(frozen=True)
+class AppliedChange:
+    code: str
+    target: str
+    status: str
+    message: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "target": self.target,
+            "status": self.status,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
@@ -175,6 +191,7 @@ class CommandResult:
     analysis: ProjectAnalysis | None = None
     fix_previews: list[FixPreview] | None = None
     approval_options: list[ApprovalOption] | None = None
+    applied_changes: list[AppliedChange] | None = None
 
     def as_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -191,6 +208,8 @@ class CommandResult:
             payload["fix_previews"] = [preview.as_dict() for preview in self.fix_previews]
         if self.approval_options is not None:
             payload["approval_options"] = [option.as_dict() for option in self.approval_options]
+        if self.applied_changes is not None:
+            payload["applied_changes"] = [change.as_dict() for change in self.applied_changes]
         return payload
 
 
@@ -312,8 +331,7 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 6. 사용자 승인\n"
         f"{format_beginner_approval(analysis, profile.approval_policy)}\n\n"
         "Step 7. 파일 생성 또는 수정\n"
-        "- 사용자가 '적용하기'를 선택한 경우에만 파일을 생성하거나 수정합니다.\n"
-        "- 삭제 작업은 수행하지 않습니다.\n\n"
+        f"{format_beginner_apply_step(analysis)}\n\n"
         "Step 8. 재검증\n"
         "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.\n\n"
         "Step 9. 분석 리포트 생성\n"
@@ -585,6 +603,126 @@ def build_approval_options(analysis: ProjectAnalysis) -> list[ApprovalOption]:
     ]
 
 
+def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[AppliedChange]:
+    root = Path(project_path or ".").resolve()
+    if not root.exists() or not root.is_dir():
+        return [
+            AppliedChange(
+                code="APPLY_BLOCKED",
+                target=str(root),
+                status="skipped",
+                message="프로젝트 폴더가 없어 적용하지 않았습니다.",
+            )
+        ]
+
+    changes: list[AppliedChange] = []
+    for preview in previews:
+        target = safe_project_path(root, preview.target)
+        if target is None:
+            changes.append(
+                AppliedChange(
+                    code=preview.code,
+                    target=preview.target,
+                    status="skipped",
+                    message="프로젝트 폴더 밖의 경로라 적용하지 않았습니다.",
+                )
+            )
+            continue
+        if preview.code == "CREATE_REQUIREMENTS":
+            changes.append(apply_create_requirements(target))
+        elif preview.code == "ADD_MLFLOW_DEPENDENCY":
+            changes.append(apply_add_mlflow_dependency(target))
+        elif preview.code == "ADD_MLFLOW_TRACKING_SNIPPET":
+            changes.append(apply_add_mlflow_tracking_snippet(target))
+        else:
+            changes.append(
+                AppliedChange(
+                    code=preview.code,
+                    target=preview.target,
+                    status="skipped",
+                    message="지원하지 않는 수정안이라 적용하지 않았습니다.",
+                )
+            )
+    return changes
+
+
+def safe_project_path(root: Path, relative: str) -> Path | None:
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    return target
+
+
+def apply_create_requirements(target: Path) -> AppliedChange:
+    if target.exists():
+        return AppliedChange(
+            code="CREATE_REQUIREMENTS",
+            target=str(target),
+            status="skipped",
+            message="requirements.txt가 이미 있어 새로 만들지 않았습니다.",
+        )
+    target.write_text("mlflow\nscikit-learn\npandas\n", encoding="utf-8")
+    return AppliedChange(
+        code="CREATE_REQUIREMENTS",
+        target=str(target),
+        status="applied",
+        message="requirements.txt를 생성했습니다.",
+    )
+
+
+def apply_add_mlflow_dependency(target: Path) -> AppliedChange:
+    content = safe_read_text(target)
+    if "mlflow" in content.lower():
+        return AppliedChange(
+            code="ADD_MLFLOW_DEPENDENCY",
+            target=str(target),
+            status="skipped",
+            message="mlflow가 이미 포함되어 있어 변경하지 않았습니다.",
+        )
+    separator = "" if not content or content.endswith("\n") else "\n"
+    target.write_text(f"{content}{separator}mlflow\n", encoding="utf-8")
+    return AppliedChange(
+        code="ADD_MLFLOW_DEPENDENCY",
+        target=str(target),
+        status="applied",
+        message="패키지 목록에 mlflow를 추가했습니다.",
+    )
+
+
+def apply_add_mlflow_tracking_snippet(target: Path) -> AppliedChange:
+    content = safe_read_text(target)
+    if "mlflow" in content.lower():
+        return AppliedChange(
+            code="ADD_MLFLOW_TRACKING_SNIPPET",
+            target=str(target),
+            status="skipped",
+            message="MLflow 코드가 이미 있어 변경하지 않았습니다.",
+        )
+    lines = content.splitlines()
+    if lines and lines[0].startswith("#!"):
+        lines.insert(1, "import mlflow")
+    else:
+        lines.insert(0, "import mlflow")
+    lines.extend(
+        [
+            "",
+            "# ml-agent: MLflow tracking template. Review before production use.",
+            "# with mlflow.start_run():",
+            "#     mlflow.log_param('source', 'ml-agent')",
+            "#     mlflow.log_metric('example_metric', 0.0)",
+        ]
+    )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return AppliedChange(
+        code="ADD_MLFLOW_TRACKING_SNIPPET",
+        target=str(target),
+        status="applied",
+        message="학습 코드에 MLflow 기록 템플릿을 추가했습니다.",
+    )
+
+
 def find_requirements_files(root: Path) -> list[Path]:
     candidates = [root / "requirements.txt", root / "pyproject.toml"]
     return [path for path in candidates if path.exists() and path.is_file()]
@@ -752,6 +890,29 @@ def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) ->
     return "\n".join(rows)
 
 
+def format_beginner_apply_step(analysis: ProjectAnalysis) -> str:
+    previews = build_fix_previews(analysis)
+    if analysis.registration_status == "불가":
+        return (
+            "- 현재는 적용할 수 없습니다.\n"
+            "- 프로젝트 경로 문제가 먼저 해결되어야 합니다.\n"
+            "- 삭제 작업은 수행하지 않습니다."
+        )
+    if not previews:
+        return (
+            "- 적용할 수정안이 없습니다.\n"
+            "- 파일을 생성하거나 수정하지 않습니다.\n"
+            "- 삭제 작업은 수행하지 않습니다."
+        )
+    rows = [
+        "- '적용하기' 승인 후에만 아래 파일을 생성하거나 수정합니다.",
+        "- 삭제 작업은 수행하지 않습니다.",
+        f"- 적용 예정 항목: {len(previews)}개",
+    ]
+    rows.extend(f"  - {preview.target}: {preview.title}" for preview in previews)
+    return "\n".join(rows)
+
+
 def format_severity(severity: str) -> str:
     labels = {
         "blocker": "필수 확인",
@@ -856,17 +1017,22 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     analysis = analyze_project(path)
     fix_previews = build_fix_previews(analysis) if command in {"fix", "apply"} else None
     approval_options = build_approval_options(analysis) if command in {"fix", "apply"} else None
+    applied_changes = None
 
     if command in {"analyze", "validate", "fix", "apply", "report"}:
         details.append(f"path={target}")
         details.append(f"agent_profile={profile.name}")
-        details.append(f"registration_status={analysis.registration_status}")
     if command == "fix" and not dry_run:
         details.append("default=dry-run")
         details.append("advanced_apply_required=true")
     if command == "apply":
         details.append("explicit_apply=true")
-        details.append("approved changes would be applied in a full implementation")
+        applied_changes = apply_fix_previews(path, fix_previews or [])
+        details.append(f"applied_changes={len([change for change in applied_changes if change.status == 'applied'])}")
+        details.append(f"skipped_changes={len([change for change in applied_changes if change.status == 'skipped'])}")
+        analysis = analyze_project(path)
+    if command in {"analyze", "validate", "fix", "apply", "report"}:
+        details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
         details.append(f"preview_items={len(fix_previews or [])}")
         details.append("approval_required=true")
@@ -896,6 +1062,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         analysis,
         fix_previews,
         approval_options,
+        applied_changes,
     )
 
 

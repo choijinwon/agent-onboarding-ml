@@ -136,6 +136,20 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("1. 적용하기 (선택 불가)", output)
             self.assertIn("적용하기는 수정안이 있을 때만 선택할 수 있습니다.", output)
 
+    def test_beginner_wizard_shows_step7_apply_scope(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("Step 7. 파일 생성 또는 수정", output)
+            self.assertIn("'적용하기' 승인 후에만", output)
+            self.assertIn("삭제 작업은 수행하지 않습니다.", output)
+            self.assertIn("requirements.txt: MLflow 의존성 추가", output)
+            self.assertIn("train.py: MLflow 기록 코드 추가", output)
+
 
 class ProjectAnalysisTest(unittest.TestCase):
     def test_missing_path_is_not_registerable(self):
@@ -242,6 +256,52 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertTrue(payload["approval_options"][0]["will_modify_files"])
             self.assertEqual(payload["approval_options"][1]["key"], "review")
             self.assertFalse(payload["approval_options"][1]["will_modify_files"])
+
+    def test_fix_dry_run_does_not_modify_files(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("scikit-learn==1.5.2\n")
+            train.write_text("print('train')\n")
+
+            handle_advanced_input(f"ml-agent fix {root} --dry-run --json")
+
+            self.assertEqual(requirements.read_text(), "scikit-learn==1.5.2\n")
+            self.assertEqual(train.read_text(), "print('train')\n")
+
+    def test_apply_modifies_only_previewed_files(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            untouched = root / "README.md"
+            requirements.write_text("scikit-learn==1.5.2\n")
+            train.write_text("print('train')\n")
+            untouched.write_text("hello\n")
+
+            output = handle_advanced_input(f"ml-agent apply {root} --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["command"], "apply")
+            self.assertIn("applied_changes=2", payload["details"])
+            self.assertEqual(len(payload["applied_changes"]), 2)
+            self.assertIn("mlflow", requirements.read_text())
+            self.assertIn("import mlflow", train.read_text())
+            self.assertIn("MLflow tracking template", train.read_text())
+            self.assertEqual(untouched.read_text(), "hello\n")
+
+    def test_apply_creates_requirements_when_missing(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "train.py").write_text("print('train')\n")
+
+            output = handle_advanced_input(f"ml-agent apply {root} --json")
+            payload = json.loads(output)
+
+            self.assertTrue((root / "requirements.txt").exists())
+            self.assertIn("mlflow", (root / "requirements.txt").read_text())
+            self.assertTrue(any(change["code"] == "CREATE_REQUIREMENTS" for change in payload["applied_changes"]))
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")
