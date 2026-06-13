@@ -59,10 +59,7 @@ QWEN_MODELS=qwen3.5,gpt20,gamma
 agent_workspace/
 agent_workspace/registered/
 skills/
-plans/
-goals/
-sessions/
-wiki_logs/
+chat_errors/
 fix_reports/
 registration_packages/
 ```

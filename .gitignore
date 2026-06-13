@@ -3,17 +3,7 @@ __pycache__/
 .pycache/
 .pytest_cache/
 .env
-wiki_logs/
 agent_workspace/
-plans/
-goals/
-sessions/
-dev_runs/
-dev_sessions/
-dev_patches/
 chat_errors/
-experiments/
-registrations/
 registration_packages/
 fix_reports/
-model_catalog.json

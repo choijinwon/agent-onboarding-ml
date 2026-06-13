@@ -21,21 +21,6 @@ description: 학습 entrypoint와 실행 인자를 기반으로 AI Studio 또는
 - CPU, GPU, memory
 - environment variables
 
-## Defaults
-
-환경 변수에서 다음 값을 우선 사용한다.
-
-- `AI_STUDIO_DEFAULT_QUEUE`
-- `AI_STUDIO_DEFAULT_GPU`
-- `AI_STUDIO_DEFAULT_CPU`
-- `AI_STUDIO_DEFAULT_MEMORY`
-- `AI_STUDIO_PYTHON_VERSION`
-- `ML_PLATFORM_DEFAULT_QUEUE`
-- `ML_PLATFORM_DEFAULT_GPU`
-- `ML_PLATFORM_DEFAULT_CPU`
-- `ML_PLATFORM_DEFAULT_MEMORY`
-- `ML_PLATFORM_PYTHON_VERSION`
-
 ## Output
 
 - Job Template 초안

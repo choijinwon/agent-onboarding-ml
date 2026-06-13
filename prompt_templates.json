@@ -30,7 +30,7 @@
       "name": "project_scan",
       "description": "프로젝트 구조를 read-only로 스캔하고 등록 관련 단서를 찾는다.",
       "tags": ["scan", "read-only"],
-      "prompt": "파일 수정 없이 프로젝트 루트, 학습 entrypoint, requirements, config, MLflow 사용 여부, arguments 정의 위치, Job Template 후보를 찾는다. ROOT_SCAN_FILE_LIMIT, ROOT_SCAN_MAX_FILE_BYTES, ROOT_SCAN_TOTAL_BYTES 제한을 지킨다."
+      "prompt": "파일 수정 없이 프로젝트 루트, 학습 entrypoint, requirements, config, MLflow 사용 여부, arguments 정의 위치, Job Template 후보를 찾는다. 큰 파일은 요약 중심으로 확인하고 필요한 증거만 리포트에 남긴다."
     },
     {
       "name": "mlflow_registration_check",
@@ -42,13 +42,13 @@
       "name": "job_template_draft",
       "description": "AI Studio 또는 ML Platform Job Template 초안을 생성한다.",
       "tags": ["job-template", "ai-studio", "ml-platform"],
-      "prompt": "entrypoint, arguments, requirements, python version, queue, cpu, gpu, memory 기본값을 기반으로 Job Template 초안을 작성한다. AI_STUDIO_* 및 ML_PLATFORM_* 환경 변수 기본값을 사용하고, 파일 생성 전 preview를 제공한다."
+      "prompt": "entrypoint, arguments, requirements, python version, queue, cpu, gpu, memory 요구사항을 기반으로 Job Template 초안을 작성한다. 파일 생성 전 preview를 제공한다."
     },
     {
       "name": "closed_network_validation",
       "description": "폐쇄망 실행 가능성과 민감정보 노출 위험을 점검한다.",
       "tags": ["closed-network", "security", "validation"],
-      "prompt": "외부 네트워크 의존성, 내부 Qwen endpoint 설정, requirements 반입 가능성, MLFLOW_TRACKING_URI, 민감정보 로그 마스킹 여부를 점검한다. MASK_SENSITIVE_LOGS가 true이면 키와 토큰은 출력하지 않는다."
+      "prompt": "외부 네트워크 의존성, 내부 Qwen endpoint 설정, requirements 반입 가능성, 민감정보 로그 마스킹 여부를 점검한다. MASK_SENSITIVE_LOGS가 true이면 키와 토큰은 출력하지 않는다."
     },
     {
       "name": "fix_preview",
@@ -60,7 +60,7 @@
       "name": "report_summary",
       "description": "분석 리포트를 짧고 추적 가능하게 작성한다.",
       "tags": ["report", "summary"],
-      "prompt": "등록 가능 여부, 발견 문제, 수정안, 적용 여부, 재검증 결과, 생성 산출물 경로를 요약한다. 상세 로그는 WIKI_LOG_DIR 또는 FIX_REPORT_DIR에 남기는 것을 전제로 한다."
+      "prompt": "등록 가능 여부, 발견 문제, 수정안, 적용 여부, 재검증 결과, 생성 산출물 경로를 요약한다. 상세 수정 리포트는 FIX_REPORT_DIR에 남기는 것을 전제로 한다."
     },
     {
       "name": "error_log_analysis",

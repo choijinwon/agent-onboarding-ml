@@ -13,7 +13,7 @@ description: MLflow 등록 준비 상태를 점검하고 누락된 logging, arti
 
 ## Checklist
 
-- `MLFLOW_TRACKING_URI` 또는 코드 내 tracking URI 설정 확인
+- MLflow tracking URI 설정 확인
 - experiment/run 생성 흐름 확인
 - params, metrics, artifacts logging 확인
 - model artifact 저장 경로 확인
