@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from deep_agent_profile import build_ml_platform_profile, format_profile
+
 
 MODE_BEGINNER = "beginner"
 MODE_INTERMEDIATE = "intermediate"
@@ -165,11 +167,12 @@ def parse_mode_command(value: str) -> str | None:
 
 def build_beginner_wizard(project_path: str) -> str:
     display_path = project_path or "(프로젝트 경로 미입력)"
+    profile = build_ml_platform_profile(MODE_BEGINNER)
     return (
         "Step 1. 프로젝트 선택\n"
         f"- 선택된 경로: {display_path}\n\n"
         "Step 2. 프로젝트 자동 스캔\n"
-        "- 현재는 read-only scan만 수행합니다.\n\n"
+        f"- {profile.subagents[0].name}가 현재는 read-only scan만 수행합니다.\n\n"
         "Step 3. 등록 가능 여부 분석\n"
         "- MLflow 설정, requirements, 실행 arguments, Job Template 후보를 확인합니다.\n\n"
         "Step 4. 문제 목록 확인\n"
@@ -177,7 +180,7 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 5. 수정안 미리보기\n"
         "- 파일 수정 전 dry-run 결과를 먼저 보여줍니다.\n\n"
         "Step 6. 사용자 승인\n"
-        "- 승인 전에는 파일을 생성하거나 수정하지 않습니다.\n\n"
+        f"- {profile.approval_policy}\n\n"
         "Step 7. 파일 생성 또는 수정\n"
         "- 삭제 작업은 수행하지 않습니다.\n\n"
         "Step 8. 재검증\n"
@@ -188,11 +191,13 @@ def build_beginner_wizard(project_path: str) -> str:
 
 
 def handle_intermediate_request(request: str) -> str:
+    profile = build_ml_platform_profile(MODE_INTERMEDIATE)
     if not request:
         return "분석할 프로젝트 경로나 질문을 입력하세요."
     if "mlflow" in request.lower():
         return (
             "MLflow 설정 검증을 준비합니다.\n"
+            f"- 담당 sub-agent: {profile.subagents[1].name}\n"
             "- tracking 설정 확인\n"
             "- experiment/run 기록 코드 확인\n"
             "- model artifact 저장 경로 확인\n"
@@ -201,17 +206,20 @@ def handle_intermediate_request(request: str) -> str:
     if "job" in request.lower() or "template" in request.lower() or "초안" in request:
         return (
             "Job Template 초안 생성을 준비합니다.\n"
+            f"- 담당 sub-agent: {profile.subagents[2].name}\n"
             "- entrypoint, arguments, requirements를 기준으로 후보를 만듭니다.\n"
             "- 항목별로 선택 적용할 수 있게 미리보기를 제공합니다."
         )
     if "오류" in request or "로그" in request or "error" in request.lower():
         return (
             "오류 로그 분석을 준비합니다.\n"
+            f"- 담당 sub-agent: {profile.subagents[3].name}\n"
             "- 실패 위치와 원인을 요약합니다.\n"
             "- MLflow / requirements / arguments 관련 문제를 우선 확인합니다."
         )
     return (
         "전체 등록 가능 여부 분석을 준비합니다.\n"
+        "- Deep Agent sub-agent 분담 사용\n"
         "- 프로젝트 구조\n"
         "- MLflow 설정\n"
         "- requirements\n"
@@ -231,8 +239,14 @@ def handle_advanced_input(command: str) -> str:
         return ADVANCED_INTRO
     if parts[0] == "chat":
         return "chat: Agent 대화 모드 진입"
+    if parts[0] == "profile":
+        as_json = "--json" in parts
+        profile = build_ml_platform_profile(MODE_ADVANCED)
+        if as_json:
+            return json.dumps(profile.as_dict(), ensure_ascii=False, indent=2)
+        return format_profile(profile)
     if parts[0] not in {"analyze", "validate", "fix", "apply", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, report, chat"
+        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -243,15 +257,17 @@ def handle_advanced_input(command: str) -> str:
 
 def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult:
     target = Path(path)
+    profile = build_ml_platform_profile(MODE_ADVANCED)
     details = []
     status = "ok"
     exit_code = 0
 
     if command in {"analyze", "validate", "fix", "apply", "report"}:
         details.append(f"path={target}")
+        details.append(f"agent_profile={profile.name}")
     if command == "fix" and not dry_run:
         details.append("default=dry-run")
-        details.append("apply 명령을 명시적으로 실행해야 파일 수정 가능")
+        details.append(profile.approval_policy)
     if command == "apply":
         details.append("explicit_apply=true")
         details.append("approved changes would be applied in a full implementation")
@@ -286,6 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser("chat")
+    profile_parser = subparsers.add_parser("profile")
+    profile_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -299,6 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "chat":
         ConsoleAssistant().run()
+        return 0
+    if args.command == "profile":
+        profile = build_ml_platform_profile(MODE_ADVANCED)
+        if args.json:
+            print(json.dumps(profile.as_dict(), ensure_ascii=False, indent=2))
+        else:
+            print(format_profile(profile))
         return 0
     if not args.command:
         parser.print_help()
@@ -378,7 +403,8 @@ validate   MLflow / Job Template 검증
 fix        수정안 생성
 apply      승인된 수정안 적용
 report     분석 리포트 생성
-chat       Agent 대화 모드 진입"""
+chat       Agent 대화 모드 진입
+profile    Deep Agent 프로파일 확인"""
 
 
 if __name__ == "__main__":

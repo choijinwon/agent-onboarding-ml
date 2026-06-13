@@ -29,13 +29,28 @@ python3 ml_agent.py
 ./ml-agent apply ./project
 ./ml-agent report ./project
 ./ml-agent chat
+./ml-agent profile
 ```
 
 JSON 출력이 필요한 경우 `--json` 옵션을 사용할 수 있습니다.
 
 ```bash
 ./ml-agent validate ./project --json
+./ml-agent profile --json
 ```
+
+## Deep Agents 참고 구조
+
+이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness 개념을 참고했습니다.
+
+- sub-agents: `project-scanner`, `mlflow-validator`, `job-template-planner`, `log-analyzer`
+- filesystem permissions: 읽기는 허용, 쓰기는 human-in-the-loop 승인, `.git`과 secret 경로 쓰기는 차단
+- skills: MLflow 등록 점검, Job Template 초안, 폐쇄망 검증 절차
+- memory: 등록 규칙과 팀 Job Template 컨벤션을 별도 메모리 경로로 선언
+- context policy: 긴 분석 결과는 요약하고 상세 증거는 리포트 산출물로 남김
+
+현재 구현은 폐쇄망 POC를 위해 외부 런타임 의존성을 강제하지 않는 독립 프로파일입니다.
+나중에 실제 LLM 런타임을 연결할 때 `deepagents.create_deep_agent`의 `tools`, `subagents`, `skills`, `permissions`, `memory` 설정으로 옮길 수 있습니다.
 
 ## 모드 전환
 
