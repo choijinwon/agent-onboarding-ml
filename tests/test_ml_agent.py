@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import unittest
 
 from deep_agent_profile import build_ml_platform_profile, format_profile
@@ -98,6 +99,14 @@ class DeepAgentProfileTest(unittest.TestCase):
 
         self.assertIn("https://github.com/langchain-ai/deepagents", output)
         self.assertIn("permissions:", output)
+
+
+class WindowsSetupTest(unittest.TestCase):
+    def test_windows_command_wrapper_exists(self):
+        wrapper = Path(__file__).resolve().parents[1] / "ml-agent.cmd"
+
+        self.assertTrue(wrapper.exists())
+        self.assertIn("py -3", wrapper.read_text())
 
 
 if __name__ == "__main__":

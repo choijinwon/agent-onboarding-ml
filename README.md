@@ -20,6 +20,33 @@ python3 ml_agent.py
 ./ml-agent
 ```
 
+Windows 10/11에서는 PowerShell 또는 CMD에서 다음처럼 실행합니다.
+
+```powershell
+py -3 ml_agent.py
+.\ml-agent.cmd
+```
+
+필수 조건:
+
+- Windows 10 또는 Windows 11
+- Python 3.10 이상
+- 폐쇄망 환경에서는 Python 설치 파일과 이 저장소를 사전에 반입
+
+Python 확인:
+
+```powershell
+py -3 --version
+python --version
+```
+
+PowerShell에서 한글이 깨지면 다음을 먼저 실행합니다.
+
+```powershell
+chcp 65001
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+```
+
 ## 고급자 명령
 
 ```bash
@@ -32,11 +59,30 @@ python3 ml_agent.py
 ./ml-agent profile
 ```
 
+Windows 10/11:
+
+```powershell
+.\ml-agent.cmd analyze .\project
+.\ml-agent.cmd validate .\project
+.\ml-agent.cmd fix .\project --dry-run
+.\ml-agent.cmd apply .\project
+.\ml-agent.cmd report .\project
+.\ml-agent.cmd chat
+.\ml-agent.cmd profile
+```
+
 JSON 출력이 필요한 경우 `--json` 옵션을 사용할 수 있습니다.
 
 ```bash
 ./ml-agent validate ./project --json
 ./ml-agent profile --json
+```
+
+Windows 10/11:
+
+```powershell
+.\ml-agent.cmd validate .\project --json
+.\ml-agent.cmd profile --json
 ```
 
 ## Deep Agents 참고 구조
