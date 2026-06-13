@@ -204,12 +204,29 @@ class ProjectScan:
 
 
 @dataclass(frozen=True)
+class RegistrationCheck:
+    code: str
+    label: str
+    status: str
+    detail: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "label": self.label,
+            "status": self.status,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
     is_directory: bool
     scan: ProjectScan
     registration_status: str
+    registration_checks: list[RegistrationCheck]
     requirements_files: list[str]
     has_mlflow_dependency: bool
     mlflow_usage_files: list[str]
@@ -227,6 +244,7 @@ class ProjectAnalysis:
             "is_directory": self.is_directory,
             "scan": self.scan.as_dict(),
             "registration_status": self.registration_status,
+            "registration_checks": [check.as_dict() for check in self.registration_checks],
             "requirements_files": self.requirements_files,
             "has_mlflow_dependency": self.has_mlflow_dependency,
             "mlflow_usage_files": self.mlflow_usage_files,
@@ -471,6 +489,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             is_directory=False,
             scan=scan,
             registration_status="불가",
+            registration_checks=build_registration_checks(
+                requirements_files=[],
+                has_mlflow_dependency=False,
+                mlflow_usage_files=[],
+                entrypoint_candidates=[],
+                model_artifacts=[],
+                scan=scan,
+            ),
             requirements_files=[],
             has_mlflow_dependency=False,
             mlflow_usage_files=[],
@@ -498,6 +524,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             is_directory=False,
             scan=scan,
             registration_status="불가",
+            registration_checks=build_registration_checks(
+                requirements_files=[],
+                has_mlflow_dependency=False,
+                mlflow_usage_files=[],
+                entrypoint_candidates=[],
+                model_artifacts=[],
+                scan=scan,
+            ),
             requirements_files=[],
             has_mlflow_dependency=False,
             mlflow_usage_files=[],
@@ -528,6 +562,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         relative_path(path, target)
         for path in list_project_files(target, MODEL_ARTIFACT_SUFFIXES, limit=80)
     ]
+    registration_checks = build_registration_checks(
+        requirements_files=[relative_path(path, target) for path in requirements_files],
+        has_mlflow_dependency=has_mlflow_dependency,
+        mlflow_usage_files=mlflow_usage_files,
+        entrypoint_candidates=entrypoint_candidates,
+        model_artifacts=model_artifacts,
+        scan=scan,
+    )
 
     issues: list[str] = []
     issue_details: list[ProjectIssue] = []
@@ -619,6 +661,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         is_directory=True,
         scan=scan,
         registration_status=registration_status,
+        registration_checks=registration_checks,
         requirements_files=[relative_path(path, target) for path in requirements_files],
         has_mlflow_dependency=has_mlflow_dependency,
         mlflow_usage_files=mlflow_usage_files,
@@ -722,6 +765,73 @@ def scan_project(root: Path) -> ProjectScan:
         largest_files=largest_files,
         scan_note="read-only scan 완료. 파일 내용은 필요한 텍스트 파일만 제한적으로 읽습니다.",
     )
+
+
+def build_registration_checks(
+    requirements_files: list[str],
+    has_mlflow_dependency: bool,
+    mlflow_usage_files: list[str],
+    entrypoint_candidates: list[str],
+    model_artifacts: list[str],
+    scan: ProjectScan,
+) -> list[RegistrationCheck]:
+    return [
+        RegistrationCheck(
+            code="project_path",
+            label="프로젝트 경로",
+            status="pass" if scan.exists and scan.is_directory else "block",
+            detail="프로젝트 폴더를 찾았습니다." if scan.exists and scan.is_directory else scan.scan_note,
+        ),
+        RegistrationCheck(
+            code="dependencies",
+            label="패키지 목록",
+            status="pass" if requirements_files else "warn",
+            detail=format_count(requirements_files) if requirements_files else "requirements.txt 또는 pyproject.toml 없음",
+        ),
+        RegistrationCheck(
+            code="mlflow_dependency",
+            label="MLflow 의존성",
+            status="pass" if has_mlflow_dependency else "warn",
+            detail="패키지 목록에서 mlflow 확인" if has_mlflow_dependency else "패키지 목록에 mlflow 없음",
+        ),
+        RegistrationCheck(
+            code="mlflow_code",
+            label="MLflow 기록 코드",
+            status="pass" if mlflow_usage_files else "warn",
+            detail=format_count(mlflow_usage_files) if mlflow_usage_files else "학습 코드에서 mlflow 사용 흔적 없음",
+        ),
+        RegistrationCheck(
+            code="entrypoint",
+            label="학습 시작 파일",
+            status="pass" if entrypoint_candidates else "block",
+            detail=format_count(entrypoint_candidates) if entrypoint_candidates else "train.py 또는 main.py 후보 없음",
+        ),
+        RegistrationCheck(
+            code="model_artifact",
+            label="모델 산출물",
+            status="pass" if model_artifacts else "warn",
+            detail=format_model_artifact_detail(model_artifacts, scan),
+        ),
+        RegistrationCheck(
+            code="job_template",
+            label="Job Template 초안",
+            status="pass" if entrypoint_candidates and requirements_files else "warn",
+            detail="entrypoint와 dependency 정보 확인" if entrypoint_candidates and requirements_files else "entrypoint/dependency 보완 필요",
+        ),
+    ]
+
+
+def format_model_artifact_detail(model_artifacts: list[str], scan: ProjectScan) -> str:
+    if not model_artifacts:
+        return "모델 파일 후보 없음"
+    artifact_sizes = {artifact.path: artifact.size_bytes for artifact in scan.model_artifacts}
+    first = model_artifacts[0]
+    size = artifact_sizes.get(first)
+    if size is None:
+        return format_count(model_artifacts)
+    if len(model_artifacts) == 1:
+        return f"{first} ({format_bytes(size)})"
+    return f"{first} ({format_bytes(size)}) 외 {len(model_artifacts) - 1}개"
 
 
 def file_size(path: Path) -> int:
@@ -1025,17 +1135,22 @@ def format_beginner_scan(scan: ProjectScan, scanner_name: str) -> str:
 
 
 def format_beginner_analysis(analysis: ProjectAnalysis) -> str:
-    return "\n".join(
+    rows = [
+        f"- 등록 상태: {analysis.registration_status}",
+        "- 판정 기준:",
+    ]
+    for check in analysis.registration_checks:
+        rows.append(f"  - {format_check_status(check.status)} {check.label}: {check.detail}")
+    blockers = [check for check in analysis.registration_checks if check.status == "block"]
+    warnings = [check for check in analysis.registration_checks if check.status == "warn"]
+    rows.extend(
         [
-            f"- 등록 상태: {analysis.registration_status}",
-            f"- 패키지 파일: {format_count(analysis.requirements_files)}",
-            f"- MLflow 의존성: {'확인됨' if analysis.has_mlflow_dependency else '미확인'}",
-            f"- MLflow 코드 사용: {format_count(analysis.mlflow_usage_files)}",
-            f"- 학습 시작 파일 후보: {format_count(analysis.entrypoint_candidates)}",
-            f"- 모델 산출물 후보: {format_count(analysis.model_artifacts)}",
+            f"- 차단 항목: {len(blockers)}개",
+            f"- 보완 권장 항목: {len(warnings)}개",
             f"- Job Template 초안 준비: {'가능' if analysis.job_template_ready else '보완 필요'}",
         ]
     )
+    return "\n".join(rows)
 
 
 def format_beginner_issues(analysis: ProjectAnalysis) -> str:
@@ -1156,6 +1271,15 @@ def format_severity(severity: str) -> str:
         "info": "참고",
     }
     return labels.get(severity, severity)
+
+
+def format_check_status(status: str) -> str:
+    labels = {
+        "pass": "[통과]",
+        "warn": "[보완]",
+        "block": "[차단]",
+    }
+    return labels.get(status, f"[{status}]")
 
 
 def format_count(values: list[str]) -> str:

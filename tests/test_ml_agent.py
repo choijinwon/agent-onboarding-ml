@@ -78,7 +78,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("Step 2. 프로젝트 자동 스캔", output)
             self.assertIn("파일 수:", output)
             self.assertIn("모델 artifact 후보: 1개", output)
-            self.assertIn("MLflow 의존성: 확인됨", output)
+            self.assertIn("[통과] MLflow 의존성", output)
+            self.assertIn("[통과] 모델 산출물", output)
             self.assertIn("Job Template 초안 준비: 가능", output)
             self.assertIn("문제 수: 0개", output)
 
@@ -259,6 +260,7 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(payload["exit_code"], 0)
             self.assertEqual(payload["analysis"]["registration_status"], "등록 가능")
             self.assertTrue(payload["analysis"]["job_template_ready"])
+            self.assertTrue(all(check["status"] == "pass" for check in payload["analysis"]["registration_checks"]))
 
     def test_validate_json_contains_step2_scan(self):
         with TemporaryDirectory() as tmpdir:
@@ -270,6 +272,13 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["path"], "model/heavy-model.onnx")
             self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size_bytes"], 2048)
             self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size"], "2.0 KiB")
+            artifact_check = [
+                check
+                for check in payload["analysis"]["registration_checks"]
+                if check["code"] == "model_artifact"
+            ][0]
+            self.assertEqual(artifact_check["status"], "pass")
+            self.assertIn("2.0 KiB", artifact_check["detail"])
 
     def test_fix_json_contains_step5_previews(self):
         with TemporaryDirectory() as tmpdir:
