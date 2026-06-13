@@ -1160,17 +1160,26 @@ def format_beginner_issues(analysis: ProjectAnalysis) -> str:
             "- 큰 문제를 찾지 못했습니다.\n"
             "- 다음 단계에서 수정 없이 미리보기를 확인할 수 있습니다."
         )
-    issue_rows = [f"- 문제 수: {len(analysis.issue_details)}개"]
-    for index, issue in enumerate(analysis.issue_details[:5], start=1):
+    blocker_count = len([issue for issue in analysis.issue_details if issue.severity == "blocker"])
+    warning_count = len([issue for issue in analysis.issue_details if issue.severity == "warning"])
+    fixable_count = len([issue for issue in analysis.issue_details if issue.fixable_by_agent])
+    issue_rows = [
+        f"- 문제 수: {len(analysis.issue_details)}개",
+        f"- 필수 확인: {blocker_count}개",
+        f"- 보완 권장: {warning_count}개",
+        f"- Agent 수정 가능: {fixable_count}개",
+        "- 주요 문제:",
+    ]
+    for index, issue in enumerate(analysis.issue_details[:3], start=1):
         issue_rows.extend(
             [
                 f"- [{index}] {format_severity(issue.severity)}: {issue.title}",
                 f"  대상: {issue.target}",
-                f"  쉬운 설명: {issue.explanation}",
-                f"  권장 조치: {issue.recommendation}",
-                f"  Agent 수정 가능: {'가능' if issue.fixable_by_agent else '검토 필요'}",
+                f"  다음 조치: {issue.recommendation}",
             ]
         )
+    if len(analysis.issue_details) > 3:
+        issue_rows.append(f"- 나머지 문제 {len(analysis.issue_details) - 3}개는 리포트에 자세히 남깁니다.")
     issue_rows.extend(
         [
             "- 다음 선택:",

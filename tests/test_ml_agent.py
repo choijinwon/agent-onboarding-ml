@@ -48,8 +48,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("파일은 수정하지 않았습니다", output)
         self.assertIn("등록 상태", output)
         self.assertIn("문제 수", output)
-        self.assertIn("쉬운 설명", output)
-        self.assertIn("권장 조치", output)
+        self.assertIn("다음 조치", output)
         self.assertIn("수정안 미리보기", output)
         self.assertIn("파일은 수정하지 않았습니다", output)
         self.assertIn("적용하기", output)
@@ -92,9 +91,13 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("Step 4. 문제 목록 확인", output)
+            self.assertIn("필수 확인: 0개", output)
+            self.assertIn("보완 권장:", output)
+            self.assertIn("Agent 수정 가능:", output)
+            self.assertIn("주요 문제:", output)
             self.assertIn("MLflow 패키지 누락", output)
             self.assertIn("대상: requirements.txt", output)
-            self.assertIn("Agent 수정 가능: 가능", output)
+            self.assertIn("다음 조치:", output)
             self.assertIn("1. 수정안 미리보기로 이동", output)
 
     def test_beginner_wizard_shows_step5_dry_run_preview(self):
