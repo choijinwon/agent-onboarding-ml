@@ -76,7 +76,7 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertEqual(payload["command"], "validate")
         self.assertEqual(payload["path"], "./project")
         self.assertEqual(payload["exit_code"], 0)
-        self.assertIn("agent_profile=ml-platform-console-assistant", payload["details"])
+        self.assertIn("agent_profile=ai-ml-onboarding-assistant", payload["details"])
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")
@@ -97,7 +97,7 @@ class DeepAgentProfileTest(unittest.TestCase):
     def test_profile_contains_deepagents_harness_concepts(self):
         profile = build_ml_platform_profile("beginner")
 
-        self.assertEqual(profile.name, "ml-platform-console-assistant")
+        self.assertEqual(profile.name, "ai-ml-onboarding-assistant")
         self.assertGreaterEqual(len(profile.subagents), 4)
         self.assertTrue(any(rule.mode == "interrupt" for rule in profile.permissions))
         self.assertIn("task", profile.tools)

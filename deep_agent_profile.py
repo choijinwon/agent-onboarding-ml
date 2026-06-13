@@ -1,4 +1,4 @@
-"""Deep Agent profile for the ML Platform onboarding POC.
+"""Deep Agent profile for the AI ML onboarding POC.
 
 This module is inspired by langchain-ai/deepagents. It keeps the POC
 dependency-free while preserving the important harness concepts:
@@ -53,14 +53,14 @@ class DeepAgentProfile:
         return asdict(self)
 
 
-BASE_SYSTEM_PROMPT = """You are an ML Platform Console Assistant.
+BASE_SYSTEM_PROMPT = """You are an AI ML Onboarding Assistant.
 Help users register ML projects safely in a closed-network POC.
 Prefer read-only analysis first, explain risk before writes, and verify after apply."""
 
 
 MODE_SYSTEM_PROMPTS = {
     "beginner": (
-        "Use short wizard steps. Explain difficult ML Platform terms in plain Korean. "
+        "Use short wizard steps. Explain difficult AI/ML onboarding terms in plain Korean. "
         "Show previews before any file creation or edit."
     ),
     "intermediate": (
@@ -78,7 +78,7 @@ def build_ml_platform_profile(mode: AgentMode = "beginner") -> DeepAgentProfile:
     """Build the closed-network Deep Agent profile for a launch mode."""
 
     return DeepAgentProfile(
-        name="ml-platform-console-assistant",
+        name="ai-ml-onboarding-assistant",
         mode=mode,
         model_policy="model-agnostic; closed-network compatible tool-calling model",
         system_prompt=f"{BASE_SYSTEM_PROMPT}\n{MODE_SYSTEM_PROMPTS[mode]}",
@@ -120,7 +120,7 @@ def build_ml_platform_profile(mode: AgentMode = "beginner") -> DeepAgentProfile:
             "closed-network-validation",
         ],
         memory=[
-            "/memory/ml-platform-registration-rules.md",
+            "/memory/ai-ml-onboarding-registration-rules.md",
             "/memory/team-job-template-conventions.md",
         ],
         tools=[

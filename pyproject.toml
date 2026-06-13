@@ -1,7 +1,7 @@
 [project]
-name = "agent-onboarding-ml"
+name = "ai-ml-onboarding"
 version = "0.1.0"
-description = "Console POC for ML Platform onboarding launch modes"
+description = "Console POC for AI ML onboarding launch modes"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]

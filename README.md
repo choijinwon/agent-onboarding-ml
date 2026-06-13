@@ -1,6 +1,6 @@
-# ML Platform Console Assistant POC
+# AI ML 온보딩 POC
 
-폐쇄망 ML Platform 등록 지원을 위한 Launch Mode POC입니다.
+폐쇄망 AI/ML 프로젝트 온보딩과 모델 등록 지원을 위한 Launch Mode POC입니다.
 
 처음 실행하면 사용자의 숙련도에 따라 세 가지 모드 중 하나를 선택합니다.
 
