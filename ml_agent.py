@@ -121,6 +121,13 @@ SAMPLE_KIND_ALIASES = {
     "/샘플 onnx": "onnx",
     "onnx": "onnx",
     "샘플 onnx": "onnx",
+    "/sample sora": "sora",
+    "/샘플 소라": "sora",
+    "sora": "sora",
+    "소라": "sora",
+    "소라모델": "sora",
+    "샘플 소라": "sora",
+    "샘플 소라모델": "sora",
 }
 
 DEFAULT_HEAVY_SAMPLE_BYTES = 128 * 1024 * 1024
@@ -244,6 +251,31 @@ SAMPLE_MODEL_SPECS = {
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'onnx')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "sora": SampleModelSpec(
+        kind="sora",
+        title="Sora 스타일 비디오 생성 모델",
+        directory="sora-video-model",
+        artifact_path="model/sora-video-sample.onnx",
+        artifact_size_bytes=64 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "torch==2.5.1", "opencv-python==4.10.0.84"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--prompt', default='a cinematic product demo')\n"
+            "    parser.add_argument('--duration-seconds', type=int, default=4)\n"
+            "    parser.add_argument('--model-path', default='model/sora-video-sample.onnx')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('model_family', 'sora-style-video-generation')\n"
+            "        mlflow.log_param('prompt', args.prompt)\n"
+            "        mlflow.log_param('duration_seconds', args.duration_seconds)\n"
             "        mlflow.log_artifact(args.model_path)\n\n"
             "if __name__ == '__main__':\n"
             "    main()\n"
@@ -1771,6 +1803,7 @@ BEGINNER_INTRO = """초급자 모드가 선택되었습니다.
 - /sample pytorch
 - /sample sklearn
 - /sample onnx
+- /sample sora
 - /sample heavy
 - /sample all"""
 

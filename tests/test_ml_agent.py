@@ -227,6 +227,29 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("torch", (sample / "requirements.txt").read_text())
             self.assertEqual(analysis.registration_status, "등록 가능")
 
+    def test_sora_korean_alias_creates_registerable_video_project(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("소라모델")
+            finally:
+                os.chdir(cwd)
+
+            sample = Path(path)
+            analysis = analyze_project(str(sample))
+            output = build_beginner_wizard(str(sample))
+
+            self.assertIsNotNone(message)
+            self.assertTrue((sample / "model" / "sora-video-sample.onnx").exists())
+            self.assertIn("opencv-python", (sample / "requirements.txt").read_text())
+            self.assertIn("sora-style-video-generation", (sample / "train.py").read_text())
+            self.assertEqual(analysis.registration_status, "등록 가능")
+            self.assertIn("sora-video-sample.onnx", output)
+            self.assertIn("64.0 MiB", output)
+
     def test_sample_all_creates_multiple_model_projects(self):
         with TemporaryDirectory() as tmpdir:
             cwd = Path.cwd()
@@ -245,6 +268,7 @@ class BeginnerWizardTest(unittest.TestCase):
                 root / "pytorch-model",
                 root / "sklearn-model",
                 root / "onnx-model",
+                root / "sora-video-model",
             ]
 
             self.assertIsNotNone(message)
