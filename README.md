@@ -2,6 +2,8 @@
 
 폐쇄망 AI/ML 프로젝트 온보딩과 모델 등록 지원을 위한 Launch Mode POC입니다.
 
+빠른 셋팅은 [QUICKSTART.md](QUICKSTART.md)를 먼저 확인하세요.
+
 처음 실행하면 사용자의 숙련도에 따라 세 가지 모드 중 하나를 선택합니다.
 
 1. 초급자 모드: 단계별 Wizard 방식
