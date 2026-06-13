@@ -43,7 +43,9 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("project-scanner", output)
         self.assertIn("read-only scan", output)
         self.assertIn("수정안 미리보기", output)
-        self.assertIn("Human-in-the-loop", output)
+        self.assertIn("적용하기", output)
+        self.assertIn("다시 보기", output)
+        self.assertIn("취소하기", output)
         self.assertIn("삭제 작업은 수행하지 않습니다", output)
         self.assertIn("재검증", output)
 
@@ -69,7 +71,7 @@ class AdvancedModeTest(unittest.TestCase):
         output = handle_advanced_input("ml-agent fix ./project")
 
         self.assertIn("default=dry-run", output)
-        self.assertIn("Human-in-the-loop", output)
+        self.assertIn("advanced_apply_required=true", output)
 
     def test_json_output(self):
         output = handle_advanced_input("ml-agent validate ./project --json")
@@ -85,7 +87,7 @@ class AdvancedModeTest(unittest.TestCase):
 
         self.assertIn("Deep Agent Profile", output)
         self.assertIn("project-scanner", output)
-        self.assertIn("Human-in-the-loop", output)
+        self.assertIn("적용하기", output)
 
     def test_config_command_outputs_env_summary(self):
         output = handle_advanced_input("ml-agent config")

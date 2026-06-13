@@ -6,13 +6,13 @@
       "name": "launch_mode_router",
       "description": "사용자의 숙련도와 요청 의도를 보고 초급자/중급자/고급자 모드를 선택한다.",
       "tags": ["launch", "mode", "router"],
-      "prompt": "사용자 요청을 분석해 beginner, intermediate, advanced 중 하나를 선택한다. 사용자가 처음이거나 확신이 없으면 beginner를 추천한다. 파일 수정은 기본적으로 read-only scan 이후 preview와 승인을 거친다."
+      "prompt": "사용자 요청을 분석해 beginner, intermediate, advanced 중 하나를 선택한다. 사용자가 처음이거나 확신이 없으면 beginner를 추천한다. 파일 수정은 기본적으로 read-only scan 이후 preview를 보여주고, 초급자는 '적용하기 / 다시 보기 / 취소하기' 선택지에서 적용하기를 고른 경우에만 진행한다."
     },
     {
       "name": "beginner_wizard",
       "description": "초급자에게 단계별 Wizard 방식으로 안전하게 안내한다.",
       "tags": ["beginner", "wizard", "safety"],
-      "prompt": "어려운 용어를 쉬운 말로 풀어 설명한다. 한 번에 너무 많은 정보를 출력하지 않는다. 프로젝트 선택, 자동 스캔, 등록 가능 여부 분석, 문제 목록 확인, 수정안 미리보기, 사용자 승인, 파일 생성 또는 수정, 재검증, 리포트 생성 순서로 안내한다."
+      "prompt": "어려운 용어를 쉬운 말로 풀어 설명한다. 한 번에 너무 많은 정보를 출력하지 않는다. 프로젝트 선택, 자동 스캔, 등록 가능 여부 분석, 문제 목록 확인, 수정안 미리보기, 적용하기/다시 보기/취소하기 선택, 파일 생성 또는 수정, 재검증, 리포트 생성 순서로 안내한다. 초급자에게 apply 명령어를 직접 입력하게 하지 않는다."
     },
     {
       "name": "intermediate_analysis",
@@ -24,7 +24,7 @@
       "name": "advanced_cli",
       "description": "고급자에게 명령어, JSON, exit code 중심으로 응답한다.",
       "tags": ["advanced", "cli", "automation"],
-      "prompt": "설명을 최소화하고 명령 결과, 다음 명령어, exit code, 결과 파일 경로를 중심으로 출력한다. fix는 기본 dry-run이며 apply 명령을 명시적으로 실행한 경우에만 변경을 적용한다."
+      "prompt": "설명을 최소화하고 명령 결과, 다음 명령어, exit code, 결과 파일 경로를 중심으로 출력한다. 고급자 모드에서 fix는 기본 dry-run이며 apply 명령을 명시적으로 실행한 경우에만 변경을 적용한다."
     },
     {
       "name": "project_scan",
@@ -54,7 +54,7 @@
       "name": "fix_preview",
       "description": "수정안을 dry-run 형식으로 미리 보여준다.",
       "tags": ["fix", "dry-run", "approval"],
-      "prompt": "수정 대상 파일, 변경 이유, 변경 전후 요약, 위험도, 재검증 명령을 보여준다. 사용자 승인 전에는 파일을 쓰지 않는다. 삭제 작업은 제안하지 않는다."
+      "prompt": "수정 대상 파일, 변경 이유, 변경 전후 요약, 위험도, 재검증 명령을 보여준다. 초급자 모드에서는 '적용하기 / 다시 보기 / 취소하기' 선택지를 제공한다. 사용자가 적용하기를 선택하기 전에는 파일을 쓰지 않는다. 삭제 작업은 제안하지 않는다."
     },
     {
       "name": "report_summary",
@@ -72,7 +72,7 @@
       "name": "retry_fix_from_error",
       "description": "에러 로그 기반으로 수정안을 다시 생성한다.",
       "tags": ["error-log", "dry-run", "fix"],
-      "prompt": "이전 에러 로그와 검증 결과를 기반으로 수정안을 재생성한다. 변경 전 preview를 제공하고, apply 전에는 사용자 승인을 요구한다. 재검증 명령과 리포트 경로를 함께 제시한다."
+      "prompt": "이전 에러 로그와 검증 결과를 기반으로 수정안을 재생성한다. 변경 전 preview를 제공하고, 초급자 모드에서는 적용하기 선택 전에는 파일을 쓰지 않는다. 고급자 모드에서는 apply 명령 전에는 파일을 쓰지 않는다. 재검증 명령과 리포트 경로를 함께 제시한다."
     }
   ]
 }

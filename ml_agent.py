@@ -191,10 +191,15 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 4. 문제 목록 확인\n"
         "- 발견된 문제는 쉬운 설명과 함께 보여줍니다.\n\n"
         "Step 5. 수정안 미리보기\n"
-        "- 파일 수정 전 dry-run 결과를 먼저 보여줍니다.\n\n"
+        "- 파일 수정 전 dry-run 결과를 먼저 보여줍니다.\n"
+        "- 화면에는 명령어 대신 선택지를 제공합니다.\n\n"
         "Step 6. 사용자 승인\n"
-        f"- {profile.approval_policy}\n\n"
+        f"- {profile.approval_policy}\n"
+        "- 1. 적용하기\n"
+        "- 2. 다시 보기\n"
+        "- 3. 취소하기\n\n"
         "Step 7. 파일 생성 또는 수정\n"
+        "- 사용자가 '적용하기'를 선택한 경우에만 파일을 생성하거나 수정합니다.\n"
         "- 삭제 작업은 수행하지 않습니다.\n\n"
         "Step 8. 재검증\n"
         "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.\n\n"
@@ -292,7 +297,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         details.append(f"agent_profile={profile.name}")
     if command == "fix" and not dry_run:
         details.append("default=dry-run")
-        details.append(profile.approval_policy)
+        details.append("advanced_apply_required=true")
     if command == "apply":
         details.append("explicit_apply=true")
         details.append("approved changes would be applied in a full implementation")

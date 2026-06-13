@@ -55,7 +55,7 @@ class DeepAgentProfile:
 
 BASE_SYSTEM_PROMPT = """You are an AI ML Onboarding Assistant.
 Help users register ML projects safely in a closed-network POC.
-Prefer read-only analysis first, explain risk before writes, and verify after apply."""
+Prefer read-only analysis first, explain risk before writes, and verify after approved changes."""
 
 
 MODE_SYSTEM_PROMPTS = {
@@ -135,7 +135,7 @@ def build_ml_platform_profile(mode: AgentMode = "beginner") -> DeepAgentProfile:
             "execute",
             "task",
         ],
-        approval_policy="Human-in-the-loop required for write_file/edit_file/apply.",
+        approval_policy="초급자 모드는 사용자가 '적용하기'를 선택한 경우에만 변경을 적용합니다.",
         context_policy="Summarize long scans and offload detailed evidence into the report artifact.",
     )
 
