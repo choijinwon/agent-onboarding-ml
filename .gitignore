@@ -3,7 +3,6 @@ __pycache__/
 .pycache/
 .pytest_cache/
 .env
-registered/
 chat_errors/
 registration_packages/
 fix_reports/

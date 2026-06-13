@@ -130,7 +130,10 @@ Windows 10/11:
 
 ## 환경 변수
 
-`.env.example`에는 현재 POC 실행에 필요한 Qwen endpoint, 모델 목록, Deep Agent 옵션, 작업 디렉터리, 에러 로그, 스킬 경로만 포함되어 있습니다.
+`.env.example`에는 현재 POC 실행에 필요한 Qwen endpoint, 모델 목록, Deep Agent 옵션, 등록 패키지, 에러 로그, 스킬 경로만 포함되어 있습니다.
+
+Qwen 설정은 Agent가 분석과 안내에 사용하는 LLM 설정입니다.
+등록 대상 ML 모델은 `analyze`, `validate`, `fix`, `report` 명령의 프로젝트 경로로 전달합니다.
 
 주요 값:
 
@@ -140,7 +143,6 @@ Windows 10/11:
 - `QWEN_MODELS`: 선택 가능한 모델 목록
 - `ENABLE_MULTI_AGENT`: sub-agent 분담 사용 여부
 - `ENABLE_HARNESS_SKILLS`: Deep Agent skill 저장/로드 사용 여부
-- `REGISTERED_WORKSPACE_DIR`: 등록 완료 workspace 경로
 - `CHAT_ERROR_DIR`: 에러 로그 저장 경로
 - `MASK_SENSITIVE_LOGS`: 에러 로그 민감정보 마스킹 여부
 - `REGISTRATION_PACKAGE_DIR`: 등록 패키지 산출물 경로

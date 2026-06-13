@@ -39,6 +39,7 @@ copy .env.example .env
 ```
 
 `.env`에서 내부 Qwen 값만 먼저 수정합니다.
+Qwen은 Agent가 분석과 안내에 사용하는 LLM이고, 등록 대상 ML 모델은 나중에 프로젝트 경로로 넘깁니다.
 
 ```env
 QWEN_API_KEY=your-internal-qwen-key
@@ -56,7 +57,6 @@ QWEN_MODELS=qwen3.5,gpt20,gamma
 생성되는 주요 경로:
 
 ```text
-registered/
 skills/
 chat_errors/
 fix_reports/
@@ -107,6 +107,9 @@ registration_packages/
 .\ml-agent.cmd prompts
 .\ml-agent.cmd errors list
 ```
+
+여기서 `.\project`는 등록하려는 ML 모델 프로젝트 경로입니다.
+예를 들어 학습 코드, requirements, MLflow artifact, 모델 파일이 들어 있는 폴더를 넘깁니다.
 
 JSON 출력:
 
