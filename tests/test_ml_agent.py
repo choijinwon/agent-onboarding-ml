@@ -13,10 +13,12 @@ from ml_agent import (
     MODE_INTERMEDIATE,
     analyze_project,
     build_beginner_wizard,
+    create_heavy_model_sample,
     handle_advanced_input,
     handle_intermediate_request,
     parse_mode,
     parse_mode_command,
+    resolve_beginner_project_input,
 )
 
 
@@ -149,6 +151,32 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("삭제 작업은 수행하지 않습니다.", output)
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
             self.assertIn("train.py: MLflow 기록 코드 추가", output)
+
+    def test_heavy_model_sample_can_be_selected_from_step1(self):
+        with TemporaryDirectory() as tmpdir:
+            sample = create_heavy_model_sample(Path(tmpdir) / "heavy-model", artifact_size_bytes=1024)
+            analysis = analyze_project(str(sample))
+            output = build_beginner_wizard(str(sample))
+
+            self.assertEqual((sample / "model" / "heavy-model.onnx").stat().st_size, 1024)
+            self.assertEqual(analysis.registration_status, "등록 가능")
+            self.assertIn("등록 상태: 등록 가능", output)
+            self.assertIn("heavy-model.onnx", output)
+
+    def test_heavy_model_alias_creates_sample_project(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample heavy")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIsNotNone(message)
+            self.assertTrue(Path(path).exists())
+            self.assertTrue((Path(path) / "model" / "heavy-model.onnx").exists())
 
 
 class ProjectAnalysisTest(unittest.TestCase):
