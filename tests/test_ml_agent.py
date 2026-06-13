@@ -11,6 +11,7 @@ from ml_agent import (
     MODE_ADVANCED,
     MODE_BEGINNER,
     MODE_INTERMEDIATE,
+    analyze_project,
     build_beginner_wizard,
     handle_advanced_input,
     handle_intermediate_request,
@@ -42,12 +43,53 @@ class BeginnerWizardTest(unittest.TestCase):
 
         self.assertIn("project-scanner", output)
         self.assertIn("read-only scan", output)
+        self.assertIn("등록 상태", output)
         self.assertIn("수정안 미리보기", output)
         self.assertIn("적용하기", output)
         self.assertIn("다시 보기", output)
         self.assertIn("취소하기", output)
         self.assertIn("삭제 작업은 수행하지 않습니다", output)
         self.assertIn("재검증", output)
+
+    def test_beginner_wizard_reports_registration_ready_project(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\nmlflow==2.17.0\n")
+            (root / "train.py").write_text(
+                "import mlflow\n\n"
+                "if __name__ == \"__main__\":\n"
+                "    with mlflow.start_run():\n"
+                "        mlflow.log_metric('accuracy', 0.9)\n"
+            )
+            (root / "model").mkdir()
+            (root / "model" / "model.pkl").write_text("sample")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("등록 상태: 등록 가능", output)
+            self.assertIn("MLflow 의존성: 확인됨", output)
+            self.assertIn("Job Template 초안 준비: 가능", output)
+
+
+class ProjectAnalysisTest(unittest.TestCase):
+    def test_missing_path_is_not_registerable(self):
+        analysis = analyze_project("/path/that/does/not/exist")
+
+        self.assertEqual(analysis.registration_status, "불가")
+        self.assertFalse(analysis.exists)
+        self.assertIn("프로젝트 경로를 찾을 수 없습니다.", analysis.issues)
+
+    def test_project_with_missing_mlflow_needs_action(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            analysis = analyze_project(str(root))
+
+            self.assertEqual(analysis.registration_status, "보완 필요")
+            self.assertFalse(analysis.has_mlflow_dependency)
+            self.assertIn("train.py", analysis.entrypoint_candidates)
 
 
 class IntermediateModeTest(unittest.TestCase):
@@ -79,8 +121,27 @@ class AdvancedModeTest(unittest.TestCase):
 
         self.assertEqual(payload["command"], "validate")
         self.assertEqual(payload["path"], "./project")
-        self.assertEqual(payload["exit_code"], 0)
+        self.assertEqual(payload["exit_code"], 2)
         self.assertIn("agent_profile=ai-ml-onboarding-assistant", payload["details"])
+        self.assertEqual(payload["analysis"]["registration_status"], "불가")
+
+    def test_validate_json_contains_step3_analysis(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text(
+                "import mlflow\n"
+                "if __name__ == \"__main__\":\n"
+                "    mlflow.log_param('x', 1)\n"
+            )
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"ml-agent validate {root} --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["exit_code"], 0)
+            self.assertEqual(payload["analysis"]["registration_status"], "등록 가능")
+            self.assertTrue(payload["analysis"]["job_template_ready"])
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")

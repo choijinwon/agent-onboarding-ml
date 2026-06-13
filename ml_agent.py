@@ -57,6 +57,50 @@ MODE_CHANGE_MESSAGES = {
     MODE_ADVANCED: "이제부터 CLI Command 중심으로 안내합니다.",
 }
 
+MODEL_ARTIFACT_SUFFIXES = {
+    ".h5",
+    ".joblib",
+    ".keras",
+    ".mlmodel",
+    ".onnx",
+    ".pickle",
+    ".pkl",
+    ".pt",
+    ".pth",
+}
+
+
+@dataclass(frozen=True)
+class ProjectAnalysis:
+    path: str
+    exists: bool
+    is_directory: bool
+    registration_status: str
+    requirements_files: list[str]
+    has_mlflow_dependency: bool
+    mlflow_usage_files: list[str]
+    entrypoint_candidates: list[str]
+    model_artifacts: list[str]
+    job_template_ready: bool
+    issues: list[str]
+    next_actions: list[str]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "exists": self.exists,
+            "is_directory": self.is_directory,
+            "registration_status": self.registration_status,
+            "requirements_files": self.requirements_files,
+            "has_mlflow_dependency": self.has_mlflow_dependency,
+            "mlflow_usage_files": self.mlflow_usage_files,
+            "entrypoint_candidates": self.entrypoint_candidates,
+            "model_artifacts": self.model_artifacts,
+            "job_template_ready": self.job_template_ready,
+            "issues": self.issues,
+            "next_actions": self.next_actions,
+        }
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -66,9 +110,10 @@ class CommandResult:
     exit_code: int
     details: list[str]
     result_file: str | None = None
+    analysis: ProjectAnalysis | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "command": self.command,
             "path": self.path,
             "status": self.status,
@@ -76,6 +121,9 @@ class CommandResult:
             "details": self.details,
             "result_file": self.result_file,
         }
+        if self.analysis:
+            payload["analysis"] = self.analysis.as_dict()
+        return payload
 
 
 class ConsoleAssistant:
@@ -181,15 +229,16 @@ def parse_mode_command(value: str) -> str | None:
 def build_beginner_wizard(project_path: str) -> str:
     display_path = project_path or "(프로젝트 경로 미입력)"
     profile = build_ml_platform_profile(MODE_BEGINNER)
+    analysis = analyze_project(project_path)
     return (
         "Step 1. 프로젝트 선택\n"
         f"- 선택된 경로: {display_path}\n\n"
         "Step 2. 프로젝트 자동 스캔\n"
         f"- {profile.subagents[0].name}가 현재는 read-only scan만 수행합니다.\n\n"
         "Step 3. 등록 가능 여부 분석\n"
-        "- MLflow 설정, requirements, 실행 arguments, Job Template 후보를 확인합니다.\n\n"
+        f"{format_beginner_analysis(analysis)}\n\n"
         "Step 4. 문제 목록 확인\n"
-        "- 발견된 문제는 쉬운 설명과 함께 보여줍니다.\n\n"
+        f"{format_beginner_issues(analysis)}\n\n"
         "Step 5. 수정안 미리보기\n"
         "- 파일 수정 전 dry-run 결과를 먼저 보여줍니다.\n"
         "- 화면에는 명령어 대신 선택지를 제공합니다.\n\n"
@@ -206,6 +255,192 @@ def build_beginner_wizard(project_path: str) -> str:
         "Step 9. 분석 리포트 생성\n"
         "- 최종 결과와 다음 조치를 리포트로 남깁니다."
     )
+
+
+def analyze_project(project_path: str) -> ProjectAnalysis:
+    target = Path(project_path or ".")
+    display_path = str(target)
+
+    if not target.exists():
+        return ProjectAnalysis(
+            path=display_path,
+            exists=False,
+            is_directory=False,
+            registration_status="불가",
+            requirements_files=[],
+            has_mlflow_dependency=False,
+            mlflow_usage_files=[],
+            entrypoint_candidates=[],
+            model_artifacts=[],
+            job_template_ready=False,
+            issues=["프로젝트 경로를 찾을 수 없습니다."],
+            next_actions=["올바른 프로젝트 폴더 경로를 다시 입력하세요."],
+        )
+    if not target.is_dir():
+        return ProjectAnalysis(
+            path=display_path,
+            exists=True,
+            is_directory=False,
+            registration_status="불가",
+            requirements_files=[],
+            has_mlflow_dependency=False,
+            mlflow_usage_files=[],
+            entrypoint_candidates=[],
+            model_artifacts=[],
+            job_template_ready=False,
+            issues=["선택한 경로가 폴더가 아닙니다."],
+            next_actions=["학습 코드가 들어 있는 프로젝트 폴더를 선택하세요."],
+        )
+
+    requirements_files = find_requirements_files(target)
+    has_mlflow_dependency = any(file_mentions(path, "mlflow") for path in requirements_files)
+    python_files = list_project_files(target, {".py"}, limit=120)
+    mlflow_usage_files = [relative_path(path, target) for path in python_files if file_mentions(path, "mlflow")]
+    entrypoint_candidates = find_entrypoint_candidates(target, python_files)
+    model_artifacts = [
+        relative_path(path, target)
+        for path in list_project_files(target, MODEL_ARTIFACT_SUFFIXES, limit=80)
+    ]
+
+    issues: list[str] = []
+    next_actions: list[str] = []
+    if not requirements_files:
+        issues.append("requirements.txt 또는 pyproject.toml을 찾지 못했습니다.")
+        next_actions.append("학습에 필요한 패키지 목록을 requirements.txt 또는 pyproject.toml에 정리하세요.")
+    if requirements_files and not has_mlflow_dependency:
+        issues.append("패키지 목록에서 mlflow 의존성을 찾지 못했습니다.")
+        next_actions.append("MLflow를 사용한다면 requirements.txt 또는 pyproject.toml에 mlflow를 추가하세요.")
+    if not entrypoint_candidates:
+        issues.append("학습 시작 파일 후보를 찾지 못했습니다.")
+        next_actions.append("train.py 또는 main.py처럼 실행 진입점을 확인할 수 있는 파일을 준비하세요.")
+    if not mlflow_usage_files:
+        issues.append("학습 코드에서 MLflow 사용 흔적을 찾지 못했습니다.")
+        next_actions.append("mlflow.start_run, mlflow.log_metric, mlflow.log_artifact 같은 기록 코드를 확인하세요.")
+    if not model_artifacts:
+        issues.append("모델 산출물 후보 파일을 찾지 못했습니다.")
+        next_actions.append("학습 후 생성되는 모델 파일 경로를 확인하거나 샘플 artifact를 준비하세요.")
+
+    job_template_ready = bool(entrypoint_candidates and requirements_files)
+    if not job_template_ready:
+        next_actions.append("Job Template 초안 생성을 위해 entrypoint와 dependency 정보를 먼저 보완하세요.")
+
+    if not issues:
+        registration_status = "등록 가능"
+        next_actions.append("dry-run 미리보기에서 Job Template과 등록 패키지 내용을 확인하세요.")
+    else:
+        registration_status = "보완 필요"
+
+    return ProjectAnalysis(
+        path=display_path,
+        exists=True,
+        is_directory=True,
+        registration_status=registration_status,
+        requirements_files=[relative_path(path, target) for path in requirements_files],
+        has_mlflow_dependency=has_mlflow_dependency,
+        mlflow_usage_files=mlflow_usage_files,
+        entrypoint_candidates=entrypoint_candidates,
+        model_artifacts=model_artifacts,
+        job_template_ready=job_template_ready,
+        issues=issues,
+        next_actions=dedupe(next_actions),
+    )
+
+
+def find_requirements_files(root: Path) -> list[Path]:
+    candidates = [root / "requirements.txt", root / "pyproject.toml"]
+    return [path for path in candidates if path.exists() and path.is_file()]
+
+
+def list_project_files(root: Path, suffixes: set[str], limit: int) -> list[Path]:
+    results: list[Path] = []
+    ignored_dirs = {".git", ".venv", "__pycache__", "node_modules", "registration_packages"}
+    for path in root.rglob("*"):
+        if len(results) >= limit:
+            break
+        if any(part in ignored_dirs for part in path.parts):
+            continue
+        if path.is_file() and path.suffix.lower() in suffixes:
+            results.append(path)
+    return results
+
+
+def find_entrypoint_candidates(root: Path, python_files: list[Path]) -> list[str]:
+    preferred = [
+        root / "train.py",
+        root / "main.py",
+        root / "src" / "train.py",
+        root / "src" / "main.py",
+    ]
+    candidates = [relative_path(path, root) for path in preferred if path.exists()]
+    for path in python_files:
+        if len(candidates) >= 8:
+            break
+        if relative_path(path, root) in candidates:
+            continue
+        text = safe_read_text(path)
+        if "argparse" in text or 'if __name__ == "__main__"' in text or "if __name__ == '__main__'" in text:
+            candidates.append(relative_path(path, root))
+    return candidates
+
+
+def file_mentions(path: Path, token: str) -> bool:
+    return token.lower() in safe_read_text(path).lower()
+
+
+def safe_read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def relative_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def format_beginner_analysis(analysis: ProjectAnalysis) -> str:
+    return "\n".join(
+        [
+            f"- 등록 상태: {analysis.registration_status}",
+            f"- 패키지 파일: {format_count(analysis.requirements_files)}",
+            f"- MLflow 의존성: {'확인됨' if analysis.has_mlflow_dependency else '미확인'}",
+            f"- MLflow 코드 사용: {format_count(analysis.mlflow_usage_files)}",
+            f"- 학습 시작 파일 후보: {format_count(analysis.entrypoint_candidates)}",
+            f"- 모델 산출물 후보: {format_count(analysis.model_artifacts)}",
+            f"- Job Template 초안 준비: {'가능' if analysis.job_template_ready else '보완 필요'}",
+        ]
+    )
+
+
+def format_beginner_issues(analysis: ProjectAnalysis) -> str:
+    if not analysis.issues:
+        return "- 큰 문제를 찾지 못했습니다.\n- 다음 단계에서 수정 없이 미리보기를 확인할 수 있습니다."
+    issue_rows = [f"- {issue}" for issue in analysis.issues[:5]]
+    if analysis.next_actions:
+        issue_rows.append("- 다음 조치: " + analysis.next_actions[0])
+    return "\n".join(issue_rows)
+
+
+def format_count(values: list[str]) -> str:
+    if not values:
+        return "없음"
+    preview = ", ".join(values[:3])
+    if len(values) > 3:
+        preview += f" 외 {len(values) - 3}개"
+    return preview
 
 
 def handle_intermediate_request(request: str) -> str:
@@ -291,10 +526,12 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     details = []
     status = "ok"
     exit_code = 0
+    analysis = analyze_project(path)
 
     if command in {"analyze", "validate", "fix", "apply", "report"}:
         details.append(f"path={target}")
         details.append(f"agent_profile={profile.name}")
+        details.append(f"registration_status={analysis.registration_status}")
     if command == "fix" and not dry_run:
         details.append("default=dry-run")
         details.append("advanced_apply_required=true")
@@ -307,9 +544,16 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     else:
         result_file = None
 
-    details.append("mlflow=queued")
-    details.append("job_template=queued")
-    return CommandResult(command, path, status, exit_code, details, result_file)
+    details.append(f"mlflow={'ok' if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else 'missing'}")
+    details.append(f"job_template={'ready' if analysis.job_template_ready else 'needs_input'}")
+    details.append(f"issues={len(analysis.issues)}")
+    if analysis.registration_status == "불가":
+        status = "error"
+        exit_code = 2
+    elif command == "validate" and analysis.issues:
+        status = "needs_action"
+        exit_code = 1
+    return CommandResult(command, path, status, exit_code, details, result_file, analysis)
 
 
 def format_command_result(result: CommandResult) -> str:
