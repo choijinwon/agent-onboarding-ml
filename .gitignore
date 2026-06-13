@@ -16,5 +16,4 @@ experiments/
 registrations/
 registration_packages/
 fix_reports/
-prompt_templates.json
 model_catalog.json

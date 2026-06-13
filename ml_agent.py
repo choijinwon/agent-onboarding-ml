@@ -12,6 +12,11 @@ from typing import Callable
 
 from app_config import AppConfig, ensure_runtime_layout, format_config_summary
 from deep_agent_profile import build_ml_platform_profile, format_profile
+from prompt_store import (
+    format_prompt_templates,
+    load_prompt_templates,
+    prompt_templates_as_dict,
+)
 
 
 MODE_BEGINNER = "beginner"
@@ -244,6 +249,12 @@ def handle_advanced_input(command: str) -> str:
         return format_config_summary(AppConfig.load())
     if parts[0] == "init":
         return initialize_runtime_layout()
+    if parts[0] == "prompts":
+        as_json = "--json" in parts
+        templates = load_prompt_templates()
+        if as_json:
+            return json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2)
+        return format_prompt_templates(templates)
     if parts[0] == "profile":
         as_json = "--json" in parts
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -251,7 +262,7 @@ def handle_advanced_input(command: str) -> str:
             return json.dumps(profile.as_dict(), ensure_ascii=False, indent=2)
         return format_profile(profile)
     if parts[0] not in {"analyze", "validate", "fix", "apply", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init"
+        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init, prompts"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -321,6 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("chat")
     subparsers.add_parser("config")
     subparsers.add_parser("init")
+    prompts_parser = subparsers.add_parser("prompts")
+    prompts_parser.add_argument("--json", action="store_true")
     profile_parser = subparsers.add_parser("profile")
     profile_parser.add_argument("--json", action="store_true")
     return parser
@@ -342,6 +355,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "init":
         print(initialize_runtime_layout())
+        return 0
+    if args.command == "prompts":
+        templates = load_prompt_templates()
+        if args.json:
+            print(json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2))
+        else:
+            print(format_prompt_templates(templates))
         return 0
     if args.command == "profile":
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -431,7 +451,8 @@ report     분석 리포트 생성
 chat       Agent 대화 모드 진입
 profile    Deep Agent 프로파일 확인
 config     .env 설정 요약
-init       런타임/스킬 저장 디렉터리 생성"""
+init       런타임/스킬 저장 디렉터리 생성
+prompts    저장된 프롬프트 템플릿 확인"""
 
 
 if __name__ == "__main__":

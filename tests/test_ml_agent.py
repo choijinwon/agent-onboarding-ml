@@ -5,6 +5,7 @@ import unittest
 
 from app_config import AppConfig, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
+from prompt_store import load_prompt_templates
 from ml_agent import (
     MODE_ADVANCED,
     MODE_BEGINNER,
@@ -92,6 +93,13 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertIn("qwen_model=qwen3.5", output)
         self.assertIn("skill_store_dir", output)
 
+    def test_prompts_command_outputs_prompt_templates(self):
+        output = handle_advanced_input("ml-agent prompts")
+
+        self.assertIn("Prompt templates", output)
+        self.assertIn("launch_mode_router", output)
+        self.assertIn("mlflow_registration_check", output)
+
 
 class DeepAgentProfileTest(unittest.TestCase):
     def test_profile_contains_deepagents_harness_concepts(self):
@@ -136,6 +144,23 @@ class AppConfigTest(unittest.TestCase):
             self.assertIn(root / "skills", directories)
             self.assertTrue((root / "skills" / "README.md").exists())
             self.assertTrue((root / "agent_workspace" / "registered").exists())
+
+
+class PromptAndSkillStoreTest(unittest.TestCase):
+    def test_prompt_templates_are_saved(self):
+        templates = load_prompt_templates()
+        names = {template.name for template in templates}
+
+        self.assertIn("launch_mode_router", names)
+        self.assertIn("job_template_draft", names)
+        self.assertIn("closed_network_validation", names)
+
+    def test_default_skills_exist(self):
+        root = Path(__file__).resolve().parents[1]
+
+        self.assertTrue((root / "skills" / "mlflow-registration-check" / "SKILL.md").exists())
+        self.assertTrue((root / "skills" / "job-template-draft" / "SKILL.md").exists())
+        self.assertTrue((root / "skills" / "closed-network-validation" / "SKILL.md").exists())
 
 
 if __name__ == "__main__":

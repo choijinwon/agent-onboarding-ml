@@ -108,6 +108,7 @@ registration_packages/
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
+.\ml-agent.cmd prompts
 ```
 
 JSON 출력:
@@ -115,9 +116,28 @@ JSON 출력:
 ```powershell
 .\ml-agent.cmd validate .\project --json
 .\ml-agent.cmd profile --json
+.\ml-agent.cmd prompts --json
 ```
 
-## 8. 스킬 저장
+## 8. 프롬프트 확인
+
+프롬프트는 기본적으로 `prompt_templates.json`에 저장됩니다.
+
+```powershell
+.\ml-agent.cmd prompts
+```
+
+주요 프롬프트:
+
+- `launch_mode_router`
+- `beginner_wizard`
+- `intermediate_analysis`
+- `advanced_cli`
+- `mlflow_registration_check`
+- `job_template_draft`
+- `closed_network_validation`
+
+## 9. 스킬 저장
 
 스킬 저장 위치는 `.env`의 `SKILL_STORE_DIR` 값으로 정합니다.
 
@@ -150,16 +170,17 @@ description: MLflow 등록 준비 상태를 점검한다
 - model registry 등록 조건 확인
 ```
 
-## 9. Linux/macOS 실행
+## 10. Linux/macOS 실행
 
 ```bash
 cp .env.example .env
 ./ml-agent init
 ./ml-agent config
+./ml-agent prompts
 ./ml-agent
 ```
 
-## 10. 문제 해결
+## 11. 문제 해결
 
 Python을 찾지 못하는 경우:
 

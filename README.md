@@ -77,6 +77,7 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ./ml-agent profile
 ./ml-agent config
 ./ml-agent init
+./ml-agent prompts
 ```
 
 Windows 10/11:
@@ -91,6 +92,7 @@ Windows 10/11:
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
 .\ml-agent.cmd init
+.\ml-agent.cmd prompts
 ```
 
 JSON 출력이 필요한 경우 `--json` 옵션을 사용할 수 있습니다.
@@ -105,6 +107,7 @@ Windows 10/11:
 ```powershell
 .\ml-agent.cmd validate .\project --json
 .\ml-agent.cmd profile --json
+.\ml-agent.cmd prompts --json
 ```
 
 ## Deep Agents 참고 구조
@@ -148,6 +151,31 @@ Windows 10/11:
 
 ```powershell
 .\ml-agent.cmd config
+```
+
+## 프롬프트와 스킬
+
+기본 프롬프트는 `PROMPT_STORE_PATH` 값이 가리키는 `prompt_templates.json`에 저장됩니다.
+
+```bash
+./ml-agent prompts
+./ml-agent prompts --json
+```
+
+Windows 10/11:
+
+```powershell
+.\ml-agent.cmd prompts
+.\ml-agent.cmd prompts --json
+```
+
+기본 스킬은 `skills/` 아래에 저장됩니다.
+
+```text
+skills/
+├── closed-network-validation/
+├── job-template-draft/
+└── mlflow-registration-check/
 ```
 
 ## 모드 전환
