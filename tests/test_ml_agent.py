@@ -188,6 +188,70 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertTrue(Path(path).exists())
             self.assertTrue((Path(path) / "model" / "heavy-model.onnx").exists())
 
+    def test_tensorflow_sample_alias_creates_registerable_project(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample tensorflow")
+            finally:
+                os.chdir(cwd)
+
+            sample = Path(path)
+            analysis = analyze_project(str(sample))
+
+            self.assertIsNotNone(message)
+            self.assertTrue((sample / "model" / "tensorflow-sample.keras").exists())
+            self.assertIn("tensorflow", (sample / "requirements.txt").read_text())
+            self.assertEqual(analysis.registration_status, "등록 가능")
+            self.assertIn("tensorflow-sample.keras", build_beginner_wizard(str(sample)))
+
+    def test_pytorch_korean_alias_creates_registerable_project(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("파이토치")
+            finally:
+                os.chdir(cwd)
+
+            sample = Path(path)
+            analysis = analyze_project(str(sample))
+
+            self.assertIsNotNone(message)
+            self.assertTrue((sample / "model" / "pytorch-sample.pt").exists())
+            self.assertIn("torch", (sample / "requirements.txt").read_text())
+            self.assertEqual(analysis.registration_status, "등록 가능")
+
+    def test_sample_all_creates_multiple_model_projects(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample all")
+            finally:
+                os.chdir(cwd)
+
+            root = Path(tmpdir) / "sample_projects"
+            expected = [
+                root / "heavy-model",
+                root / "tensorflow-model",
+                root / "pytorch-model",
+                root / "sklearn-model",
+                root / "onnx-model",
+            ]
+
+            self.assertIsNotNone(message)
+            self.assertEqual(Path(path).resolve(), expected[0].resolve())
+            self.assertTrue(all(project.exists() for project in expected))
+            self.assertTrue(all(analyze_project(str(project)).registration_status == "등록 가능" for project in expected))
+
 
 class ProjectAnalysisTest(unittest.TestCase):
     def test_missing_path_is_not_registerable(self):

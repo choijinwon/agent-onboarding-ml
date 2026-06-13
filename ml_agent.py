@@ -82,7 +82,174 @@ HEAVY_SAMPLE_ALIASES = {
     "샘플 무거운모델",
 }
 
+SAMPLE_KIND_ALIASES = {
+    "/sample heavy": "heavy",
+    "/sample-heavy": "heavy",
+    "/샘플 대형모델": "heavy",
+    "/샘플 무거운모델": "heavy",
+    "heavy": "heavy",
+    "heavy model": "heavy",
+    "대형모델": "heavy",
+    "무거운모델": "heavy",
+    "샘플 대형모델": "heavy",
+    "샘플 무거운모델": "heavy",
+    "/sample tensorflow": "tensorflow",
+    "/sample tf": "tensorflow",
+    "/샘플 텐서플로우": "tensorflow",
+    "/샘플 텐션플러워": "tensorflow",
+    "tensorflow": "tensorflow",
+    "tf": "tensorflow",
+    "텐서플로우": "tensorflow",
+    "텐션플러워": "tensorflow",
+    "샘플 텐서플로우": "tensorflow",
+    "샘플 텐션플러워": "tensorflow",
+    "/sample pytorch": "pytorch",
+    "/sample torch": "pytorch",
+    "/샘플 파이토치": "pytorch",
+    "pytorch": "pytorch",
+    "torch": "pytorch",
+    "파이토치": "pytorch",
+    "샘플 파이토치": "pytorch",
+    "/sample sklearn": "sklearn",
+    "/sample scikit": "sklearn",
+    "/샘플 사이킷런": "sklearn",
+    "sklearn": "sklearn",
+    "scikit": "sklearn",
+    "사이킷런": "sklearn",
+    "샘플 사이킷런": "sklearn",
+    "/sample onnx": "onnx",
+    "/샘플 onnx": "onnx",
+    "onnx": "onnx",
+    "샘플 onnx": "onnx",
+}
+
 DEFAULT_HEAVY_SAMPLE_BYTES = 128 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class SampleModelSpec:
+    kind: str
+    title: str
+    directory: str
+    artifact_path: str
+    artifact_size_bytes: int
+    requirements: list[str]
+    train_body: str
+
+
+SAMPLE_MODEL_SPECS = {
+    "heavy": SampleModelSpec(
+        kind="heavy",
+        title="대형 ONNX 모델",
+        directory="heavy-model",
+        artifact_path="model/heavy-model.onnx",
+        artifact_size_bytes=DEFAULT_HEAVY_SAMPLE_BYTES,
+        requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "pandas==2.2.3"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/heavy-model.onnx')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('model_path', args.model_path)\n"
+            "        mlflow.log_metric('sample_accuracy', 0.0)\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "tensorflow": SampleModelSpec(
+        kind="tensorflow",
+        title="TensorFlow Keras 모델",
+        directory="tensorflow-model",
+        artifact_path="model/tensorflow-sample.keras",
+        artifact_size_bytes=24 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "tensorflow==2.17.0", "numpy==1.26.4"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--epochs', type=int, default=1)\n"
+            "    parser.add_argument('--model-path', default='model/tensorflow-sample.keras')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'tensorflow')\n"
+            "        mlflow.log_param('epochs', args.epochs)\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "pytorch": SampleModelSpec(
+        kind="pytorch",
+        title="PyTorch 모델",
+        directory="pytorch-model",
+        artifact_path="model/pytorch-sample.pt",
+        artifact_size_bytes=32 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "torch==2.5.1", "numpy==1.26.4"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--batch-size', type=int, default=8)\n"
+            "    parser.add_argument('--model-path', default='model/pytorch-sample.pt')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'pytorch')\n"
+            "        mlflow.log_param('batch_size', args.batch_size)\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "sklearn": SampleModelSpec(
+        kind="sklearn",
+        title="scikit-learn Joblib 모델",
+        directory="sklearn-model",
+        artifact_path="model/sklearn-sample.joblib",
+        artifact_size_bytes=4 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "joblib==1.4.2"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/sklearn-sample.joblib')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'scikit-learn')\n"
+            "        mlflow.log_metric('sample_score', 0.0)\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "onnx": SampleModelSpec(
+        kind="onnx",
+        title="ONNX 모델",
+        directory="onnx-model",
+        artifact_path="model/onnx-sample.onnx",
+        artifact_size_bytes=16 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "onnx==1.17.0", "onnxruntime==1.20.1"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/onnx-sample.onnx')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'onnx')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -395,50 +562,64 @@ def parse_mode_command(value: str) -> str | None:
 
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
-    if normalized not in HEAVY_SAMPLE_ALIASES:
+    if normalized in {"/sample all", "/samples", "/샘플 전체", "sample all", "samples", "샘플 전체"}:
+        sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
+        first_path = sample_paths[0]
+        return (
+            str(first_path),
+            "다양한 모델 테스트 샘플을 생성했습니다.\n"
+            + "\n".join(f"- {path}" for path in sample_paths)
+            + "\n- 초급자 Wizard는 첫 번째 샘플 경로로 계속 진행합니다.",
+        )
+    sample_kind = SAMPLE_KIND_ALIASES.get(normalized)
+    if not sample_kind:
         return raw, None
-    sample_path = create_heavy_model_sample(Path.cwd() / "sample_projects" / "heavy-model")
+    spec = SAMPLE_MODEL_SPECS[sample_kind]
+    sample_path = create_model_sample(Path.cwd() / "sample_projects" / spec.directory, spec)
     return (
         str(sample_path),
-        "대형 모델 테스트 샘플을 생성했습니다.\n"
+        f"{spec.title} 테스트 샘플을 생성했습니다.\n"
         f"- 위치: {sample_path}\n"
-        "- 실제 외부 모델 다운로드 없이 큰 모델 artifact를 흉내냅니다.\n"
+        "- 실제 외부 모델 다운로드 없이 모델 artifact를 흉내냅니다.\n"
         "- 초급자 Wizard가 이 경로로 계속 진행합니다.",
     )
 
 
 def create_heavy_model_sample(root: Path, artifact_size_bytes: int = DEFAULT_HEAVY_SAMPLE_BYTES) -> Path:
+    spec = SAMPLE_MODEL_SPECS["heavy"]
+    custom_spec = SampleModelSpec(
+        kind=spec.kind,
+        title=spec.title,
+        directory=spec.directory,
+        artifact_path=spec.artifact_path,
+        artifact_size_bytes=artifact_size_bytes,
+        requirements=spec.requirements,
+        train_body=spec.train_body,
+    )
+    return create_model_sample(root, custom_spec)
+
+
+def create_all_model_samples(root: Path) -> list[Path]:
+    return [
+        create_model_sample(root / spec.directory, spec)
+        for spec in SAMPLE_MODEL_SPECS.values()
+    ]
+
+
+def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "model").mkdir(parents=True, exist_ok=True)
-    (root / "requirements.txt").write_text(
-        "mlflow==2.17.0\n"
-        "scikit-learn==1.5.2\n"
-        "pandas==2.2.3\n",
-        encoding="utf-8",
-    )
-    (root / "train.py").write_text(
-        "import argparse\n"
-        "import mlflow\n\n"
-        "def main() -> None:\n"
-        "    parser = argparse.ArgumentParser()\n"
-        "    parser.add_argument('--model-path', default='model/heavy-model.onnx')\n"
-        "    args = parser.parse_args()\n"
-        "    with mlflow.start_run():\n"
-        "        mlflow.log_param('model_path', args.model_path)\n"
-        "        mlflow.log_metric('sample_accuracy', 0.0)\n"
-        "        mlflow.log_artifact(args.model_path)\n\n"
-        "if __name__ == '__main__':\n"
-        "    main()\n",
-        encoding="utf-8",
-    )
+    artifact = root / spec.artifact_path
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    (root / "requirements.txt").write_text("\n".join(spec.requirements) + "\n", encoding="utf-8")
+    (root / "train.py").write_text(spec.train_body, encoding="utf-8")
     (root / "README.md").write_text(
-        "# Heavy Model Wizard Sample\n\n"
+        f"# {spec.title} Wizard Sample\n\n"
+        f"Sample kind: `{spec.kind}`\n\n"
         "This project is generated by `ml-agent` for beginner wizard testing.\n"
         "The model artifact is a local dummy file for closed-network POC validation.\n",
         encoding="utf-8",
     )
-    artifact = root / "model" / "heavy-model.onnx"
-    ensure_sparse_file(artifact, artifact_size_bytes)
+    ensure_sparse_file(artifact, spec.artifact_size_bytes)
     return root
 
 
@@ -1585,7 +1766,13 @@ BEGINNER_INTRO = """초급자 모드가 선택되었습니다.
 단계별 안내에 따라 프로젝트를 점검할 수 있습니다.
 
 먼저 분석할 프로젝트 경로를 입력하세요.
-대형 모델 테스트 샘플을 만들려면 /sample heavy 를 입력하세요."""
+샘플을 만들려면 다음 중 하나를 입력하세요.
+- /sample tensorflow
+- /sample pytorch
+- /sample sklearn
+- /sample onnx
+- /sample heavy
+- /sample all"""
 
 
 INTERMEDIATE_INTRO = """중급자 모드가 선택되었습니다.
