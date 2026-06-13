@@ -276,6 +276,25 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertTrue(all(project.exists() for project in expected))
             self.assertTrue(all(analyze_project(str(project)).registration_status == "등록 가능" for project in expected))
 
+    def test_sample_matrix_summarizes_multiple_model_results(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample matrix")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIsNotNone(message)
+            self.assertTrue(Path(path).exists())
+            self.assertIn("Step 1 검증을 완료했습니다", message)
+            self.assertIn("tensorflow-model: 등록 가능", message)
+            self.assertIn("pytorch-model: 등록 가능", message)
+            self.assertIn("sora-video-model: 등록 가능", message)
+            self.assertIn("issues=0", message)
+
 
 class ProjectAnalysisTest(unittest.TestCase):
     def test_missing_path_is_not_registerable(self):

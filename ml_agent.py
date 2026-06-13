@@ -594,6 +594,12 @@ def parse_mode_command(value: str) -> str | None:
 
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
+    if normalized in {"/sample matrix", "/samples test", "/샘플 매트릭스", "sample matrix", "샘플 매트릭스"}:
+        sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
+        return (
+            str(sample_paths[0]),
+            format_sample_matrix_message(sample_paths),
+        )
     if normalized in {"/sample all", "/samples", "/샘플 전체", "sample all", "samples", "샘플 전체"}:
         sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
         first_path = sample_paths[0]
@@ -636,6 +642,20 @@ def create_all_model_samples(root: Path) -> list[Path]:
         create_model_sample(root / spec.directory, spec)
         for spec in SAMPLE_MODEL_SPECS.values()
     ]
+
+
+def format_sample_matrix_message(sample_paths: list[Path]) -> str:
+    rows = ["다양한 모델 테스트 샘플을 생성하고 Step 1 검증을 완료했습니다."]
+    for path in sample_paths:
+        analysis = analyze_project(str(path))
+        artifact = analysis.scan.model_artifacts[0] if analysis.scan.model_artifacts else None
+        artifact_text = f"{artifact.path} ({format_bytes(artifact.size_bytes)})" if artifact else "없음"
+        rows.append(
+            f"- {path.name}: {analysis.registration_status}, "
+            f"artifact={artifact_text}, issues={len(analysis.issues)}"
+        )
+    rows.append("- 초급자 Wizard는 첫 번째 샘플 경로로 계속 진행합니다.")
+    return "\n".join(rows)
 
 
 def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
@@ -1805,7 +1825,8 @@ BEGINNER_INTRO = """초급자 모드가 선택되었습니다.
 - /sample onnx
 - /sample sora
 - /sample heavy
-- /sample all"""
+- /sample all
+- /sample matrix"""
 
 
 INTERMEDIATE_INTRO = """중급자 모드가 선택되었습니다.
