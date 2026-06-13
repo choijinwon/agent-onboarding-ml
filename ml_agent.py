@@ -12,6 +12,13 @@ from typing import Callable
 
 from app_config import AppConfig, ensure_runtime_layout, format_config_summary
 from deep_agent_profile import build_ml_platform_profile, format_profile
+from error_log_store import (
+    analyze_error_log,
+    format_error_analysis,
+    format_error_log_list,
+    list_error_logs,
+    save_error_log,
+)
 from prompt_store import (
     format_prompt_templates,
     load_prompt_templates,
@@ -255,6 +262,8 @@ def handle_advanced_input(command: str) -> str:
         if as_json:
             return json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2)
         return format_prompt_templates(templates)
+    if parts[0] == "errors":
+        return handle_error_command(parts[1:])
     if parts[0] == "profile":
         as_json = "--json" in parts
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -262,7 +271,7 @@ def handle_advanced_input(command: str) -> str:
             return json.dumps(profile.as_dict(), ensure_ascii=False, indent=2)
         return format_profile(profile)
     if parts[0] not in {"analyze", "validate", "fix", "apply", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init, prompts"
+        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init, prompts, errors"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -319,6 +328,23 @@ def initialize_runtime_layout() -> str:
     )
 
 
+def handle_error_command(parts: list[str]) -> str:
+    if not parts or parts[0] == "list":
+        return format_error_log_list(list_error_logs())
+    if parts[0] == "record":
+        message = " ".join(parts[1:]).strip()
+        if not message:
+            return "error: message is required"
+        entry = save_error_log(message)
+        return f"error log saved: {entry.id}"
+    if parts[0] == "analyze":
+        if len(parts) < 2:
+            return "error: log id or path is required"
+        analysis = analyze_error_log(parts[1])
+        return format_error_analysis(analysis)
+    return "unknown errors command. available: errors list, errors record <message>, errors analyze <id-or-path>"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agent")
     subparsers = parser.add_subparsers(dest="command")
@@ -334,6 +360,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init")
     prompts_parser = subparsers.add_parser("prompts")
     prompts_parser.add_argument("--json", action="store_true")
+    errors_parser = subparsers.add_parser("errors")
+    errors_parser.add_argument("action", nargs="?", default="list", choices=["list", "record", "analyze"])
+    errors_parser.add_argument("value", nargs="*")
     profile_parser = subparsers.add_parser("profile")
     profile_parser.add_argument("--json", action="store_true")
     return parser
@@ -362,6 +391,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2))
         else:
             print(format_prompt_templates(templates))
+        return 0
+    if args.command == "errors":
+        print(handle_error_command([args.action, *args.value]))
         return 0
     if args.command == "profile":
         profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -452,7 +484,8 @@ chat       Agent 대화 모드 진입
 profile    Deep Agent 프로파일 확인
 config     .env 설정 요약
 init       런타임/스킬 저장 디렉터리 생성
-prompts    저장된 프롬프트 템플릿 확인"""
+prompts    저장된 프롬프트 템플릿 확인
+errors     에러 로그 저장/목록/분석"""
 
 
 if __name__ == "__main__":

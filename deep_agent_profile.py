@@ -118,6 +118,7 @@ def build_ml_platform_profile(mode: AgentMode = "beginner") -> DeepAgentProfile:
             "mlflow-registration-check",
             "job-template-draft",
             "closed-network-validation",
+            "error-log-repair",
         ],
         memory=[
             "/memory/ai-ml-onboarding-registration-rules.md",

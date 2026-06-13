@@ -61,6 +61,18 @@
       "description": "분석 리포트를 짧고 추적 가능하게 작성한다.",
       "tags": ["report", "summary"],
       "prompt": "등록 가능 여부, 발견 문제, 수정안, 적용 여부, 재검증 결과, 생성 산출물 경로를 요약한다. 상세 로그는 WIKI_LOG_DIR 또는 FIX_REPORT_DIR에 남기는 것을 전제로 한다."
+    },
+    {
+      "name": "error_log_analysis",
+      "description": "저장된 에러 로그를 분류하고 재수정 방향을 찾는다.",
+      "tags": ["error-log", "analysis", "repair"],
+      "prompt": "CHAT_ERROR_DIR에 저장된 에러 로그를 읽고 MLflow, requirements, arguments, Job Template, Qwen 연결 문제로 분류한다. 민감정보는 마스킹하고 원인 후보, 증거, 재수정 액션, 추천 dry-run 명령을 출력한다."
+    },
+    {
+      "name": "retry_fix_from_error",
+      "description": "에러 로그 기반으로 수정안을 다시 생성한다.",
+      "tags": ["error-log", "dry-run", "fix"],
+      "prompt": "이전 에러 로그와 검증 결과를 기반으로 수정안을 재생성한다. 변경 전 preview를 제공하고, apply 전에는 사용자 승인을 요구한다. 재검증 명령과 리포트 경로를 함께 제시한다."
     }
   ]
 }

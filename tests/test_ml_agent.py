@@ -5,6 +5,7 @@ import unittest
 
 from app_config import AppConfig, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
+from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
 from ml_agent import (
     MODE_ADVANCED,
@@ -100,6 +101,11 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertIn("launch_mode_router", output)
         self.assertIn("mlflow_registration_check", output)
 
+    def test_errors_list_command_outputs_empty_state(self):
+        output = handle_advanced_input("ml-agent errors list")
+
+        self.assertIn("error logs:", output)
+
 
 class DeepAgentProfileTest(unittest.TestCase):
     def test_profile_contains_deepagents_harness_concepts(self):
@@ -154,6 +160,8 @@ class PromptAndSkillStoreTest(unittest.TestCase):
         self.assertIn("launch_mode_router", names)
         self.assertIn("job_template_draft", names)
         self.assertIn("closed_network_validation", names)
+        self.assertIn("error_log_analysis", names)
+        self.assertIn("retry_fix_from_error", names)
 
     def test_default_skills_exist(self):
         root = Path(__file__).resolve().parents[1]
@@ -161,6 +169,27 @@ class PromptAndSkillStoreTest(unittest.TestCase):
         self.assertTrue((root / "skills" / "mlflow-registration-check" / "SKILL.md").exists())
         self.assertTrue((root / "skills" / "job-template-draft" / "SKILL.md").exists())
         self.assertTrue((root / "skills" / "closed-network-validation" / "SKILL.md").exists())
+        self.assertTrue((root / "skills" / "error-log-repair" / "SKILL.md").exists())
+
+
+class ErrorLogStoreTest(unittest.TestCase):
+    def test_error_log_save_list_and_analyze(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = AppConfig.load(root_dir=root)
+            entry = save_error_log(
+                "ModuleNotFoundError: No module named mlflow api_key=secret",
+                project_path="./project",
+                config=config,
+            )
+            entries = list_error_logs(config)
+            analysis = analyze_error_log(entry.id, config)
+
+            self.assertEqual(len(entries), 1)
+            self.assertIn("mlflow", entries[0].tags)
+            self.assertIn("requirements", entries[0].tags)
+            self.assertNotIn("secret", entries[0].message)
+            self.assertIn("ml-agent fix ./project --dry-run", analysis.recommended_command)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,8 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ./ml-agent config
 ./ml-agent init
 ./ml-agent prompts
+./ml-agent errors list
+./ml-agent errors analyze error-YYYYMMDDTHHMMSSZ
 ```
 
 Windows 10/11:
@@ -93,6 +95,8 @@ Windows 10/11:
 .\ml-agent.cmd config
 .\ml-agent.cmd init
 .\ml-agent.cmd prompts
+.\ml-agent.cmd errors list
+.\ml-agent.cmd errors analyze error-YYYYMMDDTHHMMSSZ
 ```
 
 JSON 출력이 필요한 경우 `--json` 옵션을 사용할 수 있습니다.
@@ -174,8 +178,40 @@ Windows 10/11:
 ```text
 skills/
 ├── closed-network-validation/
+├── error-log-repair/
 ├── job-template-draft/
 └── mlflow-registration-check/
+```
+
+## 에러 로그 관리
+
+에러 로그는 `CHAT_ERROR_DIR` 값이 가리키는 `chat_errors/`에 저장됩니다.
+저장된 에러 로그는 이후 재분석해서 dry-run 수정안을 다시 만드는 기준으로 사용합니다.
+
+에러 로그 저장:
+
+```bash
+./ml-agent errors record "ModuleNotFoundError: No module named mlflow"
+```
+
+에러 로그 목록:
+
+```bash
+./ml-agent errors list
+```
+
+에러 로그 분석:
+
+```bash
+./ml-agent errors analyze error-YYYYMMDDTHHMMSSZ
+```
+
+Windows 10/11:
+
+```powershell
+.\ml-agent.cmd errors record "ModuleNotFoundError: No module named mlflow"
+.\ml-agent.cmd errors list
+.\ml-agent.cmd errors analyze error-YYYYMMDDTHHMMSSZ
 ```
 
 ## 모드 전환

@@ -109,6 +109,7 @@ registration_packages/
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
 .\ml-agent.cmd prompts
+.\ml-agent.cmd errors list
 ```
 
 JSON 출력:
@@ -136,8 +137,40 @@ JSON 출력:
 - `mlflow_registration_check`
 - `job_template_draft`
 - `closed_network_validation`
+- `error_log_analysis`
+- `retry_fix_from_error`
 
-## 9. 스킬 저장
+## 9. 에러 로그 기반 재수정
+
+에러 로그는 기본적으로 `chat_errors/`에 저장됩니다.
+
+수동 저장:
+
+```powershell
+.\ml-agent.cmd errors record "ModuleNotFoundError: No module named mlflow"
+```
+
+목록 확인:
+
+```powershell
+.\ml-agent.cmd errors list
+```
+
+분석:
+
+```powershell
+.\ml-agent.cmd errors analyze error-YYYYMMDDTHHMMSSZ
+```
+
+분석 결과에서 추천되는 명령은 보통 다음 흐름입니다.
+
+```powershell
+.\ml-agent.cmd analyze .\project
+.\ml-agent.cmd validate .\project
+.\ml-agent.cmd fix .\project --dry-run
+```
+
+## 10. 스킬 저장
 
 스킬 저장 위치는 `.env`의 `SKILL_STORE_DIR` 값으로 정합니다.
 
@@ -170,7 +203,17 @@ description: MLflow 등록 준비 상태를 점검한다
 - model registry 등록 조건 확인
 ```
 
-## 10. Linux/macOS 실행
+기본 제공 스킬:
+
+```text
+skills/
+├── closed-network-validation/
+├── error-log-repair/
+├── job-template-draft/
+└── mlflow-registration-check/
+```
+
+## 11. Linux/macOS 실행
 
 ```bash
 cp .env.example .env
@@ -180,7 +223,7 @@ cp .env.example .env
 ./ml-agent
 ```
 
-## 11. 문제 해결
+## 12. 문제 해결
 
 Python을 찾지 못하는 경우:
 
