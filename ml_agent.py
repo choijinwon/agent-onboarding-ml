@@ -173,19 +173,16 @@ SAMPLE_MODEL_SPECS = {
         directory="tensorflow-model",
         artifact_path="model/tensorflow-sample.keras",
         artifact_size_bytes=24 * 1024 * 1024,
-        requirements=["mlflow==2.17.0", "tensorflow==2.17.0", "numpy==1.26.4"],
+        requirements=["tensorflow==2.17.0", "numpy==1.26.4"],
         train_body=(
             "import argparse\n"
-            "import mlflow\n\n"
+            "\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
             "    parser.add_argument('--epochs', type=int, default=1)\n"
             "    parser.add_argument('--model-path', default='model/tensorflow-sample.keras')\n"
             "    args = parser.parse_args()\n"
-            "    with mlflow.start_run():\n"
-            "        mlflow.log_param('framework', 'tensorflow')\n"
-            "        mlflow.log_param('epochs', args.epochs)\n"
-            "        mlflow.log_artifact(args.model_path)\n\n"
+            "    print(f'TensorFlow sample model: {args.model_path}, epochs={args.epochs}')\n\n"
             "if __name__ == '__main__':\n"
             "    main()\n"
         ),

@@ -188,7 +188,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertTrue(Path(path).exists())
             self.assertTrue((Path(path) / "model" / "heavy-model.onnx").exists())
 
-    def test_tensorflow_sample_alias_creates_registerable_project(self):
+    def test_tensorflow_sample_alias_creates_fixable_project(self):
         with TemporaryDirectory() as tmpdir:
             cwd = Path.cwd()
             try:
@@ -205,8 +205,25 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertTrue((sample / "model" / "tensorflow-sample.keras").exists())
             self.assertIn("tensorflow", (sample / "requirements.txt").read_text())
-            self.assertEqual(analysis.registration_status, "등록 가능")
-            self.assertIn("tensorflow-sample.keras", build_beginner_wizard(str(sample)))
+            self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
+            self.assertEqual(analysis.registration_status, "보완 필요")
+
+            wizard = build_beginner_wizard(str(sample))
+            self.assertIn("tensorflow-sample.keras", wizard)
+            self.assertIn("MLflow 의존성 추가", wizard)
+            self.assertIn("MLflow 기록 코드 추가", wizard)
+            self.assertIn("적용하기", wizard)
+
+            dry_run = json.loads(handle_advanced_input(f"ml-agent fix {sample} --dry-run --json"))
+            self.assertEqual(len(dry_run["fix_previews"]), 2)
+            self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
+
+            applied = json.loads(handle_advanced_input(f"ml-agent apply {sample} --json"))
+            self.assertEqual(applied["command"], "apply")
+            self.assertEqual(len(applied["applied_changes"]), 2)
+            self.assertIn("mlflow", (sample / "requirements.txt").read_text().lower())
+            self.assertIn("import mlflow", (sample / "train.py").read_text())
+            self.assertEqual(analyze_project(str(sample)).registration_status, "등록 가능")
 
     def test_pytorch_korean_alias_creates_registerable_project(self):
         with TemporaryDirectory() as tmpdir:
@@ -274,7 +291,11 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertEqual(Path(path).resolve(), expected[0].resolve())
             self.assertTrue(all(project.exists() for project in expected))
-            self.assertTrue(all(analyze_project(str(project)).registration_status == "등록 가능" for project in expected))
+            statuses = {project.name: analyze_project(str(project)).registration_status for project in expected}
+            self.assertEqual(statuses["tensorflow-model"], "보완 필요")
+            self.assertTrue(
+                all(status == "등록 가능" for name, status in statuses.items() if name != "tensorflow-model")
+            )
 
     def test_sample_matrix_summarizes_multiple_model_results(self):
         with TemporaryDirectory() as tmpdir:
@@ -290,10 +311,11 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertTrue(Path(path).exists())
             self.assertIn("Step 1 검증을 완료했습니다", message)
-            self.assertIn("tensorflow-model: 등록 가능", message)
+            self.assertIn("tensorflow-model: 보완 필요", message)
             self.assertIn("pytorch-model: 등록 가능", message)
             self.assertIn("sora-video-model: 등록 가능", message)
             self.assertIn("issues=0", message)
+            self.assertIn("issues=2", message)
 
 
 class ProjectAnalysisTest(unittest.TestCase):
