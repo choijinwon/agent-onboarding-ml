@@ -175,6 +175,7 @@ OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI
 ```env
 ENABLE_RICH_CONSOLE=true
 ENABLE_TUI_BACKGROUND=false
+ENABLE_TUI_INPUT_PANEL=true
 ```
 
 위 이미지처럼 보이지 않으면 현재 세션에서 컬러 출력을 강제로 켭니다.
@@ -188,6 +189,13 @@ $env:FORCE_COLOR=1
 
 ```powershell
 $env:DISABLE_TUI_BACKGROUND=1
+.\ml-agent.cmd
+```
+
+입력 박스까지 깨지는 터미널에서는 입력 패널 배경만 끕니다.
+
+```powershell
+$env:DISABLE_TUI_INPUT_PANEL=1
 .\ml-agent.cmd
 ```
 

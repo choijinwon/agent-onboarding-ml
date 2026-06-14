@@ -16,6 +16,7 @@ DEFAULT_ENV = {
     "ENABLE_HARNESS_SKILLS": "true",
     "ENABLE_RICH_CONSOLE": "true",
     "ENABLE_TUI_BACKGROUND": "false",
+    "ENABLE_TUI_INPUT_PANEL": "true",
     "PROMPT_STORE_PATH": "prompt_templates.json",
     "CHAT_ERROR_DIR": "chat_errors",
     "MASK_SENSITIVE_LOGS": "true",
@@ -478,6 +479,7 @@ def format_config_summary(config: AppConfig) -> str:
         f"- harness_skills={config.get_bool('ENABLE_HARNESS_SKILLS')}\n"
         f"- rich_console={config.get_bool('ENABLE_RICH_CONSOLE')}\n"
         f"- tui_background={config.get_bool('ENABLE_TUI_BACKGROUND')}\n"
+        f"- tui_input_panel={config.get_bool('ENABLE_TUI_INPUT_PANEL')}\n"
         f"- skill_store_dir={config.skill_store_dir()}\n\n"
         "runtime_directories:\n"
         f"{directories}"

@@ -96,6 +96,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("ctrl+p commands", output)
             self.assertNotIn("+====", output)
             self.assertNotIn("\033[48;2;", output)
+            self.assertIn("\033[48;5;235m", output)
         finally:
             if previous_force is None:
                 os.environ.pop("FORCE_COLOR", None)
@@ -895,6 +896,7 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("QWEN_BASE_URL=http://xxx.xxx.xxx.xxx:port/v1", content)
         self.assertIn("ENABLE_RICH_CONSOLE=true", content)
         self.assertIn("ENABLE_TUI_BACKGROUND=false", content)
+        self.assertIn("ENABLE_TUI_INPUT_PANEL=true", content)
         self.assertIn("SKILL_STORE_DIR=skills", content)
 
     def test_runtime_layout_creates_skill_store(self):

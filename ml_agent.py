@@ -82,6 +82,12 @@ ANSI_BACKGROUND_STYLES = {
     "input": "\033[48;2;31;31;31m\033[38;2;245;245;245m",
     "status": "\033[48;2;6;6;7m\033[38;2;170;170;170m",
 }
+ANSI_INPUT_PANEL_STYLES = {
+    "accent": "\033[48;5;235m\033[38;5;75m",
+    "text": "\033[48;5;235m\033[38;5;255m",
+    "muted": "\033[48;5;235m\033[38;5;245m",
+    "cursor": "\033[48;5;235m\033[38;5;255m",
+}
 
 _RICH_CONSOLE_ENABLED: bool | None = None
 RICH_TUI_WIDTH = 118
@@ -577,6 +583,12 @@ def tui_background_enabled() -> bool:
     return AppConfig.load().get_bool("ENABLE_TUI_BACKGROUND")
 
 
+def tui_input_panel_enabled() -> bool:
+    if os.environ.get("DISABLE_TUI_INPUT_PANEL"):
+        return False
+    return AppConfig.load().get_bool("ENABLE_TUI_INPUT_PANEL")
+
+
 def style_tui_lines(lines: list[str], roles: list[str]) -> str:
     return "\n".join(tui_style(line, roles[index] if index < len(roles) else "normal") for index, line in enumerate(lines))
 
@@ -593,6 +605,35 @@ def rich_card_line(text: str = "", role: str = "panel", accent: bool = False, wi
     content_width = width - 5
     content = " " + truncate_cell(text, content_width - 1).ljust(content_width - 1)
     return tui_segment("  |", "accent") + tui_segment(content, role)
+
+
+def rich_input_panel_line(
+    left_text: str,
+    middle_text: str = "",
+    right_text: str = "",
+    width: int = RICH_TUI_WIDTH,
+) -> str:
+    if not rich_console_enabled() or not tui_input_panel_enabled():
+        content = " " + " ".join(part for part in [left_text, middle_text, right_text] if part).strip()
+        return rich_card_line(content, role="input", accent=True, width=width)
+    content_width = width - 5
+    left = left_text.rstrip()
+    middle = middle_text.rstrip()
+    right = right_text.rstrip()
+    used = len(left) + len(middle) + len(right)
+    gap_count = 2 if middle and right else 1 if middle or right else 0
+    padding = max(content_width - used - gap_count, 0)
+    left_style = ANSI_INPUT_PANEL_STYLES["cursor"] if left == "█" else ANSI_INPUT_PANEL_STYLES["accent"]
+    middle_gap = " " if middle else ""
+    right_gap = " " if right else ""
+    return (
+        tui_segment("  |", "accent")
+        + f"{ANSI_INPUT_PANEL_STYLES['text']} "
+        + f"{left_style}{left}"
+        + f"{ANSI_INPUT_PANEL_STYLES['text']}{middle_gap}{middle}"
+        + f"{ANSI_INPUT_PANEL_STYLES['muted']}{right_gap}{right}"
+        + f"{ANSI_INPUT_PANEL_STYLES['text']}{' ' * padding}{ANSI_RESET}"
+    )
 
 
 def render_launch_screen() -> str:
@@ -1068,8 +1109,8 @@ def render_rich_beginner_tab(
             rich_row(width=width),
             rich_row(f"□  {active_mode} · qwen3.5 · AI ML Onboarding", role="normal", indent=6, width=width),
             rich_row(width=width),
-            rich_card_line("█", role="input", accent=True, width=width),
-            rich_card_line(f"{active_mode}  {inactive_mode}  OpenCode Zen", role="input", accent=True, width=width),
+            rich_input_panel_line("█", width=width),
+            rich_input_panel_line(active_mode, inactive_mode, "OpenCode Zen", width=width),
             rich_row(".........  esc interrupt                    ctrl+t variants   tab agents   ctrl+p commands", role="status", width=width),
             rich_row(f"Current: Tab {index + 1}/{total} | {mode_line} | {title}", role="status", width=width),
         ]
