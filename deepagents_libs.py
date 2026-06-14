@@ -12,6 +12,7 @@ from pathlib import Path
 
 DEEPAGENTS_LIBS_REFERENCE = "https://github.com/langchain-ai/deepagents/tree/main/libs"
 DEEPAGENTS_SOURCE_ENV = "DEEPAGENTS_SOURCE_ZIP"
+DEEPAGENTS_SOURCE_DIR_ENV = "DEEPAGENTS_SOURCE_DIR"
 
 
 POC_USAGE_BY_PATH = {
@@ -89,25 +90,42 @@ def _extract_project_value(pyproject_text: str, key: str) -> str | None:
     return match.group(1).strip()
 
 
-def _default_source_zip_candidates() -> list[Path]:
+def _default_source_candidates() -> list[Path]:
     return [
+        Path.cwd() / "deepagents_source" / "deepagents-main",
+        Path.cwd() / "deepagents_source",
         Path.cwd() / "deepagents-main.zip",
         Path.home() / "Downloads" / "deepagents-main.zip",
     ]
 
 
-def resolve_deepagents_source_zip(source_zip: str | None = None) -> Path | None:
-    candidates: list[Path] = []
-    if source_zip:
-        candidates.append(Path(source_zip).expanduser())
-    env_source = os.environ.get(DEEPAGENTS_SOURCE_ENV, "").strip()
-    if env_source:
-        candidates.append(Path(env_source).expanduser())
-    candidates.extend(_default_source_zip_candidates())
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+def _detect_source(candidate: Path) -> tuple[Path, str] | None:
+    if candidate.is_file() and candidate.suffix.lower() == ".zip":
+        return candidate, "zip"
+    if candidate.is_dir():
+        if any(candidate.glob("libs/**/pyproject.toml")):
+            return candidate, "directory"
+        if any(candidate.glob("deepagents-main/libs/**/pyproject.toml")):
+            return candidate, "directory"
     return None
+
+
+def resolve_deepagents_source(source: str | None = None) -> tuple[Path | None, str | None]:
+    candidates: list[Path] = []
+    if source:
+        candidates.append(Path(source).expanduser())
+    env_dir = os.environ.get(DEEPAGENTS_SOURCE_DIR_ENV, "").strip()
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser())
+    env_zip = os.environ.get(DEEPAGENTS_SOURCE_ENV, "").strip()
+    if env_zip:
+        candidates.append(Path(env_zip).expanduser())
+    candidates.extend(_default_source_candidates())
+    for candidate in candidates:
+        detected = _detect_source(candidate)
+        if detected:
+            return detected
+    return None, None
 
 
 def read_deepagents_libs_from_zip(source_zip: str | Path) -> list[DeepAgentsLibSpec]:
@@ -138,28 +156,60 @@ def read_deepagents_libs_from_zip(source_zip: str | Path) -> list[DeepAgentsLibS
     return specs
 
 
+def read_deepagents_libs_from_directory(source_dir: str | Path) -> list[DeepAgentsLibSpec]:
+    source_path = Path(source_dir).expanduser()
+    pyprojects = sorted(source_path.glob("libs/**/pyproject.toml"))
+    if not pyprojects:
+        pyprojects = sorted(source_path.glob("deepagents-main/libs/**/pyproject.toml"))
+    specs: list[DeepAgentsLibSpec] = []
+    for pyproject in pyprojects:
+        relative_parts = pyproject.relative_to(source_path).parts
+        if "libs" not in relative_parts:
+            continue
+        libs_index = relative_parts.index("libs")
+        lib_path = "/".join(relative_parts[libs_index:-1])
+        raw_text = pyproject.read_text(encoding="utf-8", errors="replace")
+        package_name = _extract_project_value(raw_text, "name") or lib_path.rsplit("/", 1)[-1]
+        description = _extract_project_value(raw_text, "description")
+        purpose = description or f"DeepAgents package from {lib_path}."
+        specs.append(
+            DeepAgentsLibSpec(
+                name=package_name,
+                path=lib_path,
+                purpose=purpose,
+                poc_usage=POC_USAGE_BY_PATH.get(lib_path, "DeepAgents 확장 패키지로 필요 시 선택 적용."),
+                required_now=lib_path == "libs/deepagents" or package_name == "deepagents",
+            )
+        )
+    return specs
+
+
 def deepagents_runtime_available() -> bool:
     return importlib.util.find_spec("deepagents") is not None
 
 
-def _libs_for_source(source_zip: str | None = None) -> tuple[list[DeepAgentsLibSpec], Path | None, str | None]:
-    source_path = resolve_deepagents_source_zip(source_zip)
+def _libs_for_source(source: str | None = None) -> tuple[list[DeepAgentsLibSpec], Path | None, str | None, str | None]:
+    source_path, source_type = resolve_deepagents_source(source)
     if not source_path:
-        return DEEPAGENTS_LIBS, None, None
+        return DEEPAGENTS_LIBS, None, None, None
     try:
-        return read_deepagents_libs_from_zip(source_path), source_path, None
+        if source_type == "directory":
+            return read_deepagents_libs_from_directory(source_path), source_path, source_type, None
+        return read_deepagents_libs_from_zip(source_path), source_path, source_type, None
     except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as exc:
-        return DEEPAGENTS_LIBS, source_path, f"{type(exc).__name__}: {exc}"
+        return DEEPAGENTS_LIBS, source_path, source_type, f"{type(exc).__name__}: {exc}"
 
 
 def deepagents_libs_as_dict(source_zip: str | None = None) -> dict[str, object]:
-    libs, resolved_source, source_error = _libs_for_source(source_zip)
+    libs, resolved_source, source_type, source_error = _libs_for_source(source_zip)
     return {
         "reference": DEEPAGENTS_LIBS_REFERENCE,
-        "source_zip": str(resolved_source) if resolved_source else None,
-        "source_zip_found": resolved_source is not None,
+        "source_path": str(resolved_source) if resolved_source else None,
+        "source_type": source_type,
+        "source_zip": str(resolved_source) if resolved_source and source_type == "zip" else None,
+        "source_zip_found": resolved_source is not None and source_type == "zip",
         "source_error": source_error,
-        "libs_source": "zip" if resolved_source and not source_error else "fallback_manifest",
+        "libs_source": source_type if resolved_source and not source_error else "fallback_manifest",
         "runtime_import": "deepagents",
         "runtime_available": deepagents_runtime_available(),
         "install_hint": "pip install '.[deepagents]' 또는 폐쇄망 wheelhouse에서 deepagents wheel 설치",
@@ -168,13 +218,14 @@ def deepagents_libs_as_dict(source_zip: str | None = None) -> dict[str, object]:
 
 
 def format_deepagents_libs(source_zip: str | None = None) -> str:
-    libs, resolved_source, source_error = _libs_for_source(source_zip)
+    libs, resolved_source, source_type, source_error = _libs_for_source(source_zip)
     runtime = "available" if deepagents_runtime_available() else "missing"
     rows = [
         "DeepAgents Libs",
         f"- reference: {DEEPAGENTS_LIBS_REFERENCE}",
-        f"- source_zip: {resolved_source if resolved_source else 'not found'}",
-        f"- libs_source: {'zip' if resolved_source and not source_error else 'fallback_manifest'}",
+        f"- source_path: {resolved_source if resolved_source else 'not found'}",
+        f"- source_type: {source_type if source_type else 'none'}",
+        f"- libs_source: {source_type if resolved_source and not source_error else 'fallback_manifest'}",
         f"- runtime_import: deepagents ({runtime})",
         "- install_hint: pip install '.[deepagents]' 또는 폐쇄망 wheelhouse에서 deepagents wheel 설치",
         "",

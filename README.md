@@ -120,6 +120,8 @@ Windows 10/11:
 
 이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness와 [deepagents/libs](https://github.com/langchain-ai/deepagents/tree/main/libs) 구조를 참고했습니다.
 
+DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
+
 - sub-agents: `project-scanner`, `mlflow-validator`, `job-template-planner`, `log-analyzer`
 - filesystem permissions: 읽기는 허용, 쓰기는 human-in-the-loop 승인, `.git`과 secret 경로 쓰기는 차단
 - skills: MLflow 등록 점검, Job Template 초안, 폐쇄망 검증 절차
@@ -137,7 +139,7 @@ pip install ".[deepagents]"
 ./ml-agent deepagents --json
 ```
 
-`deepagents-main.zip`을 지정하면 zip 안의 `libs/*/pyproject.toml`을 읽어 실제 DeepAgents libs 목록을 구성합니다. 지정하지 않아도 현재 폴더 또는 `~/Downloads/deepagents-main.zip`이 있으면 자동으로 사용합니다.
+`ml-agent deepagents`는 기본적으로 repo 내부의 `deepagents_source/deepagents-main/libs`를 먼저 읽습니다. `deepagents-main.zip`을 지정하면 zip 안의 `libs/*/pyproject.toml`을 읽어 실제 DeepAgents libs 목록을 구성합니다.
 
 `libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/talon`, `libs/partners/*`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
 

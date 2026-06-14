@@ -734,7 +734,16 @@ class AdvancedModeTest(unittest.TestCase):
 
         self.assertEqual(payload["runtime_import"], "deepagents")
         self.assertIn("https://github.com/langchain-ai/deepagents/tree/main/libs", payload["reference"])
+        self.assertEqual(payload["source_type"], "directory")
+        self.assertIn("deepagents_source", payload["source_path"])
         self.assertTrue(any(item["path"] == "libs/deepagents" for item in payload["libs"]))
+
+    def test_deepagents_source_is_committed_under_repo(self):
+        source_root = Path(__file__).resolve().parents[1] / "deepagents_source" / "deepagents-main" / "libs"
+
+        self.assertTrue(source_root.exists())
+        self.assertTrue((source_root / "deepagents" / "pyproject.toml").exists())
+        self.assertTrue((source_root / "code" / "pyproject.toml").exists())
 
     def test_deepagents_libs_can_be_read_from_source_zip(self):
         with TemporaryDirectory() as tmp:

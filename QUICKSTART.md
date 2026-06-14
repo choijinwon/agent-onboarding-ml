@@ -211,6 +211,8 @@ description: MLflow 등록 준비 상태를 점검한다
 
 기본 제공 스킬:
 
+DeepAgents 참고 소스는 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
+
 ```text
 skills/
 ├── agent-evaluation/
