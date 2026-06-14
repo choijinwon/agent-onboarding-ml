@@ -40,6 +40,7 @@ from ml_agent_tui import (
     format_model_choices,
     is_fix_request,
     missing_textual_message,
+    model_selection_placeholder,
     normalize_input_path,
     parse_model_command,
     path_candidates_from_input,
@@ -954,6 +955,10 @@ class WindowsSetupTest(unittest.TestCase):
     def test_tui_command_placeholder_mentions_model_command(self):
         self.assertIn("/path", command_placeholder_for_mode("Plan", "qwen3.6"))
         self.assertIn("/model", command_placeholder_for_mode("Build", "gamma"))
+
+    def test_tui_model_selection_placeholder_shows_number_range(self):
+        self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
+        self.assertIn("모델명", model_selection_placeholder([]))
 
     def test_tui_parse_model_commands(self):
         self.assertEqual(parse_model_command("/model qwen3.5"), "qwen3.5")

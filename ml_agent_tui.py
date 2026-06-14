@@ -66,6 +66,12 @@ def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str
     return f"[Plan DeepAgents · {model}] 읽기 전용 - /path 경로, 드롭/붙여넣기, 다음"
 
 
+def model_selection_placeholder(models: list[str]) -> str:
+    if not models:
+        return "[Model Select] 모델명을 입력하세요"
+    return f"[Model Select] 1-{len(models)} 번호 또는 모델명 입력"
+
+
 def available_models_from_config(config: AppConfig) -> list[str]:
     models = [model.strip() for model in config.get("QWEN_MODELS").split(",") if model.strip()]
     if config.get("QWEN_MODEL") and config.get("QWEN_MODEL") not in models:
@@ -569,12 +575,16 @@ def run_tui(project_path: str = "") -> int:
 
         def _refresh(self) -> None:
             command = self.query_one(CommandInput)
-            command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
+            if self.controller.awaiting_model_selection:
+                command.placeholder = model_selection_placeholder(self.controller.available_models)
+            else:
+                command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
             self.query_one(LogView).update(self.controller.render_log())
+            input_state = "Model Select" if self.controller.awaiting_model_selection else self.controller.agent_mode
             self.query_one(StatusBar).update(
                 f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "
-                f"{self.controller.agent_mode}  |  {self.controller.qwen_model}  |  esc interrupt   tab agents"
+                f"{input_state}  |  {self.controller.qwen_model}  |  esc interrupt   tab agents"
             )
 
         def _focus_command(self) -> None:
@@ -594,6 +604,7 @@ __all__ = [
     "format_model_choices",
     "is_fix_request",
     "is_wizard_navigation",
+    "model_selection_placeholder",
     "normalize_input_path",
     "path_candidates_from_input",
     "parse_model_command",
