@@ -9,6 +9,7 @@ import ml_agent
 from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
 from deepagents_libs import deepagents_libs_as_dict
+from deepagents_runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
 from qwen_chat import QwenChatConfig, chat_with_qwen
@@ -52,6 +53,38 @@ class QwenChatTest(unittest.TestCase):
 
         self.assertTrue(config.is_configured())
         self.assertEqual(config.endpoint(), "http://qwen.local/v1/chat/completions")
+
+
+class DeepAgentsRuntimeTest(unittest.TestCase):
+    def test_deepagents_runtime_reports_missing_qwen_config(self):
+        config = AppConfig(values={
+            "QWEN_API_KEY": "your-internal-qwen-key",
+            "QWEN_BASE_URL": "http://xxx.xxx.xxx.xxx:port/v1",
+            "QWEN_MODEL": "qwen3.6",
+            "QWEN_MODELS": "qwen3.6,qwen3.5,gpt20,gamma",
+        }, root_dir=Path.cwd())
+
+        result = DeepAgentsRuntime(config).invoke("분석해줘")
+
+        self.assertFalse(result.used_deepagents)
+        self.assertEqual(result.error, "qwen_not_configured")
+        self.assertIn("QWEN_API_KEY", result.content)
+
+    def test_deepagents_prompt_enforces_plan_and_build_policies(self):
+        plan_prompt = build_deepagents_system_prompt("/tmp/model", "Plan")
+        build_prompt = build_deepagents_system_prompt("/tmp/model", "Build")
+
+        self.assertIn("Plan mode: do not modify files", plan_prompt)
+        self.assertIn("preview_ml_fixes", plan_prompt)
+        self.assertIn("Build mode", build_prompt)
+        self.assertIn("apply_ml_fixes", build_prompt)
+
+    def test_extract_deepagents_content_reads_last_message(self):
+        class Message:
+            content = "마지막 응답"
+
+        self.assertEqual(extract_deepagents_content({"messages": [Message()]}), "마지막 응답")
+        self.assertEqual(extract_deepagents_content({"output": "출력"}), "출력")
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -102,7 +135,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("Plan(read-only)", LAUNCH_SCREEN)
         self.assertIn("esc interrupt", LAUNCH_SCREEN)
 
-    def test_forced_rich_tui_uses_opencode_like_layout(self):
+    def test_forced_rich_tui_uses_deepagents_layout(self):
         previous_force = os.environ.get("FORCE_COLOR")
         previous_no_color = os.environ.get("NO_COLOR")
         try:
@@ -113,7 +146,7 @@ class BeginnerWizardTest(unittest.TestCase):
             output = format_beginner_tab(0, len(steps), steps[0])
 
             self.assertIn("\033[", output)
-            self.assertIn("OpenCode Zen", output)
+            self.assertIn("DeepAgents", output)
             self.assertIn("ctrl+p commands", output)
             self.assertNotIn("+====", output)
             self.assertNotIn("\033[48;2;", output)
@@ -895,17 +928,17 @@ class WindowsSetupTest(unittest.TestCase):
         message = missing_textual_message()
 
         self.assertIn("Textual", message)
-        self.assertIn('pip install ".[tui]"', message)
+        self.assertIn('pip install ".[tui,deepagents]"', message)
         self.assertIn("Windows Terminal", message)
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
-        self.assertIn("[Plan Chat", command_placeholder_for_mode("Plan"))
+        self.assertIn("[Plan DeepAgents", command_placeholder_for_mode("Plan"))
         self.assertIn("읽기 전용", command_placeholder_for_mode("Plan"))
-        self.assertIn("[Build Chat", command_placeholder_for_mode("Build"))
-        self.assertIn("수정 적용 가능", command_placeholder_for_mode("Build"))
+        self.assertIn("[Build DeepAgents", command_placeholder_for_mode("Build"))
+        self.assertIn("승인 후 수정 가능", command_placeholder_for_mode("Build"))
 
-    def test_tui_command_placeholder_mentions_qwen_chat(self):
-        self.assertIn("Chat", command_placeholder_for_mode("Plan", "qwen3.6"))
+    def test_tui_command_placeholder_mentions_deepagents_model(self):
+        self.assertIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
         self.assertIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
 
     def test_tui_command_placeholder_mentions_model_command(self):
@@ -1038,7 +1071,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
-    def test_tui_chat_fix_request_in_build_mode_applies(self):
+    def test_tui_chat_fix_request_in_build_mode_requires_deepagents_runtime(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             requirements = root / "requirements.txt"
@@ -1051,9 +1084,54 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("코드 자동 수정해줘")
 
-            self.assertIn("적용 완료", output)
-            self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertIn("DeepAgents runtime", output)
+            self.assertIn("실행하지 않았습니다", output)
+            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
+            self.assertNotIn("import mlflow", train.read_text())
+
+    def test_tui_chat_routes_general_requests_through_deepagents_runtime(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("DeepAgents 응답", True)
+
+        fake = FakeRuntime()
+        controller = BeginnerTuiController("/tmp/sample-project", deepagents_runtime=fake)
+
+        output = controller.submit("프로젝트 분석해줘")
+
+        self.assertEqual(output, "DeepAgents 응답")
+        self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", controller.project_path, "Plan"))
+        self.assertIn("DeepAgents qwen3.6: DeepAgents 응답", controller.render_log())
+
+    def test_tui_chat_routes_fix_requests_through_deepagents_runtime_first(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("DeepAgents 수정 완료", True)
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            fake = FakeRuntime()
+            controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
+            controller.toggle_agent()
+
+            output = controller.submit("코드 자동 수정해줘")
+
+            self.assertEqual(output, "DeepAgents 수정 완료")
+            self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "Build"))
+            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
+            self.assertNotIn("import mlflow", train.read_text())
 
     def test_tui_controller_build_mode_applies_only_after_approval(self):
         with TemporaryDirectory() as tmpdir:
@@ -1123,32 +1201,6 @@ class AppConfigTest(unittest.TestCase):
             self.assertTrue((root / "skills" / "agent-evaluation" / "SKILL.md").exists())
             self.assertTrue((root / "registration_packages").exists())
 
-
-class OpenCodeProfileTest(unittest.TestCase):
-    def test_opencode_deep_agent_only_profile_exists(self):
-        root = Path(__file__).resolve().parents[1]
-        opencode_dir = root / ".opencode"
-        agent_dir = opencode_dir / "agent"
-        agent_files = sorted(path.name for path in agent_dir.glob("*.md"))
-        profile = (agent_dir / "deep-agent.md").read_text(encoding="utf-8")
-
-        self.assertEqual(agent_files, ["deep-agent.md"])
-        self.assertIn("mode: primary", profile)
-        self.assertIn("Plan mode must not modify files.", profile)
-        self.assertIn("Build mode only after approval", profile)
-        self.assertFalse((agent_dir / "triage.md").exists())
-        self.assertFalse((agent_dir / "duplicate-pr.md").exists())
-
-    def test_opencode_config_references_deepagents_and_skills(self):
-        root = Path(__file__).resolve().parents[1]
-        config = json.loads((root / ".opencode" / "opencode.jsonc").read_text(encoding="utf-8"))
-        tui = json.loads((root / ".opencode" / "tui.json").read_text(encoding="utf-8"))
-        theme = json.loads((root / ".opencode" / "themes" / "deep-agent.json").read_text(encoding="utf-8"))
-
-        self.assertIn("deepagents-libs", config["references"])
-        self.assertEqual(config["references"]["deepagents-libs"]["path"], "deepagents_source/deepagents-main/libs")
-        self.assertEqual(tui["plugin"], [])
-        self.assertEqual(theme["theme"]["accent"]["dark"], "blue")
 
 
 class PromptAndSkillStoreTest(unittest.TestCase):

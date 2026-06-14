@@ -1,4 +1,4 @@
-<svg width="1200" height="820" viewBox="0 0 1200 820" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI ML Onboarding opencode inspired TUI preview">
+<svg width="1200" height="820" viewBox="0 0 1200 820" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI ML Onboarding DeepAgents TUI preview">
   <rect width="1200" height="820" fill="#000000"/>
   <rect x="70" y="50" width="1060" height="720" rx="22" fill="#050506" stroke="#4b5168" stroke-width="2"/>
   <rect x="70" y="50" width="1060" height="46" rx="22" fill="#303448"/>
@@ -35,7 +35,7 @@
   <rect x="126" y="690" width="10" height="22" fill="#ffffff"/>
   <text x="126" y="734" fill="#4fa3ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">Plan</text>
   <text x="184" y="734" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">Build</text>
-  <text x="252" y="734" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">OpenCode Zen</text>
+  <text x="252" y="734" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">DeepAgents</text>
 
   <text x="126" y="782" fill="#4fa3ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">.........</text>
   <text x="226" y="782" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">esc</text>

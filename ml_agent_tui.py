@@ -21,7 +21,8 @@ from ml_agent import (
     parse_mode_command,
     resolve_beginner_project_input,
 )
-from qwen_chat import QwenChatConfig, chat_with_qwen
+from deepagents_runtime import DeepAgentsRuntime
+from qwen_chat import QwenChatConfig
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
@@ -51,17 +52,17 @@ def missing_textual_message() -> str:
     return (
         "Textual TUI를 실행하려면 Textual 패키지가 필요합니다.\n\n"
         "설치 방법:\n"
-        '  pip install ".[tui]"\n'
+        '  pip install ".[tui,deepagents]"\n'
         "또는\n"
-        "  pip install textual\n\n"
+        "  pip install textual deepagents langchain-openai\n\n"
         "Windows 10/11에서는 Windows Terminal, WezTerm, Alacritty 사용을 권장합니다."
     )
 
 
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
-        return f"[Build Chat · {model}] 수정 적용 가능 - /model, 질문 또는 '수정해줘'"
-    return f"[Plan Chat · {model}] 읽기 전용 - /model, 경로 붙여넣기/드롭, 다음"
+        return f"[Build DeepAgents · {model}] 승인 후 수정 가능 - /model, 질문 또는 '수정해줘'"
+    return f"[Plan DeepAgents · {model}] 읽기 전용 - /model, 경로 붙여넣기/드롭, 다음"
 
 
 def available_models_from_config(config: AppConfig) -> list[str]:
@@ -135,6 +136,7 @@ class BeginnerTuiController:
     exited: bool = False
     log_lines: list[str] = field(default_factory=list)
     qwen_config: QwenChatConfig | None = None
+    deepagents_runtime: DeepAgentsRuntime | None = None
 
     def __post_init__(self) -> None:
         self.project_path = ""
@@ -143,12 +145,14 @@ class BeginnerTuiController:
         self.available_models = available_models_from_config(self.app_config)
         if self.qwen_config is None:
             self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
+        if self.deepagents_runtime is None:
+            self.deepagents_runtime = DeepAgentsRuntime(self.app_config)
         self.set_project(self.project_input)
         self.log_lines.extend(
             [
                 "# AI ML Onboarding workflow",
                 "초급자 Wizard TUI가 시작되었습니다.",
-                "하단 Chat 입력창에서 Qwen 3.6에게 질문하거나, Build 모드에서 수정 요청을 할 수 있습니다.",
+                "하단 Chat 입력창의 모든 요청은 DeepAgents runtime으로 처리합니다.",
             ]
         )
         if self.sample_message:
@@ -199,6 +203,8 @@ class BeginnerTuiController:
             self.log_lines.append(message)
             return message
         self.qwen_config = replace(self.qwen_config or QwenChatConfig.from_app_config(self.app_config), model=model)
+        if self.deepagents_runtime is not None:
+            self.deepagents_runtime.qwen_config = self.qwen_config
         message = f"현재 모델이 {model}로 변경되었습니다."
         self.log_lines.append(message)
         return message
@@ -244,42 +250,46 @@ class BeginnerTuiController:
 
     def _handle_chat(self, command: str) -> str:
         self.log_lines.append(f"나: {command}")
+        result = self._invoke_deepagents(command)
+        if result.used_deepagents:
+            self.log_lines.append(f"DeepAgents {self.qwen_model}: {result.content}")
+            return result.content
         if is_fix_request(command):
-            return self._handle_chat_fix_request(command)
-        answer = chat_with_qwen(
-            command,
-            config=self.qwen_config or QwenChatConfig.from_app_config(AppConfig.load()),
-            project_path=self.project_path,
-            agent_mode=self.agent_mode,
-        )
-        self.log_lines.append(f"Qwen {self.qwen_model}: {answer}")
-        return answer
+            return self._handle_chat_fix_request(command, unavailable_reason=result.content)
+        self.log_lines.append(f"DeepAgents: {result.content}")
+        return result.content
 
-    def _handle_chat_fix_request(self, command: str) -> str:
+    def _invoke_deepagents(self, command: str):
+        runtime = self.deepagents_runtime or DeepAgentsRuntime(self.app_config)
+        return runtime.invoke(command, project_path=self.project_path, agent_mode=self.agent_mode)
+
+    def _handle_chat_fix_request(self, command: str, unavailable_reason: str = "") -> str:
         analysis = analyze_project(self.project_path)
         previews = build_fix_previews(analysis)
         if self.agent_mode != "Build":
             message = (
-                "Plan 모드라 파일을 수정하지 않았습니다. "
-                "Tab으로 Build 모드로 전환한 뒤 다시 '수정해줘'라고 입력하면 적용합니다."
+                "DeepAgents runtime이 현재 사용할 수 없어 로컬 dry-run 미리보기만 표시합니다. "
+                "Plan 모드라 파일을 수정하지 않았습니다."
             )
+            if unavailable_reason:
+                message += f"\n사유: {unavailable_reason}"
             if previews:
                 preview_titles = ", ".join(preview.title for preview in previews)
                 message += f"\n미리보기: {preview_titles}"
             else:
                 message += "\n현재 자동 수정할 항목이 없습니다."
-            self.log_lines.append(f"Agent: {message}")
+            self.log_lines.append(f"DeepAgents: {message}")
             return message
-        if not previews:
-            message = "자동 수정할 항목이 없습니다. 현재 분석 기준으로 적용 가능한 preview가 없습니다."
-            self.log_lines.append(f"Agent: {message}")
-            return message
-        self.applied_changes = apply_fix_previews(self.project_path, previews)
-        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
-        self.index = min(6, len(self.steps) - 1)
-        result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
-        self.log_lines.append(f"Agent: Build 모드 요청으로 자동 수정했습니다.\n{result}")
-        return result
+        message = "DeepAgents runtime이 현재 사용할 수 없어 채팅 자동 수정은 실행하지 않았습니다."
+        if unavailable_reason:
+            message += f"\n사유: {unavailable_reason}"
+        if previews:
+            preview_titles = ", ".join(preview.title for preview in previews)
+            message += f"\n로컬 미리보기: {preview_titles}"
+        else:
+            message += "\n현재 로컬 기준 자동 수정할 항목도 없습니다."
+        self.log_lines.append(f"DeepAgents: {message}")
+        return message
 
     def _handle_issue_choice(self, command: str) -> str:
         if command == "1":

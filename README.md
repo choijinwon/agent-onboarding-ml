@@ -6,7 +6,7 @@
 
 처음 실행하면 사용자의 숙련도에 따라 세 가지 모드 중 하나를 선택합니다.
 
-1. 초급자 모드: opencode 스타일의 이미지형 터미널 로그 TUI Wizard 방식
+1. 초급자 모드: DeepAgents 기반 터미널 로그 TUI Wizard 방식
 2. 중급자 모드: Chat + Wizard 혼합
 3. 고급자 모드: CLI Command 중심
 
@@ -31,14 +31,14 @@ py -3 ml_agent.py
 .\ml-agent.cmd
 ```
 
-OpenCode처럼 하단 박스 안에 직접 입력되는 Textual TUI는 별도 명령으로 실행합니다.
+하단 박스 안에 직접 입력되는 Textual TUI는 별도 명령으로 실행합니다.
 
 ```powershell
-py -3 -m pip install ".[tui]"
+py -3 -m pip install ".[tui,deepagents]"
 .\ml-agent.cmd tui
 ```
 
-Textual이 설치되지 않은 상태에서 `tui`를 실행하면 설치 안내만 출력하고 기존 콘솔 모드는 그대로 유지됩니다.
+Textual 또는 DeepAgents 의존성이 설치되지 않은 상태에서는 안내를 출력하고 기존 콘솔 모드는 그대로 유지됩니다.
 
 필수 조건:
 
@@ -76,7 +76,7 @@ chcp 65001
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ```
 
-OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI를 보려면 최신 터미널을 권장합니다.
+어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI를 보려면 최신 터미널을 권장합니다.
 Windows에서는 Windows Terminal, WezTerm, Alacritty에서 가장 안정적입니다.
 
 ```env
@@ -145,8 +145,7 @@ Windows 10/11:
 ## Deep Agents 참고 구조
 
 이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness와 [deepagents/libs](https://github.com/langchain-ai/deepagents/tree/main/libs) 구조를 참고했습니다.
-터미널 화면 구성은 [anomalyco/opencode](https://github.com/anomalyco/opencode)의 Terminal UI와 `build / plan` agent 전환 개념을 참고했습니다.
-OpenCode workspace 설정은 upstream `.opencode` 구조를 참고하되, 이 repo에는 `.opencode/agent/deep-agent.md` 하나만 적용했습니다.
+터미널 화면 구성은 DeepAgents 실행 흐름에 맞춘 자체 Textual TUI로 제공합니다.
 
 DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
 
@@ -161,7 +160,7 @@ DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포
 실제 DeepAgents runtime을 사용할 때는 optional dependency를 설치하고 libs 연결 상태를 확인합니다.
 
 ```bash
-pip install ".[deepagents]"
+pip install ".[deepagents,tui]"
 ./ml-agent deepagents
 ./ml-agent deepagents --json
 ```

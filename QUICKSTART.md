@@ -101,10 +101,10 @@ registration_packages/
 초급자 모드는 `Tab 1/10`부터 `Tab 10/10`까지 한 단계씩 보여줍니다.
 파일 수정은 미리보기와 사용자 승인 후에만 진행됩니다.
 
-OpenCode처럼 하단 입력 박스 안에서 바로 타이핑되는 TUI를 쓰려면 Textual 옵션을 설치한 뒤 실행합니다.
+하단 입력 박스 안에서 바로 타이핑되는 DeepAgents TUI를 쓰려면 Textual/DeepAgents 옵션을 설치한 뒤 실행합니다.
 
 ```powershell
-py -3 -m pip install ".[tui]"
+py -3 -m pip install ".[tui,deepagents]"
 .\ml-agent.cmd tui
 ```
 
@@ -147,8 +147,6 @@ JSON 출력:
 ## 8. DeepAgents 소스 확인
 
 DeepAgents 참고 소스는 repo 안에 포함되어 있습니다.
-OpenCode 설정은 `.opencode/`에 있으며, Deep Agent만 적용되어 있습니다.
-
 ```text
 deepagents_source/
 └── deepagents-main/
@@ -169,15 +167,9 @@ deepagents_source/
 .\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
 ```
 
-OpenCode Deep Agent 설정 확인:
-
-```powershell
-type .opencode\agent\deep-agent.md
-```
-
 ## 9. 이미지형 TUI 화면
 
-OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI를 기본으로 사용합니다.
+어두운 배경과 하단 `Plan / Build` 상태바가 있는 DeepAgents TUI를 기본으로 사용합니다.
 최신 터미널에서 가장 잘 보입니다.
 
 ![AI ML 온보딩 TUI 미리보기](docs/tui-preview.svg)

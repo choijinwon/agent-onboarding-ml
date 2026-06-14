@@ -5,7 +5,7 @@ description = "Console POC for AI ML onboarding launch modes"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-deepagents = ["deepagents>=0.6.8"]
+deepagents = ["deepagents>=0.6.8", "langchain-openai>=0.3"]
 tui = ["textual>=0.85"]
 
 [project.scripts]
@@ -16,6 +16,7 @@ py-modules = [
     "app_config",
     "deep_agent_profile",
     "deepagents_libs",
+    "deepagents_runtime",
     "error_log_store",
     "ml_agent",
     "ml_agent_tui",
