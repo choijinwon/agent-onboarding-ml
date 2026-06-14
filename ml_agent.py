@@ -815,16 +815,74 @@ def build_beginner_step_tabs(
 
 
 def format_beginner_tab(index: int, total: int, body: str) -> str:
+    title, _, content = body.partition("\n")
+    step_titles = [
+        "프로젝트 선택",
+        "자동 스캔",
+        "등록 분석",
+        "문제 확인",
+        "수정 미리보기",
+        "사용자 승인",
+        "파일 적용",
+        "재검증",
+        "로컬 서빙",
+        "리포트",
+    ]
+    sidebar_rows = []
+    for step, label in enumerate(step_titles[:total], start=1):
+        marker = ">" if step == index + 1 else " "
+        sidebar_rows.append(f"{marker} {step:02d} {label}")
+
+    header = render_tui_header(index, total, title)
+    body_panel = render_tui_body(sidebar_rows, content or body)
+    footer = render_tui_footer(index)
+    return (
+        f"{header}\n"
+        f"{body_panel}\n"
+        f"{footer}"
+    )
+
+
+def render_tui_header(index: int, total: int, title: str) -> str:
+    width = 104
     tabs = " ".join(
         f"[Tab {step}]" if step == index + 1 else f" Tab {step} "
         for step in range(1, total + 1)
     )
-    return (
-        f"{tabs}\n"
-        f"현재 단계: Tab {index + 1}/{total}\n"
-        "명령: Enter=다음, 이전=이전 탭, 1~10=탭 이동, 종료=중단\n\n"
-        f"{body}"
-    )
+    rows = [
+        "┌" + "─" * width + "┐",
+        f"│ {'AI ML 온보딩 Assistant':<{width - 1}}│",
+        f"│ {'현재 단계: Tab ' + str(index + 1) + '/' + str(total) + ' · ' + title:<{width - 1}}│",
+        f"│ {tabs:<{width - 1}}│",
+        "└" + "─" * width + "┘",
+    ]
+    return "\n".join(rows)
+
+
+def render_tui_body(sidebar_rows: list[str], content: str) -> str:
+    left_width = 20
+    right_width = 80
+    content_lines = content.splitlines() or [""]
+    row_count = max(len(sidebar_rows), len(content_lines))
+    rows = [
+        "┌" + "─" * left_width + "┬" + "─" * right_width + "┐",
+        f"│ {'STEPS':<{left_width - 1}}│ {'CURRENT PANEL':<{right_width - 1}}│",
+        "├" + "─" * left_width + "┼" + "─" * right_width + "┤",
+    ]
+    for row_index in range(row_count):
+        left = sidebar_rows[row_index] if row_index < len(sidebar_rows) else ""
+        right = content_lines[row_index] if row_index < len(content_lines) else ""
+        rows.append(
+            f"│ {truncate_cell(left, left_width - 2).ljust(left_width - 2)} "
+            f"│ {truncate_cell(right, right_width - 2).ljust(right_width - 2)} │"
+        )
+    rows.append("└" + "─" * left_width + "┴" + "─" * right_width + "┘")
+    return "\n".join(rows)
+
+
+def render_tui_footer(index: int) -> str:
+    command = "선택 번호: 1=적용  2=다시 보기  3=취소" if index == 5 else "Enter=다음  이전=이전 탭  1~10=탭 이동  종료=중단"
+    return f"명령: {command}"
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:

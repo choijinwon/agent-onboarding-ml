@@ -53,6 +53,9 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertNotIn("Step 2. 프로젝트 자동 스캔", steps[0])
         self.assertIn("[Tab 1]", first_tab)
         self.assertIn("현재 단계: Tab 1/10", first_tab)
+        self.assertIn("STEPS", first_tab)
+        self.assertIn("CURRENT PANEL", first_tab)
+        self.assertIn("> 01 프로젝트 선택", first_tab)
         self.assertIn("Enter=다음", first_tab)
 
     def test_beginner_console_advances_one_tab_at_a_time(self):
