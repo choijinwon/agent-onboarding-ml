@@ -519,9 +519,11 @@ class ConsoleAssistant:
         self,
         input_fn: Callable[[str], str] = input,
         output_fn: Callable[[str], None] = print,
+        clear_fn: Callable[[], None] | None = None,
     ) -> None:
         self.input_fn = input_fn
         self.output_fn = output_fn
+        self.clear_fn = clear_fn or clear_console
         self.mode = MODE_BEGINNER
 
     def run(self) -> None:
@@ -591,6 +593,7 @@ class ConsoleAssistant:
         steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
         index = 0
         while 0 <= index < len(steps):
+            self.clear_fn()
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
             if index == len(steps) - 1:
                 return
@@ -648,6 +651,10 @@ class ConsoleAssistant:
             self.run_current_mode()
             return
         self.output_fn(handle_advanced_input(command))
+
+
+def clear_console() -> None:
+    print("\033[2J\033[H", end="")
 
 
 def parse_mode(value: str) -> str | None:

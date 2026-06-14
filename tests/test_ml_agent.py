@@ -63,13 +63,16 @@ class BeginnerWizardTest(unittest.TestCase):
             (root / "model.onnx").write_text("sample")
             inputs = iter([str(root), "", "종료"])
             outputs: list[str] = []
+            clears: list[str] = []
             assistant = ConsoleAssistant(
                 input_fn=lambda prompt: next(inputs),
                 output_fn=outputs.append,
+                clear_fn=lambda: clears.append("clear"),
             )
 
             assistant.run_beginner_mode()
 
+            self.assertGreaterEqual(len(clears), 2)
             self.assertIn("현재 단계: Tab 1/10", outputs[0])
             self.assertIn("Step 1. 프로젝트 선택", outputs[0])
             self.assertNotIn("Step 2. 프로젝트 자동 스캔", outputs[0])
@@ -91,6 +94,7 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant = ConsoleAssistant(
                 input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
                 output_fn=outputs.append,
+                clear_fn=lambda: None,
             )
 
             assistant.run_beginner_mode()
@@ -115,6 +119,7 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant = ConsoleAssistant(
                 input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
                 output_fn=outputs.append,
+                clear_fn=lambda: None,
             )
 
             assistant.run_beginner_mode()
