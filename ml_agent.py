@@ -62,6 +62,7 @@ MODE_CHANGE_MESSAGES = {
 ANSI_RESET = "\033[0m"
 ANSI_STYLES = {
     "chrome": "\033[48;2;6;6;7m\033[38;2;86;92;112m",
+    "window": "\033[48;2;48;52;72m\033[38;2;200;204;216m",
     "title": "\033[1m\033[48;2;20;20;20m\033[38;2;245;245;245m",
     "panel": "\033[48;2;20;20;20m\033[38;2;230;230;230m",
     "normal": "\033[48;2;6;6;7m\033[38;2;235;235;235m",
@@ -72,6 +73,7 @@ ANSI_STYLES = {
 }
 
 _RICH_CONSOLE_ENABLED: bool | None = None
+RICH_TUI_WIDTH = 118
 
 MODEL_ARTIFACT_SUFFIXES = {
     ".h5",
@@ -550,11 +552,33 @@ def tui_style(line: str, role: str = "normal") -> str:
     return f"{ANSI_STYLES.get(role, ANSI_STYLES['normal'])}{line}{ANSI_RESET}"
 
 
+def tui_segment(text: str, role: str = "normal") -> str:
+    if not rich_console_enabled():
+        return text
+    return f"{ANSI_STYLES.get(role, ANSI_STYLES['normal'])}{text}{ANSI_RESET}"
+
+
 def style_tui_lines(lines: list[str], roles: list[str]) -> str:
     return "\n".join(tui_style(line, roles[index] if index < len(roles) else "normal") for index, line in enumerate(lines))
 
 
+def rich_row(text: str = "", role: str = "normal", indent: int = 2, width: int = RICH_TUI_WIDTH) -> str:
+    body_width = max(width - indent, 1)
+    body = truncate_cell(text, body_width).ljust(body_width)
+    return tui_style(" " * indent + body, role)
+
+
+def rich_card_line(text: str = "", role: str = "panel", accent: bool = False, width: int = RICH_TUI_WIDTH) -> str:
+    if not accent:
+        return rich_row(text, role=role, indent=4, width=width)
+    content_width = width - 5
+    content = " " + truncate_cell(text, content_width - 1).ljust(content_width - 1)
+    return tui_segment("  |", "accent") + tui_segment(content, role)
+
+
 def render_launch_screen() -> str:
+    if rich_console_enabled():
+        return render_rich_launch_screen()
     roles = []
     for line in LAUNCH_SCREEN.splitlines():
         if line.startswith("+"):
@@ -570,6 +594,24 @@ def render_launch_screen() -> str:
         else:
             roles.append("panel")
     return style_tui_lines(LAUNCH_SCREEN.splitlines(), roles)
+
+
+def render_rich_launch_screen() -> str:
+    rows = [
+        rich_row("●  ●  ●   AI ML Onboarding Console ...", role="window"),
+        rich_row(),
+        rich_card_line("# Launch workflow", role="title", accent=True),
+        rich_card_line("사용자 모드를 선택하세요.", role="panel"),
+        rich_row(),
+        rich_card_line("처음 사용하는 경우에는 1. 초급자 모드를 권장합니다.", role="panel", accent=True),
+        rich_row(),
+        rich_card_line("1. 초급자 모드    Plan(read-only) -> Build(approval-gated apply)", role="panel"),
+        rich_card_line("2. 중급자 모드    Chat + Wizard", role="panel"),
+        rich_card_line("3. 고급자 모드    CLI Command", role="panel"),
+        rich_row(),
+        rich_row(".........  esc interrupt                    tab agents   ctrl+p commands", role="status"),
+    ]
+    return "\n".join(rows)
 
 
 class ConsoleAssistant:
@@ -957,6 +999,9 @@ def format_beginner_tab(index: int, total: int, body: str) -> str:
         marker = ">" if step == index + 1 else " "
         sidebar_rows.append(f"{marker} {step:02d} {label}")
 
+    if rich_console_enabled():
+        return render_rich_beginner_tab(index, total, title, content or body, sidebar_rows)
+
     header = render_tui_header(index, total, title)
     body_panel = render_tui_body(sidebar_rows, content or body)
     footer = render_tui_footer(index)
@@ -965,6 +1010,52 @@ def format_beginner_tab(index: int, total: int, body: str) -> str:
         f"{body_panel}\n"
         f"{footer}"
     )
+
+
+def render_rich_beginner_tab(
+    index: int,
+    total: int,
+    title: str,
+    content: str,
+    sidebar_rows: list[str],
+) -> str:
+    width = RICH_TUI_WIDTH
+    agent = tui_agent_label(index)
+    request_line = (content.splitlines() or [""])[0].removeprefix("- ").strip()
+    log_lines = build_terminal_log_lines(content.splitlines() or [""])
+    mode_line = "Plan  Build" if index >= 6 else "Plan  Build"
+    active_mode = "Build" if index >= 6 else "Plan"
+    inactive_mode = "Plan" if index >= 6 else "Build"
+    rows = [
+        rich_row("●  ●  ●   AI ML Onboarding Console | ML Platform registration workflow ...", role="window", width=width),
+        rich_row(width=width),
+        rich_card_line(f"# {title}", role="title", accent=True, width=width),
+        rich_card_line(f"Tab {index + 1}/{total}    {agent}", role="muted", width=width),
+        rich_row(width=width),
+        rich_card_line(request_line, role="panel", accent=True, width=width),
+        rich_row(width=width),
+    ]
+    for line in log_lines[:10]:
+        if not line:
+            rows.append(rich_row(width=width))
+        elif line.startswith("*"):
+            rows.append(rich_row(line, role="muted", indent=6, width=width))
+        elif line.startswith("~"):
+            rows.append(rich_row(line, role="normal", indent=6, width=width))
+        else:
+            rows.append(rich_row(line, role="normal", indent=6, width=width))
+    rows.extend(
+        [
+            rich_row(width=width),
+            rich_row(f"□  {active_mode} · qwen3.5 · AI ML Onboarding", role="normal", indent=6, width=width),
+            rich_row(width=width),
+            rich_card_line("█", role="input", accent=True, width=width),
+            rich_card_line(f"{active_mode}  {inactive_mode}  OpenCode Zen", role="input", accent=True, width=width),
+            rich_row(".........  esc interrupt                    ctrl+t variants   tab agents   ctrl+p commands", role="status", width=width),
+            rich_row(f"Current: Tab {index + 1}/{total} | {mode_line} | {title}", role="status", width=width),
+        ]
+    )
+    return "\n".join(rows)
 
 
 def render_tui_header(index: int, total: int, title: str) -> str:

@@ -169,6 +169,13 @@ OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI
 ENABLE_RICH_CONSOLE=true
 ```
 
+위 이미지처럼 보이지 않으면 현재 세션에서 컬러 출력을 강제로 켭니다.
+
+```powershell
+$env:FORCE_COLOR=1
+.\ml-agent.cmd
+```
+
 색상이 깨지거나 로그 파일로 저장할 때는 끌 수 있습니다.
 
 ```powershell

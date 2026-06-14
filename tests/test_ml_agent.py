@@ -1,9 +1,11 @@
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 import zipfile
 
+import ml_agent
 from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
 from deepagents_libs import deepagents_libs_as_dict
@@ -78,6 +80,31 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("# Launch workflow", LAUNCH_SCREEN)
         self.assertIn("Plan(read-only)", LAUNCH_SCREEN)
         self.assertIn("esc interrupt", LAUNCH_SCREEN)
+
+    def test_forced_rich_tui_uses_opencode_like_layout(self):
+        previous_force = os.environ.get("FORCE_COLOR")
+        previous_no_color = os.environ.get("NO_COLOR")
+        try:
+            os.environ["FORCE_COLOR"] = "1"
+            os.environ.pop("NO_COLOR", None)
+            ml_agent._RICH_CONSOLE_ENABLED = None
+            steps = build_beginner_step_tabs("/workspace/my-model")
+            output = format_beginner_tab(0, len(steps), steps[0])
+
+            self.assertIn("\033[", output)
+            self.assertIn("OpenCode Zen", output)
+            self.assertIn("ctrl+p commands", output)
+            self.assertNotIn("+====", output)
+        finally:
+            if previous_force is None:
+                os.environ.pop("FORCE_COLOR", None)
+            else:
+                os.environ["FORCE_COLOR"] = previous_force
+            if previous_no_color is None:
+                os.environ.pop("NO_COLOR", None)
+            else:
+                os.environ["NO_COLOR"] = previous_no_color
+            ml_agent._RICH_CONSOLE_ENABLED = None
 
     def test_beginner_console_advances_one_tab_at_a_time(self):
         with TemporaryDirectory() as tmpdir:
