@@ -183,11 +183,21 @@ Windows 10/11:
 
 ```text
 skills/
+├── agent-evaluation/
+├── analyze-mlflow-chat-session/
+├── analyze-mlflow-trace/
 ├── closed-network-validation/
 ├── error-log-repair/
+├── instrumenting-with-mlflow-tracing/
 ├── job-template-draft/
-└── mlflow-registration-check/
+├── mlflow-onboarding/
+├── mlflow-registration-check/
+├── querying-mlflow-metrics/
+├── retrieving-mlflow-traces/
+└── searching-mlflow-docs/
 ```
+
+MLflow skill 구성은 [mlflow/skills](https://github.com/mlflow/skills)의 tracing, trace 분석, chat session 분석, metrics, agent evaluation, onboarding, docs search 흐름을 참고해 폐쇄망 POC용으로 정리했습니다.
 
 ## 에러 로그 관리
 

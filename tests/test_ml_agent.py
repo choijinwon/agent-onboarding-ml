@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from app_config import AppConfig, ensure_runtime_layout
+from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
@@ -721,6 +721,8 @@ class AppConfigTest(unittest.TestCase):
 
             self.assertIn(root / "skills", directories)
             self.assertTrue((root / "skills" / "README.md").exists())
+            self.assertTrue((root / "skills" / "instrumenting-with-mlflow-tracing" / "SKILL.md").exists())
+            self.assertTrue((root / "skills" / "agent-evaluation" / "SKILL.md").exists())
             self.assertTrue((root / "registration_packages").exists())
 
 
@@ -738,10 +740,16 @@ class PromptAndSkillStoreTest(unittest.TestCase):
     def test_default_skills_exist(self):
         root = Path(__file__).resolve().parents[1]
 
-        self.assertTrue((root / "skills" / "mlflow-registration-check" / "SKILL.md").exists())
-        self.assertTrue((root / "skills" / "job-template-draft" / "SKILL.md").exists())
-        self.assertTrue((root / "skills" / "closed-network-validation" / "SKILL.md").exists())
-        self.assertTrue((root / "skills" / "error-log-repair" / "SKILL.md").exists())
+        for skill_name in DEFAULT_SKILLS:
+            self.assertTrue((root / "skills" / skill_name / "SKILL.md").exists(), skill_name)
+
+    def test_mlflow_skills_are_in_deep_agent_profile(self):
+        profile = build_ml_platform_profile("advanced")
+
+        self.assertIn("instrumenting-with-mlflow-tracing", profile.skills)
+        self.assertIn("analyze-mlflow-trace", profile.skills)
+        self.assertIn("agent-evaluation", profile.skills)
+        self.assertIn("searching-mlflow-docs", profile.skills)
 
 
 class ErrorLogStoreTest(unittest.TestCase):

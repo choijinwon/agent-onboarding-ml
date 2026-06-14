@@ -209,10 +209,18 @@ description: MLflow 등록 준비 상태를 점검한다
 
 ```text
 skills/
+├── agent-evaluation/
+├── analyze-mlflow-chat-session/
+├── analyze-mlflow-trace/
 ├── closed-network-validation/
 ├── error-log-repair/
+├── instrumenting-with-mlflow-tracing/
 ├── job-template-draft/
-└── mlflow-registration-check/
+├── mlflow-onboarding/
+├── mlflow-registration-check/
+├── querying-mlflow-metrics/
+├── retrieving-mlflow-traces/
+└── searching-mlflow-docs/
 ```
 
 ## 11. Linux/macOS 실행
