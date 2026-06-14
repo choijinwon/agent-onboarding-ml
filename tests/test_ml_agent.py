@@ -690,6 +690,23 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertIn("Deep Agent Profile", output)
         self.assertIn("project-scanner", output)
         self.assertIn("적용하기", output)
+        self.assertIn("libs_reference", output)
+
+    def test_deepagents_command_outputs_libs_manifest(self):
+        output = handle_advanced_input("ml-agent deepagents")
+
+        self.assertIn("DeepAgents Libs", output)
+        self.assertIn("libs/deepagents", output)
+        self.assertIn("libs/code", output)
+        self.assertIn("runtime_import: deepagents", output)
+
+    def test_deepagents_command_outputs_json(self):
+        output = handle_advanced_input("ml-agent deepagents --json")
+        payload = json.loads(output)
+
+        self.assertEqual(payload["runtime_import"], "deepagents")
+        self.assertIn("https://github.com/langchain-ai/deepagents/tree/main/libs", payload["reference"])
+        self.assertTrue(any(item["path"] == "libs/deepagents" for item in payload["libs"]))
 
     def test_config_command_outputs_env_summary(self):
         output = handle_advanced_input("ml-agent config")
@@ -725,6 +742,7 @@ class DeepAgentProfileTest(unittest.TestCase):
         output = format_profile(build_ml_platform_profile("advanced"))
 
         self.assertIn("https://github.com/langchain-ai/deepagents", output)
+        self.assertIn("https://github.com/langchain-ai/deepagents/tree/main/libs", output)
         self.assertIn("permissions:", output)
 
 

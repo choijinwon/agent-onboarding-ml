@@ -118,7 +118,7 @@ Windows 10/11:
 
 ## Deep Agents 참고 구조
 
-이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness 개념을 참고했습니다.
+이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness와 [deepagents/libs](https://github.com/langchain-ai/deepagents/tree/main/libs) 구조를 참고했습니다.
 
 - sub-agents: `project-scanner`, `mlflow-validator`, `job-template-planner`, `log-analyzer`
 - filesystem permissions: 읽기는 허용, 쓰기는 human-in-the-loop 승인, `.git`과 secret 경로 쓰기는 차단
@@ -128,7 +128,15 @@ Windows 10/11:
 - skills 저장소: `SKILL_STORE_DIR` 값으로 지정하며 기본값은 `skills`
 
 현재 구현은 폐쇄망 POC를 위해 외부 런타임 의존성을 강제하지 않는 독립 프로파일입니다.
-나중에 실제 LLM 런타임을 연결할 때 `deepagents.create_deep_agent`의 `tools`, `subagents`, `skills`, `permissions`, `memory` 설정으로 옮길 수 있습니다.
+실제 DeepAgents runtime을 사용할 때는 optional dependency를 설치하고 libs 연결 상태를 확인합니다.
+
+```bash
+pip install ".[deepagents]"
+./ml-agent deepagents
+./ml-agent deepagents --json
+```
+
+`libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/partners`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
 
 ## 환경 변수
 

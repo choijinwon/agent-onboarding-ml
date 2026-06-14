@@ -18,6 +18,7 @@ FilesystemOperation = Literal["read", "write"]
 
 
 DEEPAGENTS_REFERENCE = "https://github.com/langchain-ai/deepagents"
+DEEPAGENTS_LIBS_REFERENCE = "https://github.com/langchain-ai/deepagents/tree/main/libs"
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,7 @@ def format_profile(profile: DeepAgentProfile) -> str:
         f"Deep Agent Profile: {profile.name}\n"
         f"mode: {profile.mode}\n"
         f"reference: {DEEPAGENTS_REFERENCE}\n"
+        f"libs_reference: {DEEPAGENTS_LIBS_REFERENCE}\n"
         f"model_policy: {profile.model_policy}\n"
         f"approval_policy: {profile.approval_policy}\n"
         f"context_policy: {profile.context_policy}\n\n"
