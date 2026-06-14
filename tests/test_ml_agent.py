@@ -37,6 +37,7 @@ from ml_agent import (
 from ml_agent_tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
+    format_model_choices,
     is_fix_request,
     missing_textual_message,
     normalize_input_path,
@@ -960,18 +961,45 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(parse_model_command("/model"), "")
         self.assertIsNone(parse_model_command("모델 gamma"))
 
+    def test_tui_formats_model_choices_with_current_marker(self):
+        output = format_model_choices(["qwen3.6", "gamma"], "gamma")
+
+        self.assertIn("1. qwen3.6", output)
+        self.assertIn("2. gamma (현재)", output)
+        self.assertIn("번호를 입력", output)
+
     def test_tui_controller_lists_and_selects_model_from_input_box(self):
         controller = BeginnerTuiController("")
 
         list_output = controller.submit("/model")
-        self.assertIn("qwen3.6", list_output)
+        self.assertIn("1. qwen3.6", list_output)
         self.assertIn("gamma", list_output)
+        self.assertTrue(controller.awaiting_model_selection)
 
         output = controller.submit("/model gamma")
 
         self.assertIn("gamma", output)
         self.assertEqual(controller.qwen_model, "gamma")
+        self.assertFalse(controller.awaiting_model_selection)
         self.assertIn("gamma", command_placeholder_for_mode(controller.agent_mode, controller.qwen_model))
+
+    def test_tui_controller_selects_model_by_number_after_model_menu(self):
+        controller = BeginnerTuiController("")
+
+        controller.submit("/model")
+        output = controller.submit("2")
+
+        self.assertIn("qwen3.5", output)
+        self.assertEqual(controller.qwen_model, "qwen3.5")
+        self.assertFalse(controller.awaiting_model_selection)
+
+    def test_tui_controller_selects_model_by_number_in_model_command(self):
+        controller = BeginnerTuiController("")
+
+        output = controller.submit("/model 4")
+
+        self.assertIn("gamma", output)
+        self.assertEqual(controller.qwen_model, "gamma")
 
     def test_tui_controller_rejects_unknown_model(self):
         controller = BeginnerTuiController("")
@@ -979,6 +1007,16 @@ class WindowsSetupTest(unittest.TestCase):
         output = controller.submit("/model unknown-model")
 
         self.assertIn("지원하지 않는 모델", output)
+        self.assertEqual(controller.qwen_model, "qwen3.6")
+
+    def test_tui_controller_keeps_model_menu_open_on_invalid_number(self):
+        controller = BeginnerTuiController("")
+
+        controller.submit("/model")
+        output = controller.submit("99")
+
+        self.assertIn("지원하지 않는 모델", output)
+        self.assertTrue(controller.awaiting_model_selection)
         self.assertEqual(controller.qwen_model, "qwen3.6")
 
     def test_tui_detects_fix_request_text(self):

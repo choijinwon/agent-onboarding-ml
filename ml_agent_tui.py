@@ -82,6 +82,15 @@ def parse_model_command(command: str) -> str | None:
     return parts[1].strip()
 
 
+def format_model_choices(models: list[str], current_model: str) -> str:
+    lines = ["모델을 선택하세요."]
+    for index, model in enumerate(models, start=1):
+        marker = " (현재)" if model == current_model else ""
+        lines.append(f"{index}. {model}{marker}")
+    lines.append("번호를 입력하거나 /model <모델명>으로 선택할 수 있습니다.")
+    return "\n".join(lines)
+
+
 def is_fix_request(command: str) -> bool:
     lowered = command.lower()
     keywords = (
@@ -165,6 +174,7 @@ class BeginnerTuiController:
     log_lines: list[str] = field(default_factory=list)
     qwen_config: QwenChatConfig | None = None
     deepagents_runtime: DeepAgentsRuntime | None = None
+    awaiting_model_selection: bool = False
 
     def __post_init__(self) -> None:
         self.project_path = ""
@@ -223,9 +233,12 @@ class BeginnerTuiController:
 
     def select_model(self, model: str) -> str:
         if not model:
-            message = "선택 가능한 모델: " + ", ".join(self.available_models)
+            self.awaiting_model_selection = True
+            message = format_model_choices(self.available_models, self.qwen_model)
             self.log_lines.append(message)
             return message
+        if model.isdigit() and 1 <= int(model) <= len(self.available_models):
+            model = self.available_models[int(model) - 1]
         if model not in self.available_models:
             message = f"지원하지 않는 모델입니다: {model}\n선택 가능한 모델: " + ", ".join(self.available_models)
             self.log_lines.append(message)
@@ -233,6 +246,7 @@ class BeginnerTuiController:
         self.qwen_config = replace(self.qwen_config or QwenChatConfig.from_app_config(self.app_config), model=model)
         if self.deepagents_runtime is not None:
             self.deepagents_runtime.qwen_config = self.qwen_config
+        self.awaiting_model_selection = False
         message = f"현재 모델이 {model}로 변경되었습니다."
         self.log_lines.append(message)
         return message
@@ -257,6 +271,8 @@ class BeginnerTuiController:
         model = parse_model_command(command)
         if model is not None:
             return self.select_model(model)
+        if self.awaiting_model_selection:
+            return self.select_model(command)
 
         path_value, is_path_command = strip_path_command(command)
         if is_path_command and not path_value:
@@ -575,6 +591,7 @@ __all__ = [
     "CommandInput",
     "LogView",
     "StatusBar",
+    "format_model_choices",
     "is_fix_request",
     "is_wizard_navigation",
     "normalize_input_path",
