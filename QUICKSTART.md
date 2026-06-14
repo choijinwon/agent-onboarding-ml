@@ -1,6 +1,7 @@
 # AI ML 온보딩 퀵 가이드
 
-Windows 10/11 폐쇄망 환경에서 AI ML 온보딩 POC를 빠르게 셋팅하는 절차입니다.
+Windows 10/11 폐쇄망 환경에서 AI ML 온보딩 POC를 빠르게 실행하는 절차입니다.
+기본 실행은 `ml-agent.cmd`를 사용합니다.
 
 ## 1. 준비물
 
@@ -39,7 +40,6 @@ copy .env.example .env
 ```
 
 `.env`에서 내부 Qwen 값만 먼저 수정합니다.
-Qwen은 Agent가 분석과 안내에 사용하는 LLM이고, 등록 대상 ML 모델은 나중에 프로젝트 경로로 넘깁니다.
 
 ```env
 QWEN_API_KEY=your-internal-qwen-key
@@ -48,13 +48,16 @@ QWEN_MODEL=qwen3.5
 QWEN_MODELS=qwen3.5,gpt20,gamma
 ```
 
-## 4. 초기 디렉터리 생성
+Qwen은 Agent가 분석과 안내에 사용하는 LLM입니다.
+등록 대상 ML 모델은 실행할 때 프로젝트 경로로 넘깁니다.
+
+## 4. 초기화
 
 ```powershell
 .\ml-agent.cmd init
 ```
 
-생성되는 주요 경로:
+생성 또는 확인되는 주요 경로:
 
 ```text
 skills/
@@ -69,7 +72,7 @@ registration_packages/
 .\ml-agent.cmd config
 ```
 
-확인할 값:
+주요 확인 값:
 
 - `qwen_base_url`
 - `qwen_model`
@@ -78,7 +81,7 @@ registration_packages/
 - `harness_skills`
 - `skill_store_dir`
 
-## 6. 실행
+## 6. 초급자 Wizard 실행
 
 ```powershell
 .\ml-agent.cmd
@@ -93,8 +96,8 @@ registration_packages/
 ```
 
 처음 사용하는 경우에는 `1. 초급자 모드`를 권장합니다.
-초급자 모드는 `Tab 1/10`부터 `Tab 10/10`까지 한 단계씩 보여주며, 좌측 단계 목록과 우측 현재 패널을 함께 표시합니다.
-초급자 모드에서는 `apply` 명령어를 직접 입력하지 않고, 화면의 `적용하기 / 다시 보기 / 취소하기` 선택지로 진행합니다.
+초급자 모드는 `Tab 1/10`부터 `Tab 10/10`까지 한 단계씩 보여줍니다.
+파일 수정은 미리보기와 사용자 승인 후에만 진행됩니다.
 
 ## 7. 자주 쓰는 명령
 
@@ -114,7 +117,7 @@ registration_packages/
 ```
 
 여기서 `.\project`는 등록하려는 ML 모델 프로젝트 경로입니다.
-예를 들어 학습 코드, requirements, MLflow artifact, 모델 파일이 들어 있는 폴더를 넘깁니다.
+예를 들어 학습 코드, `requirements.txt`, MLflow artifact, 모델 파일이 들어 있는 폴더를 넘깁니다.
 
 JSON 출력:
 
@@ -126,9 +129,34 @@ JSON 출력:
 .\ml-agent.cmd prompts --json
 ```
 
-`deepagents`는 repo 내부 `deepagents_source`를 확인하고, `--source`는 다운로드한 DeepAgents zip으로 비교 검증할 때 사용합니다.
+`deepagents`는 repo 내부 `deepagents_source`를 확인합니다.
+`--source`는 다운로드한 DeepAgents zip으로 비교 검증할 때 사용합니다.
 
-## 8. 프롬프트 확인
+## 8. DeepAgents 소스 확인
+
+DeepAgents 참고 소스는 repo 안에 포함되어 있습니다.
+
+```text
+deepagents_source/
+└── deepagents-main/
+    ├── LICENSE
+    ├── README.md
+    └── libs/
+```
+
+확인 명령:
+
+```powershell
+.\ml-agent.cmd deepagents
+```
+
+다운로드한 zip과 비교할 때:
+
+```powershell
+.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
+```
+
+## 9. 프롬프트 확인
 
 프롬프트는 기본적으로 `prompt_templates.json`에 저장됩니다.
 
@@ -148,7 +176,7 @@ JSON 출력:
 - `error_log_analysis`
 - `retry_fix_from_error`
 
-## 9. 에러 로그 기반 재수정
+## 10. 에러 로그 기반 재수정
 
 에러 로그는 기본적으로 `chat_errors/`에 저장됩니다.
 
@@ -178,7 +206,30 @@ JSON 출력:
 .\ml-agent.cmd fix .\project --dry-run
 ```
 
-## 10. 스킬 저장
+## 11. Windows 10/11 실행 환경
+
+이 POC의 기본 대상은 Windows 10/11 폐쇄망 환경입니다.
+PowerShell 또는 CMD에서 `ml-agent.cmd`를 사용합니다.
+
+```powershell
+copy .env.example .env
+.\ml-agent.cmd init
+.\ml-agent.cmd config
+.\ml-agent.cmd prompts
+.\ml-agent.cmd
+```
+
+Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
+
+```bash
+cp .env.example .env
+./ml-agent init
+./ml-agent config
+./ml-agent prompts
+./ml-agent
+```
+
+## 12. 스킬 저장
 
 스킬 저장 위치는 `.env`의 `SKILL_STORE_DIR` 값으로 정합니다.
 
@@ -195,25 +246,7 @@ skills/
     └── SKILL.md
 ```
 
-`SKILL.md` 예시:
-
-```markdown
----
-name: mlflow-registration-check
-description: MLflow 등록 준비 상태를 점검한다
----
-
-# MLflow Registration Check
-
-- tracking URI 확인
-- experiment/run logging 확인
-- artifact 저장 경로 확인
-- model registry 등록 조건 확인
-```
-
 기본 제공 스킬:
-
-DeepAgents 참고 소스는 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
 
 ```text
 skills/
@@ -236,41 +269,13 @@ skills/
 └── searching-mlflow-docs/
 ```
 
-## 11. Windows 10/11 실행 환경
-
-이 POC의 기본 대상은 Windows 10/11 폐쇄망 환경입니다.
-PowerShell 또는 CMD에서 `ml-agent.cmd`를 사용합니다.
-
-```powershell
-copy .env.example .env
-.\ml-agent.cmd init
-.\ml-agent.cmd config
-.\ml-agent.cmd prompts
-.\ml-agent.cmd
-```
-
-DeepAgents 소스 확인:
-
-```powershell
-.\ml-agent.cmd deepagents
-```
-
-Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
-
-```bash
-cp .env.example .env
-./ml-agent init
-./ml-agent config
-./ml-agent prompts
-./ml-agent
-```
-
-## 12. 문제 해결
+## 13. 문제 해결
 
 Python을 찾지 못하는 경우:
 
 ```powershell
 py -3 --version
+python --version
 ```
 
 한글이 깨지는 경우:
