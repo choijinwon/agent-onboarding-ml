@@ -102,6 +102,7 @@ registration_packages/
 .\ml-agent.cmd validate .\project
 .\ml-agent.cmd fix .\project --dry-run
 .\ml-agent.cmd apply .\project
+.\ml-agent.cmd serve .\project --dry-run
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
 .\ml-agent.cmd config

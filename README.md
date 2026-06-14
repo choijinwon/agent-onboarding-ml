@@ -72,6 +72,7 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ./ml-agent validate ./project
 ./ml-agent fix ./project --dry-run
 ./ml-agent apply ./project
+./ml-agent serve ./project --dry-run
 ./ml-agent report ./project
 ./ml-agent chat
 ./ml-agent profile
@@ -89,6 +90,7 @@ Windows 10/11:
 .\ml-agent.cmd validate .\project
 .\ml-agent.cmd fix .\project --dry-run
 .\ml-agent.cmd apply .\project
+.\ml-agent.cmd serve .\project --dry-run
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd chat
 .\ml-agent.cmd profile
@@ -133,7 +135,7 @@ Windows 10/11:
 `.env.example`에는 현재 POC 실행에 필요한 Qwen endpoint, 모델 목록, Deep Agent 옵션, 등록 패키지, 에러 로그, 스킬 경로만 포함되어 있습니다.
 
 Qwen 설정은 Agent가 분석과 안내에 사용하는 LLM 설정입니다.
-등록 대상 ML 모델은 `analyze`, `validate`, `fix`, `report` 명령의 프로젝트 경로로 전달합니다.
+등록 대상 ML 모델은 `analyze`, `validate`, `fix`, `serve`, `report` 명령의 프로젝트 경로로 전달합니다.
 
 주요 값:
 

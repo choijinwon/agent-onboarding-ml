@@ -57,6 +57,8 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("승인 전 상태", output)
         self.assertIn("삭제 작업은 수행하지 않습니다", output)
         self.assertIn("재검증", output)
+        self.assertIn("Step 9. 로컬 서빙 테스트", output)
+        self.assertIn("Step 10. 분석 리포트 생성", output)
 
     def test_beginner_wizard_reports_registration_ready_project(self):
         with TemporaryDirectory() as tmpdir:
@@ -81,6 +83,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("[통과] 모델 산출물", output)
             self.assertIn("Job Template 초안 준비: 가능", output)
             self.assertIn("문제 수: 0개", output)
+            self.assertIn("상태: 준비 가능", output)
+            self.assertIn("http://127.0.0.1:8000/health", output)
 
     def test_beginner_wizard_lists_step4_issue_details(self):
         with TemporaryDirectory() as tmpdir:
@@ -159,6 +163,21 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("삭제 작업은 수행하지 않습니다.", output)
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
             self.assertIn("train.py: MLflow 기록 코드 추가", output)
+
+    def test_beginner_wizard_shows_step9_local_serving(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            output = build_beginner_wizard(str(root))
+
+            self.assertIn("Step 9. 로컬 서빙 테스트", output)
+            self.assertIn("상태: 준비 가능", output)
+            self.assertIn("FastAPI 기본 서버", output)
+            self.assertIn("ml-agent serve", output)
+            self.assertIn("/predict", output)
 
     def test_heavy_model_sample_can_be_selected_from_step1(self):
         with TemporaryDirectory() as tmpdir:
@@ -489,6 +508,24 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("mlflow", (root / "requirements.txt").read_text())
             self.assertTrue(any(change["code"] == "CREATE_REQUIREMENTS" for change in payload["applied_changes"]))
 
+    def test_serve_json_contains_local_serving_plan(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\nscikit-learn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"ml-agent serve {root} --dry-run --json")
+            payload = json.loads(output)
+            serving = payload["analysis"]["local_serving"]
+
+            self.assertEqual(payload["command"], "serve")
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(serving["status"], "준비 가능")
+            self.assertEqual(serving["health_endpoint"], "http://127.0.0.1:8000/health")
+            self.assertEqual(serving["predict_endpoint"], "http://127.0.0.1:8000/predict")
+            self.assertIn("local_serving=준비 가능", payload["details"])
+
     def test_report_writes_final_analysis_file(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -507,6 +544,8 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(report["summary"]["registration_status"], "등록 가능")
             self.assertEqual(report["summary"]["issue_count"], 0)
             self.assertEqual(report["summary"]["mlflow"], "ok")
+            self.assertEqual(report["summary"]["local_serving"], "준비 가능")
+            self.assertEqual(report["summary"]["health_endpoint"], "http://127.0.0.1:8000/health")
 
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")

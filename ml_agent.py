@@ -416,6 +416,32 @@ class RegistrationCheck:
 
 
 @dataclass(frozen=True)
+class LocalServingPlan:
+    status: str
+    mode: str
+    host: str
+    port: int
+    health_endpoint: str
+    predict_endpoint: str
+    checks: list[RegistrationCheck]
+    commands: list[str]
+    notes: list[str]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "mode": self.mode,
+            "host": self.host,
+            "port": self.port,
+            "health_endpoint": self.health_endpoint,
+            "predict_endpoint": self.predict_endpoint,
+            "checks": [check.as_dict() for check in self.checks],
+            "commands": self.commands,
+            "notes": self.notes,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectAnalysis:
     path: str
     exists: bool
@@ -429,6 +455,7 @@ class ProjectAnalysis:
     entrypoint_candidates: list[str]
     model_artifacts: list[str]
     job_template_ready: bool
+    local_serving: LocalServingPlan
     issues: list[str]
     issue_details: list[ProjectIssue]
     next_actions: list[str]
@@ -447,6 +474,7 @@ class ProjectAnalysis:
             "entrypoint_candidates": self.entrypoint_candidates,
             "model_artifacts": self.model_artifacts,
             "job_template_ready": self.job_template_ready,
+            "local_serving": self.local_serving.as_dict(),
             "issues": self.issues,
             "issue_details": [issue.as_dict() for issue in self.issue_details],
             "next_actions": self.next_actions,
@@ -702,7 +730,9 @@ def build_beginner_wizard(project_path: str) -> str:
         f"{format_beginner_apply_step(analysis)}\n\n"
         "Step 8. 재검증\n"
         "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.\n\n"
-        "Step 9. 분석 리포트 생성\n"
+        "Step 9. 로컬 서빙 테스트\n"
+        f"{format_beginner_local_serving(analysis)}\n\n"
+        "Step 10. 분석 리포트 생성\n"
         "- 최종 결과와 다음 조치를 리포트로 남깁니다."
     )
 
@@ -733,6 +763,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             entrypoint_candidates=[],
             model_artifacts=[],
             job_template_ready=False,
+            local_serving=build_local_serving_plan(
+                display_path,
+                exists=False,
+                is_directory=False,
+                requirements_files=[],
+                entrypoint_candidates=[],
+                model_artifacts=[],
+            ),
             issues=["프로젝트 경로를 찾을 수 없습니다."],
             issue_details=[
                 build_project_issue(
@@ -768,6 +806,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             entrypoint_candidates=[],
             model_artifacts=[],
             job_template_ready=False,
+            local_serving=build_local_serving_plan(
+                display_path,
+                exists=True,
+                is_directory=False,
+                requirements_files=[],
+                entrypoint_candidates=[],
+                model_artifacts=[],
+            ),
             issues=["선택한 경로가 폴더가 아닙니다."],
             issue_details=[
                 build_project_issue(
@@ -898,6 +944,14 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         entrypoint_candidates=entrypoint_candidates,
         model_artifacts=model_artifacts,
         job_template_ready=job_template_ready,
+        local_serving=build_local_serving_plan(
+            display_path,
+            exists=True,
+            is_directory=True,
+            requirements_files=[relative_path(path, target) for path in requirements_files],
+            entrypoint_candidates=entrypoint_candidates,
+            model_artifacts=model_artifacts,
+        ),
         issues=issues,
         issue_details=issue_details,
         next_actions=dedupe(next_actions),
@@ -1062,6 +1116,77 @@ def format_model_artifact_detail(model_artifacts: list[str], scan: ProjectScan) 
     if len(model_artifacts) == 1:
         return f"{first} ({format_bytes(size)})"
     return f"{first} ({format_bytes(size)}) 외 {len(model_artifacts) - 1}개"
+
+
+def build_local_serving_plan(
+    project_path: str,
+    exists: bool,
+    is_directory: bool,
+    requirements_files: list[str],
+    entrypoint_candidates: list[str],
+    model_artifacts: list[str],
+) -> LocalServingPlan:
+    host = "127.0.0.1"
+    port = 8000
+    checks: list[RegistrationCheck] = []
+    notes = [
+        "기본 방식은 FastAPI 호환 로컬 서버 기준입니다.",
+        "실제 서버 실행 전에는 dry-run으로 포트와 입력 예시를 먼저 확인합니다.",
+    ]
+    if not exists:
+        checks.append(RegistrationCheck("serving_project", "프로젝트 경로", "block", "프로젝트 폴더를 찾을 수 없습니다."))
+    elif not is_directory:
+        checks.append(RegistrationCheck("serving_project", "프로젝트 경로", "block", "폴더가 아니어서 서빙할 수 없습니다."))
+    else:
+        checks.append(RegistrationCheck("serving_project", "프로젝트 경로", "pass", "프로젝트 폴더 확인"))
+
+    checks.append(
+        RegistrationCheck(
+            "serving_artifact",
+            "모델 artifact",
+            "pass" if model_artifacts else "block",
+            format_count(model_artifacts) if model_artifacts else "서빙할 모델 파일 없음",
+        )
+    )
+    checks.append(
+        RegistrationCheck(
+            "serving_entrypoint",
+            "서빙 entrypoint",
+            "pass" if entrypoint_candidates else "warn",
+            format_count(entrypoint_candidates) if entrypoint_candidates else "train.py 또는 main.py 확인 필요",
+        )
+    )
+    checks.append(
+        RegistrationCheck(
+            "serving_dependencies",
+            "서빙 패키지",
+            "pass" if requirements_files else "warn",
+            format_count(requirements_files) if requirements_files else "requirements.txt 확인 필요",
+        )
+    )
+    checks.append(RegistrationCheck("serving_port", "로컬 포트", "pass", f"{host}:{port} 사용 예정"))
+
+    if any(check.status == "block" for check in checks):
+        status = "불가"
+    elif any(check.status == "warn" for check in checks):
+        status = "보완 필요"
+    else:
+        status = "준비 가능"
+
+    return LocalServingPlan(
+        status=status,
+        mode="FastAPI 기본 서버",
+        host=host,
+        port=port,
+        health_endpoint=f"http://{host}:{port}/health",
+        predict_endpoint=f"http://{host}:{port}/predict",
+        checks=checks,
+        commands=[
+            f"ml-agent serve {project_path} --dry-run",
+            f"python -m uvicorn serving_app:app --host {host} --port {port}",
+        ],
+        notes=notes,
+    )
 
 
 def file_size(path: Path) -> int:
@@ -1503,6 +1628,31 @@ def format_beginner_apply_step(analysis: ProjectAnalysis) -> str:
     return "\n".join(rows)
 
 
+def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
+    serving = analysis.local_serving
+    rows = [
+        f"- 상태: {serving.status}",
+        f"- 방식: {serving.mode}",
+        f"- health 확인: {serving.health_endpoint}",
+        f"- predict 테스트: {serving.predict_endpoint}",
+        "- 체크 결과:",
+    ]
+    rows.extend(f"  - {format_check_status(check.status)} {check.label}: {check.detail}" for check in serving.checks)
+    rows.extend(
+        [
+            "- 실행 전 확인 명령:",
+            f"  - {serving.commands[0]}",
+        ]
+    )
+    if serving.status == "준비 가능":
+        rows.append("- dry-run 확인 후 로컬 서버 실행 명령을 안내합니다.")
+    elif serving.status == "보완 필요":
+        rows.append("- 보완 항목을 수정한 뒤 다시 로컬 서빙 테스트를 진행합니다.")
+    else:
+        rows.append("- 차단 항목이 있어 아직 로컬 서빙을 실행하지 않습니다.")
+    return "\n".join(rows)
+
+
 def format_severity(severity: str) -> str:
     labels = {
         "blocker": "필수 확인",
@@ -1608,8 +1758,8 @@ def handle_advanced_input(command: str) -> str:
         if as_json:
             return json.dumps(profile.as_dict(), ensure_ascii=False, indent=2)
         return format_profile(profile)
-    if parts[0] not in {"analyze", "validate", "fix", "apply", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, report, chat, profile, config, init, prompts, errors"
+    if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report"}:
+        return "unknown command. available: analyze, validate, fix, apply, serve, report, chat, profile, config, init, prompts, errors"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -1629,7 +1779,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     approval_options = build_approval_options(analysis) if command in {"fix", "apply"} else None
     applied_changes = None
 
-    if command in {"analyze", "validate", "fix", "apply", "report"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report"}:
         details.append(f"path={target}")
         details.append(f"agent_profile={profile.name}")
     if command == "fix" and not dry_run:
@@ -1641,7 +1791,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         details.append(f"applied_changes={len([change for change in applied_changes if change.status == 'applied'])}")
         details.append(f"skipped_changes={len([change for change in applied_changes if change.status == 'skipped'])}")
         analysis = analyze_project(path)
-    if command in {"analyze", "validate", "fix", "apply", "report"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report"}:
         details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
         details.append(f"preview_items={len(fix_previews or [])}")
@@ -1655,11 +1805,18 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
 
     details.append(f"mlflow={'ok' if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else 'missing'}")
     details.append(f"job_template={'ready' if analysis.job_template_ready else 'needs_input'}")
+    if command in {"serve", "report"}:
+        details.append(f"local_serving={analysis.local_serving.status}")
+        details.append(f"health={analysis.local_serving.health_endpoint}")
+        details.append(f"predict={analysis.local_serving.predict_endpoint}")
     details.append(f"issues={len(analysis.issues)}")
     if analysis.registration_status == "불가":
         status = "error"
         exit_code = 2
     elif command == "validate" and analysis.issues:
+        status = "needs_action"
+        exit_code = 1
+    elif command == "serve" and analysis.local_serving.status != "준비 가능":
         status = "needs_action"
         exit_code = 1
     if command == "report" and result_file:
@@ -1697,6 +1854,9 @@ def write_report_file(
             "registration_status": analysis.registration_status,
             "mlflow": "ok" if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else "missing",
             "job_template": "ready" if analysis.job_template_ready else "needs_input",
+            "local_serving": analysis.local_serving.status,
+            "health_endpoint": analysis.local_serving.health_endpoint,
+            "predict_endpoint": analysis.local_serving.predict_endpoint,
             "issue_count": len(analysis.issues),
             "next_actions": analysis.next_actions,
         },
@@ -1748,7 +1908,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agent")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["analyze", "validate", "fix", "apply", "report"]:
+    for command in ["analyze", "validate", "fix", "apply", "serve", "report"]:
         sub = subparsers.add_parser(command)
         sub.add_argument("path", nargs="?", default=".")
         sub.add_argument("--json", action="store_true")
@@ -1887,6 +2047,7 @@ analyze    프로젝트 구조 분석
 validate   MLflow / Job Template 검증
 fix        수정안 생성
 apply      승인된 수정안 적용
+serve      로컬 서빙 테스트 계획 확인
 report     분석 리포트 생성
 chat       Agent 대화 모드 진입
 profile    Deep Agent 프로파일 확인
