@@ -908,6 +908,33 @@ class AppConfigTest(unittest.TestCase):
             self.assertTrue((root / "registration_packages").exists())
 
 
+class OpenCodeProfileTest(unittest.TestCase):
+    def test_opencode_deep_agent_only_profile_exists(self):
+        root = Path(__file__).resolve().parents[1]
+        opencode_dir = root / ".opencode"
+        agent_dir = opencode_dir / "agent"
+        agent_files = sorted(path.name for path in agent_dir.glob("*.md"))
+        profile = (agent_dir / "deep-agent.md").read_text(encoding="utf-8")
+
+        self.assertEqual(agent_files, ["deep-agent.md"])
+        self.assertIn("mode: primary", profile)
+        self.assertIn("Plan mode must not modify files.", profile)
+        self.assertIn("Build mode only after approval", profile)
+        self.assertFalse((agent_dir / "triage.md").exists())
+        self.assertFalse((agent_dir / "duplicate-pr.md").exists())
+
+    def test_opencode_config_references_deepagents_and_skills(self):
+        root = Path(__file__).resolve().parents[1]
+        config = json.loads((root / ".opencode" / "opencode.jsonc").read_text(encoding="utf-8"))
+        tui = json.loads((root / ".opencode" / "tui.json").read_text(encoding="utf-8"))
+        theme = json.loads((root / ".opencode" / "themes" / "deep-agent.json").read_text(encoding="utf-8"))
+
+        self.assertIn("deepagents-libs", config["references"])
+        self.assertEqual(config["references"]["deepagents-libs"]["path"], "deepagents_source/deepagents-main/libs")
+        self.assertEqual(tui["plugin"], [])
+        self.assertEqual(theme["theme"]["accent"]["dark"], "blue")
+
+
 class PromptAndSkillStoreTest(unittest.TestCase):
     def test_prompt_templates_are_saved(self):
         templates = load_prompt_templates()

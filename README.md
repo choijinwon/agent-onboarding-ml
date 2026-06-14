@@ -131,6 +131,7 @@ Windows 10/11:
 
 이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness와 [deepagents/libs](https://github.com/langchain-ai/deepagents/tree/main/libs) 구조를 참고했습니다.
 터미널 화면 구성은 [anomalyco/opencode](https://github.com/anomalyco/opencode)의 Terminal UI와 `build / plan` agent 전환 개념을 참고했습니다.
+OpenCode workspace 설정은 upstream `.opencode` 구조를 참고하되, 이 repo에는 `.opencode/agent/deep-agent.md` 하나만 적용했습니다.
 
 DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
 

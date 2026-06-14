@@ -137,6 +137,7 @@ JSON 출력:
 ## 8. DeepAgents 소스 확인
 
 DeepAgents 참고 소스는 repo 안에 포함되어 있습니다.
+OpenCode 설정은 `.opencode/`에 있으며, Deep Agent만 적용되어 있습니다.
 
 ```text
 deepagents_source/
@@ -156,6 +157,12 @@ deepagents_source/
 
 ```powershell
 .\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
+```
+
+OpenCode Deep Agent 설정 확인:
+
+```powershell
+type .opencode\agent\deep-agent.md
 ```
 
 ## 9. 이미지형 TUI 화면
