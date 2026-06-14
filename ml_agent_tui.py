@@ -212,6 +212,13 @@ def run_tui(project_path: str = "") -> int:
         def on_mount(self) -> None:
             self.focus()
 
+        def on_key(self, event) -> None:
+            if event.key == "tab":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.app.action_toggle_agent()
+
     class StatusBar(Static):
         pass
 
@@ -258,7 +265,7 @@ def run_tui(project_path: str = "") -> int:
         }
         """
         BINDINGS = [
-            Binding("tab", "toggle_agent", "agents", show=True),
+            Binding("tab", "toggle_agent", "agents", show=True, priority=True),
             Binding("escape", "quit", "interrupt", show=True),
         ]
 
@@ -298,6 +305,12 @@ def run_tui(project_path: str = "") -> int:
 
         def on_key(self, event) -> None:
             command = self.query_one(CommandInput)
+            if event.key == "tab":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.action_toggle_agent()
+                return
             if self.focused is command:
                 return
             if event.key == "enter":
