@@ -209,12 +209,14 @@ def run_tui(project_path: str = "") -> int:
         pass
 
     class CommandInput(Input):
-        pass
+        def on_mount(self) -> None:
+            self.focus()
 
     class StatusBar(Static):
         pass
 
     class AIOnboardingTuiApp(App[None]):
+        AUTO_FOCUS = "#command"
         CSS = """
         Screen {
             background: #080808;
@@ -239,9 +241,14 @@ def run_tui(project_path: str = "") -> int:
             color: #e8e8e8;
         }
         #command {
-            height: 4;
-            padding: 1 2;
+            height: 3;
+            padding: 0 1;
             background: #202020;
+            color: #ffffff;
+            border-left: solid #58a6ff;
+        }
+        #command:focus {
+            background: #242424;
             border-left: solid #58a6ff;
         }
         #status {
@@ -268,20 +275,46 @@ def run_tui(project_path: str = "") -> int:
 
         def on_mount(self) -> None:
             self._refresh()
-            self.query_one(CommandInput).focus()
+            self._focus_command()
 
         def action_toggle_agent(self) -> None:
             self.controller.toggle_agent()
             self._refresh()
+            self._focus_command()
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             value = event.value
-            event.input.value = ""
+            command = self.query_one(CommandInput)
+            command.value = ""
             self.controller.submit(value)
             if self.controller.exited:
                 self.exit()
                 return
             self._refresh()
+            self._focus_command()
+
+        def on_click(self) -> None:
+            self._focus_command()
+
+        def on_key(self, event) -> None:
+            command = self.query_one(CommandInput)
+            if self.focused is command:
+                return
+            if event.key == "enter":
+                event.stop()
+                value = command.value
+                command.value = ""
+                self.controller.submit(value)
+                if self.controller.exited:
+                    self.exit()
+                    return
+                self._refresh()
+                self._focus_command()
+                return
+            if event.character:
+                event.stop()
+                self._focus_command()
+                command.insert_text_at_cursor(event.character)
 
         def _refresh(self) -> None:
             self.query_one(LogView).update(self.controller.render_log())
@@ -289,6 +322,9 @@ def run_tui(project_path: str = "") -> int:
                 f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "
                 f"{self.controller.agent_mode}  |  esc interrupt   tab agents"
             )
+
+        def _focus_command(self) -> None:
+            self.set_focus(self.query_one(CommandInput))
 
     AIOnboardingTuiApp(project_path).run()
     return 0
