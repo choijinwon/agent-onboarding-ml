@@ -1662,6 +1662,8 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     elif command == "validate" and analysis.issues:
         status = "needs_action"
         exit_code = 1
+    if command == "report" and result_file:
+        write_report_file(Path(result_file), analysis, profile.name, details, status, exit_code)
     return CommandResult(
         command,
         path,
@@ -1674,6 +1676,34 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         approval_options,
         applied_changes,
     )
+
+
+def write_report_file(
+    path: Path,
+    analysis: ProjectAnalysis,
+    agent_profile: str,
+    details: list[str],
+    status: str,
+    exit_code: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "title": "AI ML 온보딩 분석 리포트",
+        "agent_profile": agent_profile,
+        "status": status,
+        "exit_code": exit_code,
+        "summary": {
+            "project_path": analysis.path,
+            "registration_status": analysis.registration_status,
+            "mlflow": "ok" if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else "missing",
+            "job_template": "ready" if analysis.job_template_ready else "needs_input",
+            "issue_count": len(analysis.issues),
+            "next_actions": analysis.next_actions,
+        },
+        "details": details,
+        "analysis": analysis.as_dict(),
+    }
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def format_command_result(result: CommandResult) -> str:

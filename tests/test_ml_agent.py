@@ -489,6 +489,25 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("mlflow", (root / "requirements.txt").read_text())
             self.assertTrue(any(change["code"] == "CREATE_REQUIREMENTS" for change in payload["applied_changes"]))
 
+    def test_report_writes_final_analysis_file(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\nscikit-learn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"ml-agent report {root} --json")
+            payload = json.loads(output)
+            report_path = root / "ml-agent-report.json"
+            report = json.loads(report_path.read_text())
+
+            self.assertEqual(payload["command"], "report")
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report["title"], "AI ML 온보딩 분석 리포트")
+            self.assertEqual(report["summary"]["registration_status"], "등록 가능")
+            self.assertEqual(report["summary"]["issue_count"], 0)
+            self.assertEqual(report["summary"]["mlflow"], "ok")
+
     def test_profile_command_outputs_deep_agent_profile(self):
         output = handle_advanced_input("ml-agent profile")
 
