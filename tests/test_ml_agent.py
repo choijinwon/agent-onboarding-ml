@@ -189,9 +189,12 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("보완 권장:", output)
             self.assertIn("Agent 수정 가능:", output)
             self.assertIn("주요 문제:", output)
+            self.assertIn("| 번호", output)
+            self.assertIn("| 구분", output)
+            self.assertIn("| 다음 조치", output)
             self.assertIn("MLflow 패키지 누락", output)
-            self.assertIn("대상: requirements.txt", output)
-            self.assertIn("다음 조치:", output)
+            self.assertIn("requirements.txt", output)
+            self.assertIn("가능", output)
             self.assertIn("1. 수정안 미리보기로 이동", output)
 
     def test_beginner_wizard_shows_step5_dry_run_preview(self):

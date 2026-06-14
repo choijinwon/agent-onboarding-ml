@@ -1600,14 +1600,7 @@ def format_beginner_issues(analysis: ProjectAnalysis) -> str:
         f"- Agent 수정 가능: {fixable_count}개",
         "- 주요 문제:",
     ]
-    for index, issue in enumerate(analysis.issue_details[:3], start=1):
-        issue_rows.extend(
-            [
-                f"- [{index}] {format_severity(issue.severity)}: {issue.title}",
-                f"  대상: {issue.target}",
-                f"  다음 조치: {issue.recommendation}",
-            ]
-        )
+    issue_rows.extend(format_issue_table(analysis.issue_details[:3]))
     if len(analysis.issue_details) > 3:
         issue_rows.append(f"- 나머지 문제 {len(analysis.issue_details) - 3}개는 리포트에 자세히 남깁니다.")
     issue_rows.extend(
@@ -1619,6 +1612,49 @@ def format_beginner_issues(analysis: ProjectAnalysis) -> str:
         ]
     )
     return "\n".join(issue_rows)
+
+
+def format_issue_table(issues: list[ProjectIssue]) -> list[str]:
+    headers = ("번호", "구분", "문제", "대상", "다음 조치", "수정")
+    widths = (4, 9, 18, 22, 34, 6)
+    rows = [
+        "  " + format_table_row(headers, widths),
+        "  " + format_table_separator(widths),
+    ]
+    for index, issue in enumerate(issues, start=1):
+        rows.append(
+            "  "
+            + format_table_row(
+                (
+                    str(index),
+                    format_severity(issue.severity),
+                    issue.title,
+                    issue.target,
+                    issue.recommendation,
+                    "가능" if issue.fixable_by_agent else "수동",
+                ),
+                widths,
+            )
+        )
+    return rows
+
+
+def format_table_row(values: tuple[str, ...], widths: tuple[int, ...]) -> str:
+    cells = [truncate_cell(value, width).ljust(width) for value, width in zip(values, widths)]
+    return "| " + " | ".join(cells) + " |"
+
+
+def format_table_separator(widths: tuple[int, ...]) -> str:
+    return "| " + " | ".join("-" * width for width in widths) + " |"
+
+
+def truncate_cell(value: str, width: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= width:
+        return normalized
+    if width <= 1:
+        return normalized[:width]
+    return normalized[: width - 1] + "…"
 
 
 def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
