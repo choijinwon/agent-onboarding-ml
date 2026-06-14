@@ -911,45 +911,83 @@ def format_beginner_tab(index: int, total: int, body: str) -> str:
 
 
 def render_tui_header(index: int, total: int, title: str) -> str:
-    width = 104
-    tabs = " ".join(
-        f"[Tab {step}]" if step == index + 1 else f" Tab {step} "
-        for step in range(1, total + 1)
-    )
+    width = 112
+    current = f"Current: Tab {index + 1}/{total} - {title}"
+    meta = f"[Tab {index + 1}] {index + 1}/{total} | Deep Agent | read-only first"
     rows = [
+        "+" + "=" * width + "+",
+        f"| {'AI ML Onboarding Console':<{width - len(meta) - 1}}{meta} |",
         "+" + "-" * width + "+",
-        f"| {'AI ML Onboarding Assistant':<{width - 1}}|",
-        f"| {'Current: Tab ' + str(index + 1) + '/' + str(total) + ' - ' + title:<{width - 1}}|",
-        f"| {tabs:<{width - 1}}|",
+        f"| {('# ' + title):<{width - 1}}|",
+        f"| {current:<{width - 1}}|",
         "+" + "-" * width + "+",
     ]
     return "\n".join(rows)
 
 
 def render_tui_body(sidebar_rows: list[str], content: str) -> str:
-    left_width = 20
-    right_width = 80
+    width = 112
     content_lines = content.splitlines() or [""]
-    row_count = max(len(sidebar_rows), len(content_lines))
+    request_line = content_lines[0].removeprefix("- ").strip()
+    log_lines = build_terminal_log_lines(content_lines)
     rows = [
-        "+" + "-" * left_width + "+" + "-" * right_width + "+",
-        f"| {'STEPS':<{left_width - 1}}| {'CURRENT PANEL':<{right_width - 1}}|",
-        "+" + "-" * left_width + "+" + "-" * right_width + "+",
+        f"| {'STEPS':<35}{'CURRENT PANEL':<{width - 36}}|",
+        "|" + " " * width + "|",
+        f"| {'Workflow':<{width - 1}}|",
     ]
-    for row_index in range(row_count):
-        left = sidebar_rows[row_index] if row_index < len(sidebar_rows) else ""
-        right = content_lines[row_index] if row_index < len(content_lines) else ""
-        rows.append(
-            f"| {truncate_cell(left, left_width - 2).ljust(left_width - 2)} "
-            f"| {truncate_cell(right, right_width - 2).ljust(right_width - 2)} |"
-        )
-    rows.append("+" + "-" * left_width + "+" + "-" * right_width + "+")
+    for item in sidebar_rows:
+        rows.append(f"|   {truncate_cell(item, width - 5).ljust(width - 5)} |")
+    rows.extend(
+        [
+            "|" + " " * width + "|",
+            f"| {'User request':<{width - 1}}|",
+            f"| {'> ' + truncate_cell(request_line, width - 5):<{width - 1}}|",
+            "|" + " " * width + "|",
+        ]
+    )
+    for line in log_lines:
+        rows.append(f"| {truncate_cell(line, width - 3).ljust(width - 3)} |")
+    rows.append("+" + "-" * width + "+")
     return "\n".join(rows)
+
+
+def build_terminal_log_lines(content_lines: list[str]) -> list[str]:
+    rows = [
+        "I'll inspect the project state and keep changes behind approval.",
+        "",
+    ]
+    for line in content_lines:
+        if not line.strip():
+            rows.append("")
+        elif line.startswith("- "):
+            rows.append(f"* {line[2:]}")
+        elif line.startswith("|"):
+            rows.append(f"  {line}")
+        else:
+            rows.append(line)
+    rows.extend(
+        [
+            "",
+            "~ Awaiting next step...",
+            "[] Build . qwen3.5 . AI ML Onboarding",
+        ]
+    )
+    return rows
 
 
 def render_tui_footer(index: int) -> str:
     command = "선택 번호: 1=적용  2=다시 보기  3=취소" if index == 5 else "Enter=다음  이전=이전 탭  1~10=탭 이동  종료=중단"
-    return f"명령: {command}"
+    width = 112
+    input_line = "| " + " " * (width - 2) + " |"
+    shortcut_line = f"| {truncate_cell(command, 57).ljust(57)} esc interrupt   tab agents   ctrl+p commands |"
+    return "\n".join(
+        [
+            "+" + "-" * width + "+",
+            input_line,
+            shortcut_line,
+            "+" + "=" * width + "+",
+        ]
+    )
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
@@ -2320,30 +2358,31 @@ def main(argv: list[str] | None = None) -> int:
     return result.exit_code
 
 
-LAUNCH_SCREEN = """┌────────────────────────────────────────────┐
-│ AI ML 온보딩 Assistant                       │
-├────────────────────────────────────────────┤
-│ Mode: 폐쇄망 POC                             │
-│ Engine: Deep Agent                           │
-│ UI: Console Wizard + Chat + CLI              │
-└────────────────────────────────────────────┘
-
-사용자 모드를 선택하세요.
-
-1. 초급자 모드
-   - 단계별 Wizard 방식
-   - 선택지만 따라가면 됨
-   - 파일 수정 전 자세한 설명 제공
-
-2. 중급자 모드
-   - Chat + Wizard 혼합
-   - 프로젝트 분석 후 수정안 선택
-   - MLflow / Job Template 중심 검증
-
-3. 고급자 모드
-   - CLI Command 중심
-   - dry-run / apply / validate 직접 실행
-   - 자동화 파이프라인 연계 가능"""
+LAUNCH_SCREEN = """+================================================================================================+
+| AI ML Onboarding Console                                      Deep Agent | Windows 10/11 POC |
++------------------------------------------------------------------------------------------------+
+| # Launch workflow                                                                             |
+| 사용자 모드를 선택하세요.                                                                       |
+|                                                                                                |
+| > 처음 사용하는 경우에는 1. 초급자 모드를 권장합니다.                                           |
+|                                                                                                |
+| 1. 초급자 모드                                                                                 |
+|    - 단계별 Wizard 방식                                                                        |
+|    - 선택지만 따라가면 됨                                                                      |
+|    - 파일 수정 전 자세한 설명 제공                                                             |
+|                                                                                                |
+| 2. 중급자 모드                                                                                 |
+|    - Chat + Wizard 혼합                                                                        |
+|    - 프로젝트 분석 후 수정안 선택                                                              |
+|    - MLflow / Job Template 중심 검증                                                           |
+|                                                                                                |
+| 3. 고급자 모드                                                                                 |
+|    - CLI Command 중심                                                                          |
+|    - dry-run / apply / validate 직접 실행                                                      |
+|    - 자동화 파이프라인 연계 가능                                                               |
++------------------------------------------------------------------------------------------------+
+| esc interrupt   /mode beginner   /mode intermediate   /mode advanced                          |
++================================================================================================+"""
 
 
 INTERMEDIATE_INTRO = """중급자 모드가 선택되었습니다.
