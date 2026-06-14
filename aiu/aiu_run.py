@@ -7,16 +7,16 @@ from tempfile import TemporaryDirectory
 import unittest
 import zipfile
 
-import ml_agent
-from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
-from deep_agent_profile import build_ml_platform_profile, format_profile
-from deepagents_libs import deepagents_libs_as_dict
-from deepagents_runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
-from chat_session_store import append_chat_session_event, mask_sensitive_text
-from error_log_store import analyze_error_log, list_error_logs, save_error_log
-from prompt_store import export_prompt_templates_to_wiki, load_prompt_templates
-from qwen_chat import QwenChatConfig, chat_with_qwen
-from ml_agent import (
+from deep_agent import cli as ml_agent
+from deep_agent.app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
+from deep_agent.profile import build_ml_platform_profile, format_profile
+from deep_agent.libs import deepagents_libs_as_dict
+from deep_agent.runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
+from deep_agent.stores.chat_session_store import append_chat_session_event, mask_sensitive_text
+from deep_agent.stores.error_log_store import analyze_error_log, list_error_logs, save_error_log
+from deep_agent.stores.prompt_store import export_prompt_templates_to_wiki, load_prompt_templates
+from deep_agent.qwen_chat import QwenChatConfig, chat_with_qwen
+from deep_agent.cli import (
     ConsoleAssistant,
     LAUNCH_SCREEN,
     MODE_ADVANCED,
@@ -37,8 +37,9 @@ from ml_agent import (
     parse_mode_command,
     resolve_existing_sample_project,
     resolve_beginner_project_input,
+    sample_projects_root,
 )
-from ml_agent_tui import (
+from deep_agent.tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
     format_agent_mode_selector,
@@ -475,7 +476,7 @@ class BeginnerWizardTest(unittest.TestCase):
                 import os
 
                 os.chdir(tmpdir)
-                sample = Path(tmpdir) / "sample_projects" / "custom-added-model"
+                sample = Path(tmpdir) / ".aiu" / "sample_projects" / "custom-added-model"
                 sample.mkdir(parents=True)
 
                 intro = build_beginner_intro()
@@ -613,7 +614,7 @@ class BeginnerWizardTest(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
-            root = Path(tmpdir) / "sample_projects"
+            root = Path(tmpdir) / ".aiu" / "sample_projects"
             expected = [
                 root / "heavy-model",
                 root / "tensorflow-model",
@@ -664,7 +665,7 @@ class BeginnerWizardTest(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
-            root = Path(tmpdir) / "sample_projects"
+            root = Path(tmpdir) / ".aiu" / "sample_projects"
             projects = sorted(path for path in root.iterdir() if path.is_dir())
 
             self.assertIsNotNone(message)
@@ -677,7 +678,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
     def test_create_large_model_samples_supports_small_test_artifacts(self):
         with TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sample_projects"
+            root = Path(tmpdir) / ".aiu" / "sample_projects"
             sample_paths = create_large_model_samples(root, artifact_size_bytes=1024)
 
             self.assertEqual(len(sample_paths), 10)
@@ -920,11 +921,11 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertEqual(payload["runtime_import"], "deepagents")
         self.assertIn("https://github.com/langchain-ai/deepagents/tree/main/libs", payload["reference"])
         self.assertEqual(payload["source_type"], "directory")
-        self.assertIn("deepagents_source", payload["source_path"])
+        self.assertIn("deep_agent/vendor/deepagents", payload["source_path"])
         self.assertTrue(any(item["path"] == "libs/deepagents" for item in payload["libs"]))
 
     def test_deepagents_source_is_committed_under_repo(self):
-        source_root = Path(__file__).resolve().parents[1] / "deepagents_source" / "deepagents-main" / "libs"
+        source_root = Path(__file__).resolve().parents[1] / "deep_agent" / "vendor" / "deepagents" / "deepagents-main" / "libs"
 
         self.assertTrue(source_root.exists())
         self.assertTrue((source_root / "deepagents" / "pyproject.toml").exists())
@@ -1340,7 +1341,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("최종 등록 상태", output)
             self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
             self.assertIn("Agent: DeepAgents 응답", controller.render_log())
-            session_files = list((Path(tmpdir) / "sessions").glob("chat-session-*.jsonl"))
+            session_files = list((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
             self.assertEqual(len(session_files), 1)
             session_payload = json.loads(session_files[0].read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(session_payload["user_message"], "프로젝트 분석해줘")
@@ -1380,7 +1381,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertIn("import mlflow", train.read_text())
             self.assertEqual(controller.index, 6)
-            session_file = next((Path(tmpdir) / "sessions").glob("chat-session-*.jsonl"))
+            session_file = next((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
             session_payload = json.loads(session_file.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(session_payload["selected_model"], "qwen3.6")
             self.assertTrue(session_payload["applied_changes"])
@@ -1465,10 +1466,10 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("ENABLE_RICH_CONSOLE=true", content)
         self.assertIn("ENABLE_TUI_BACKGROUND=false", content)
         self.assertIn("ENABLE_TUI_INPUT_PANEL=true", content)
-        self.assertIn("SESSION_DIR=sessions", content)
-        self.assertIn("SKILL_STORE_DIR=skills", content)
-        self.assertIn("WIKI_DIR=wiki", content)
-        self.assertIn("WIKI_PROMPT_DIR=wiki/prompts", content)
+        self.assertIn("SESSION_DIR=.aiu/sessions", content)
+        self.assertIn("SKILL_STORE_DIR=deep_agent/skills", content)
+        self.assertIn("WIKI_DIR=deep_agent/wiki", content)
+        self.assertIn("WIKI_PROMPT_DIR=deep_agent/wiki/prompts", content)
 
     def test_runtime_layout_creates_skill_store(self):
         with TemporaryDirectory() as tmpdir:
@@ -1476,16 +1477,16 @@ class AppConfigTest(unittest.TestCase):
             config = AppConfig.load(root_dir=root)
             directories = ensure_runtime_layout(config)
 
-            self.assertIn(root / "skills", directories)
-            self.assertIn(root / "sessions", directories)
-            self.assertTrue((root / "skills" / "README.md").exists())
-            self.assertTrue((root / "skills" / "instrumenting-with-mlflow-tracing" / "SKILL.md").exists())
-            self.assertTrue((root / "skills" / "agent-evaluation" / "SKILL.md").exists())
-            self.assertTrue((root / "registration_packages").exists())
-            self.assertTrue((root / "wiki").exists())
-            self.assertTrue((root / "wiki" / "prompts").exists())
-            self.assertTrue((root / "wiki" / "prompts" / "prompt_templates.md").exists())
-            self.assertTrue((root / "wiki" / "prompts" / "prompt_templates.json").exists())
+            self.assertIn(root / "deep_agent" / "skills", directories)
+            self.assertIn(root / ".aiu" / "sessions", directories)
+            self.assertTrue((root / "deep_agent" / "skills" / "README.md").exists())
+            self.assertTrue((root / "deep_agent" / "skills" / "instrumenting-with-mlflow-tracing" / "SKILL.md").exists())
+            self.assertTrue((root / "deep_agent" / "skills" / "agent-evaluation" / "SKILL.md").exists())
+            self.assertTrue((root / ".aiu" / "registration_packages").exists())
+            self.assertTrue((root / "deep_agent" / "wiki").exists())
+            self.assertTrue((root / "deep_agent" / "wiki" / "prompts").exists())
+            self.assertTrue((root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.md").exists())
+            self.assertTrue((root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.json").exists())
 
     def test_chat_session_store_masks_sensitive_values(self):
         with TemporaryDirectory() as tmpdir:
@@ -1530,12 +1531,14 @@ class PromptAndSkillStoreTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
 
         for skill_name in DEFAULT_SKILLS:
-            self.assertTrue((root / "skills" / skill_name / "SKILL.md").exists(), skill_name)
+            self.assertTrue((root / "deep_agent" / "skills" / skill_name / "SKILL.md").exists(), skill_name)
 
     def test_prompt_templates_export_to_wiki(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "prompt_templates.json").write_text(
+            prompt_file = root / "deep_agent" / "prompts" / "prompt_templates.json"
+            prompt_file.parent.mkdir(parents=True)
+            prompt_file.write_text(
                 json.dumps(
                     {
                         "templates": [
@@ -1554,8 +1557,8 @@ class PromptAndSkillStoreTest(unittest.TestCase):
             config = AppConfig.load(root_dir=root)
             paths = export_prompt_templates_to_wiki(config)
 
-            markdown = root / "wiki" / "prompts" / "prompt_templates.md"
-            payload = root / "wiki" / "prompts" / "prompt_templates.json"
+            markdown = root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.md"
+            payload = root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.json"
             self.assertEqual(paths, [markdown, payload])
             self.assertIn("## sample_prompt", markdown.read_text(encoding="utf-8"))
             self.assertIn("프로젝트를 분석하세요.", markdown.read_text(encoding="utf-8"))
@@ -1568,8 +1571,8 @@ class PromptAndSkillStoreTest(unittest.TestCase):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             config = AppConfig.load(root_dir=root)
-            stale_skill = root / "skills" / "mlflow-registration-check" / "SKILL.md"
-            custom_skill = root / "skills" / "custom-user-skill" / "SKILL.md"
+            stale_skill = root / "deep_agent" / "skills" / "mlflow-registration-check" / "SKILL.md"
+            custom_skill = root / "deep_agent" / "skills" / "custom-user-skill" / "SKILL.md"
             stale_skill.parent.mkdir(parents=True, exist_ok=True)
             custom_skill.parent.mkdir(parents=True, exist_ok=True)
             stale_skill.write_text("old content\n", encoding="utf-8")

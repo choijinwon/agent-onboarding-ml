@@ -7,7 +7,7 @@ Each skill should live in its own directory with a `SKILL.md` file.
 Example:
 
 ```text
-skills/
+deep_agent/skills/
 └── mlflow-registration-check/
     └── SKILL.md
 ```
@@ -15,7 +15,7 @@ skills/
 Default skills:
 
 ```text
-skills/
+deep_agent/skills/
 ├── agent-evaluation/
 ├── analyze-mlflow-chat-session/
 ├── analyze-mlflow-trace/

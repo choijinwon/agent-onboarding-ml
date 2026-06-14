@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app_config import AppConfig
+from deep_agent.app_config import AppConfig
 
 
 SENSITIVE_KEYS = ("API_KEY", "TOKEN", "PASSWORD", "SECRET", "BASE_URL")

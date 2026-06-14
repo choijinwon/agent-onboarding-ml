@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app_config import AppConfig
+from deep_agent.app_config import AppConfig
 
 
 @dataclass(frozen=True)

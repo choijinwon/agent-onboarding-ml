@@ -7,10 +7,10 @@ import os
 import shlex
 from urllib.parse import unquote, urlparse
 
-from app_config import AppConfig
-from chat_session_store import append_chat_session_event
+from deep_agent.app_config import AppConfig
+from deep_agent.stores.chat_session_store import append_chat_session_event
 
-from ml_agent import (
+from deep_agent.cli import (
     AppliedChange,
     MODE_CHANGE_MESSAGES,
     MODE_LABELS,
@@ -24,8 +24,8 @@ from ml_agent import (
     parse_mode_command,
     resolve_beginner_project_input,
 )
-from deepagents_runtime import DeepAgentsRuntime
-from qwen_chat import QwenChatConfig
+from deep_agent.runtime import DeepAgentsRuntime
+from deep_agent.qwen_chat import QwenChatConfig
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}

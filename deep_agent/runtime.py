@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app_config import AppConfig
-from ml_agent import (
+from deep_agent.app_config import AppConfig
+from deep_agent.cli import (
     analyze_project,
     apply_fix_previews,
     build_fix_previews,
@@ -16,10 +16,12 @@ from ml_agent import (
     format_beginner_apply_result,
     format_beginner_fix_preview,
 )
-from qwen_chat import QwenChatConfig
+from deep_agent.qwen_chat import QwenChatConfig
 
 
-LOCAL_DEEPAGENTS_LIB = Path(__file__).resolve().parent / "deepagents_source" / "deepagents-main" / "libs" / "deepagents"
+LOCAL_DEEPAGENTS_LIB = (
+    Path(__file__).resolve().parent / "vendor" / "deepagents" / "deepagents-main" / "libs" / "deepagents"
+)
 
 
 def _ensure_local_deepagents_on_path() -> None:

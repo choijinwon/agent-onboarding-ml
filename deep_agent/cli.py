@@ -11,17 +11,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from app_config import AppConfig, ensure_runtime_layout, format_config_summary
-from deep_agent_profile import build_ml_platform_profile, format_profile
-from deepagents_libs import deepagents_libs_as_dict, format_deepagents_libs
-from error_log_store import (
+from deep_agent.app_config import AppConfig, ensure_runtime_layout, format_config_summary
+from deep_agent.profile import build_ml_platform_profile, format_profile
+from deep_agent.libs import deepagents_libs_as_dict, format_deepagents_libs
+from deep_agent.stores.error_log_store import (
     analyze_error_log,
     format_error_analysis,
     format_error_log_list,
     list_error_logs,
     save_error_log,
 )
-from prompt_store import (
+from deep_agent.stores.prompt_store import (
     format_prompt_templates,
     load_prompt_templates,
     prompt_templates_as_dict,
@@ -1110,6 +1110,11 @@ def parse_mode_command(value: str) -> str | None:
     return parse_mode(mode_name)
 
 
+def sample_projects_root(config: AppConfig | None = None) -> Path:
+    active_config = AppConfig.load() if config is None else config
+    return active_config.root_dir / ".aiu" / "sample_projects"
+
+
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
     custom_sample = resolve_existing_sample_project(raw)
@@ -1119,13 +1124,13 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
             f"기존 샘플 프로젝트를 선택했습니다.\n- 위치: {custom_sample}\n- 초급자 Wizard가 이 경로로 계속 진행합니다.",
         )
     if normalized in {"/sample matrix", "/samples test", "/샘플 매트릭스", "sample matrix", "샘플 매트릭스"}:
-        sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
+        sample_paths = create_all_model_samples(sample_projects_root())
         return (
             str(sample_paths[0]),
             format_sample_matrix_message(sample_paths),
         )
     if normalized in LARGE10_SAMPLE_ALIASES:
-        sample_paths = create_large_model_samples(Path.cwd() / "sample_projects")
+        sample_paths = create_large_model_samples(sample_projects_root())
         return (
             str(sample_paths[0]),
             format_sample_matrix_message(
@@ -1134,7 +1139,7 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
             ),
         )
     if normalized in {"/sample all", "/samples", "/샘플 전체", "sample all", "samples", "샘플 전체"}:
-        sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
+        sample_paths = create_all_model_samples(sample_projects_root())
         first_path = sample_paths[0]
         return (
             str(first_path),
@@ -1146,7 +1151,7 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     if not sample_kind:
         return raw, None
     spec = SAMPLE_MODEL_SPECS[sample_kind]
-    sample_path = create_model_sample(Path.cwd() / "sample_projects" / spec.directory, spec)
+    sample_path = create_model_sample(sample_projects_root() / spec.directory, spec)
     sample_note = (
         "- 이 샘플은 오류/수정 흐름 재현을 위해 일부 구성이 빠져 있습니다.\n"
         if sample_kind.endswith("_error")
@@ -1185,13 +1190,13 @@ def build_beginner_intro() -> str:
     existing_samples = list_existing_sample_projects()
     if existing_samples:
         rows.append("")
-        rows.append("sample_projects/에 있는 기존 샘플:")
+        rows.append(".aiu/sample_projects/에 있는 기존 샘플:")
         rows.extend(f"- /sample {path.name}  ({path})" for path in existing_samples)
     return "\n".join(rows)
 
 
 def list_existing_sample_projects(root: Path | None = None) -> list[Path]:
-    sample_root = Path.cwd() / "sample_projects" if root is None else root
+    sample_root = sample_projects_root() if root is None else root
     if not sample_root.exists() or not sample_root.is_dir():
         return []
     return sorted(
@@ -1204,7 +1209,7 @@ def resolve_existing_sample_project(raw: str, root: Path | None = None) -> Path 
     value = raw.strip()
     if not value:
         return None
-    sample_root = Path.cwd() / "sample_projects" if root is None else root
+    sample_root = sample_projects_root() if root is None else root
     prefixes = ("/sample ", "sample ", "/샘플 ", "샘플 ")
     lowered = value.lower()
     name = value
@@ -1804,7 +1809,15 @@ def scan_project(root: Path) -> ProjectScan:
     python_file_count = 0
     model_artifacts: list[FileStat] = []
     largest_files: list[FileStat] = []
-    ignored_dirs = {".git", ".venv", "__pycache__", "node_modules", "registration_packages", "sample_projects"}
+    ignored_dirs = {
+        ".aiu",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "registration_packages",
+        "sample_projects",
+    }
     for path in root.rglob("*"):
         if any(part in ignored_dirs for part in path.relative_to(root).parts):
             continue
@@ -2791,12 +2804,37 @@ def initialize_runtime_layout() -> str:
     config = AppConfig.load()
     directories = ensure_runtime_layout(config)
     rows = "\n".join(f"- {directory}" for directory in directories)
+    migration_notice = format_runtime_migration_notice(config.root_dir)
+    notice = f"\n\nmigration notice:\n{migration_notice}" if migration_notice else ""
     return (
         "runtime layout initialized\n"
         f"skill_store_dir: {config.skill_store_dir()}\n"
         "directories:\n"
         f"{rows}"
+        f"{notice}"
     )
+
+
+def format_runtime_migration_notice(root: Path) -> str:
+    legacy_paths = [
+        root / "skills",
+        root / "wiki",
+        root / "sample_projects",
+        root / "sessions",
+        root / "chat_errors",
+        root / "registration_packages",
+        root / "fix_reports",
+        root / "deepagents_source",
+    ]
+    existing = [path for path in legacy_paths if path.exists()]
+    if not existing:
+        return ""
+    rows = [
+        "기존 루트 폴더를 발견했습니다. 삭제하지 않았습니다.",
+        "새 구조는 deep_agent/와 .aiu/를 사용합니다.",
+    ]
+    rows.extend(f"- legacy: {path}" for path in existing)
+    return "\n".join(rows)
 
 
 def handle_error_command(parts: list[str]) -> str:
@@ -2855,7 +2893,7 @@ def main(argv: list[str] | None = None) -> int:
         ConsoleAssistant().run()
         return 0
     if args.command == "tui":
-        from ml_agent_tui import run_tui
+        from deep_agent.tui import run_tui
 
         return run_tui()
     if args.command == "config":

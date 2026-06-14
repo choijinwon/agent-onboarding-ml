@@ -8,7 +8,7 @@ description: 저장된 에러 로그를 기반으로 원인 후보를 찾고 dry
 ## When To Use
 
 - 사용자가 에러 로그 기반 재수정을 요청할 때
-- `chat_errors/`에 저장된 로그를 다시 분석해야 할 때
+- `.aiu/chat_errors/`에 저장된 로그를 다시 분석해야 할 때
 - validate, apply, report 이후 실패 로그가 남았을 때
 
 ## Inputs

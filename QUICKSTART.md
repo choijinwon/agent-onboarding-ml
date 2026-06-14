@@ -1,7 +1,7 @@
 # AI ML 온보딩 퀵 가이드
 
 Windows 10/11 폐쇄망 환경에서 AI ML 온보딩 POC를 빠르게 실행하는 절차입니다.
-기본 실행은 `ml-agent.cmd`를 사용합니다.
+기본 실행은 `aiu`를 사용합니다. `ml-agent.cmd`는 하위 호환 wrapper입니다.
 
 ## 1. 준비물
 
@@ -62,10 +62,11 @@ Qwen은 Agent가 분석과 안내에 사용하는 LLM입니다.
 생성 또는 확인되는 주요 경로:
 
 ```text
-skills/
-chat_errors/
-fix_reports/
-registration_packages/
+deep_agent/skills/
+deep_agent/wiki/
+.aiu/chat_errors/
+.aiu/fix_reports/
+.aiu/registration_packages/
 ```
 
 ## 5. 설정 확인
@@ -147,14 +148,14 @@ JSON 출력:
 .\ml-agent.cmd prompts --json
 ```
 
-`deepagents`는 repo 내부 `deepagents_source`를 확인합니다.
+`deepagents`는 repo 내부 `deep_agent/vendor/deepagents`를 확인합니다.
 `--source`는 다운로드한 DeepAgents zip으로 비교 검증할 때 사용합니다.
 
 ## 8. DeepAgents 소스 확인
 
 DeepAgents 참고 소스는 repo 안에 포함되어 있습니다.
 ```text
-deepagents_source/
+deep_agent/vendor/deepagents/
 └── deepagents-main/
     ├── LICENSE
     ├── README.md
@@ -228,7 +229,7 @@ $env:NO_COLOR=1
 
 ## 10. 프롬프트 확인
 
-프롬프트는 기본적으로 `prompt_templates.json`에 저장됩니다.
+프롬프트는 기본적으로 `deep_agent/prompts/prompt_templates.json`에 저장됩니다.
 
 ```powershell
 .\ml-agent.cmd prompts
@@ -248,7 +249,7 @@ $env:NO_COLOR=1
 
 ## 11. 에러 로그 기반 재수정
 
-에러 로그는 기본적으로 `chat_errors/`에 저장됩니다.
+에러 로그는 기본적으로 `.aiu/chat_errors/`에 저장됩니다.
 
 수동 저장:
 
@@ -289,7 +290,7 @@ copy .env.example .env
 .\ml-agent.cmd
 ```
 
-`init`은 `skills/`의 기본 스킬을 최신 내용으로 갱신하고, `prompt_templates.json`을 `wiki/prompts/`에 Markdown/JSON으로 저장합니다.
+`init`은 `deep_agent/skills/`의 기본 스킬을 최신 내용으로 갱신하고, `deep_agent/prompts/prompt_templates.json`을 `deep_agent/wiki/prompts/`에 Markdown/JSON으로 저장합니다.
 
 Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
 
@@ -309,15 +310,15 @@ python3 -m aiu tui
 
 ```env
 ENABLE_HARNESS_SKILLS=true
-SKILL_STORE_DIR=skills
-WIKI_DIR=wiki
-WIKI_PROMPT_DIR=wiki/prompts
+SKILL_STORE_DIR=deep_agent/skills
+WIKI_DIR=deep_agent/wiki
+WIKI_PROMPT_DIR=deep_agent/wiki/prompts
 ```
 
 스킬은 다음 구조로 저장합니다.
 
 ```text
-skills/
+deep_agent/skills/
 └── mlflow-registration-check/
     └── SKILL.md
 ```
@@ -325,7 +326,7 @@ skills/
 기본 제공 스킬:
 
 ```text
-skills/
+deep_agent/skills/
 ├── agent-evaluation/
 ├── analyze-mlflow-chat-session/
 ├── analyze-mlflow-trace/

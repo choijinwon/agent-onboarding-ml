@@ -15,7 +15,7 @@
 ## 실행
 
 ```bash
-python3 ml_agent.py
+python3 -m aiu
 ```
 
 또는 저장소 루트에서 실행 스크립트를 사용할 수 있습니다.
@@ -27,7 +27,7 @@ python3 ml_agent.py
 Windows 10/11에서는 PowerShell 또는 CMD에서 다음처럼 실행합니다.
 
 ```powershell
-py -3 ml_agent.py
+py -3 -m aiu
 .\ml-agent.cmd
 ```
 
@@ -54,7 +54,7 @@ Linux/macOS:
 
 ```bash
 cp .env.example .env
-python3 ml_agent.py init
+python3 -m aiu init
 ```
 
 Windows 10/11:
@@ -153,14 +153,15 @@ Windows 10/11:
 터미널 화면 구성은 DeepAgents 실행 흐름에 맞춘 자체 Textual TUI로 제공합니다.
 TUI 하단 입력 영역은 `Plan`, `Build`, `Chatbot` 선택 박스를 제공하며 `Tab`으로 순환하거나 `/agent chat`, `/agent build`, `/agent plan`으로 직접 선택할 수 있습니다.
 
-DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
+루트는 실행 파일과 문서만 두고, 실제 Agent 코드와 구성 자산은 `deep_agent/` 안에 모읍니다.
+DeepAgents 소스는 `deep_agent/vendor/deepagents/deepagents-main/libs`에 포함되어 있습니다.
 
 - sub-agents: `project-scanner`, `mlflow-validator`, `job-template-planner`, `log-analyzer`
 - filesystem permissions: 읽기는 허용, 쓰기는 human-in-the-loop 승인, `.git`과 secret 경로 쓰기는 차단
 - skills: MLflow 등록 점검, Job Template 초안, 폐쇄망 검증 절차
 - memory: 등록 규칙과 팀 Job Template 컨벤션을 별도 메모리 경로로 선언
 - context policy: 긴 분석 결과는 요약하고 상세 증거는 리포트 산출물로 남김
-- skills 저장소: `SKILL_STORE_DIR` 값으로 지정하며 기본값은 `skills`
+- skills 저장소: `SKILL_STORE_DIR` 값으로 지정하며 기본값은 `deep_agent/skills`
 
 현재 구현은 폐쇄망 POC를 위해 외부 런타임 의존성을 강제하지 않는 독립 프로파일입니다.
 실제 DeepAgents runtime을 사용할 때는 optional dependency를 설치하고 libs 연결 상태를 확인합니다.
@@ -171,12 +172,12 @@ pip install ".[deepagents,tui]"
 ./ml-agent deepagents --json
 ```
 
-`ml-agent deepagents`는 기본적으로 repo 내부의 `deepagents_source/deepagents-main/libs`를 먼저 읽습니다. 다른 DeepAgents archive로 비교 검증할 때만 `--source <zip 경로>`를 지정합니다.
+`aiu deepagents`는 기본적으로 repo 내부의 `deep_agent/vendor/deepagents/deepagents-main/libs`를 먼저 읽습니다. 다른 DeepAgents archive로 비교 검증할 때만 `--source <zip 경로>`를 지정합니다.
 
 `libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/talon`, `libs/partners/*`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
 
 초급자 Step 1에서 대형 모델 샘플 10개를 만들려면 `/sample large10`을 입력합니다.
-샘플은 `sample_projects/` 아래에 생성되고 Git에는 포함되지 않습니다.
+샘플은 `.aiu/sample_projects/` 아래에 생성되고 Git에는 포함되지 않습니다.
 
 ## 환경 변수
 
@@ -193,13 +194,13 @@ Qwen 설정은 Agent가 분석과 안내에 사용하는 LLM 설정입니다.
 - `QWEN_MODELS`: 선택 가능한 모델 목록
 - `ENABLE_MULTI_AGENT`: sub-agent 분담 사용 여부
 - `ENABLE_HARNESS_SKILLS`: Deep Agent skill 저장/로드 사용 여부
-- `CHAT_ERROR_DIR`: 에러 로그 저장 경로
+- `CHAT_ERROR_DIR`: 에러 로그 저장 경로, 기본값 `.aiu/chat_errors`
 - `MASK_SENSITIVE_LOGS`: 에러 로그 민감정보 마스킹 여부
-- `REGISTRATION_PACKAGE_DIR`: 등록 패키지 산출물 경로
-- `FIX_REPORT_DIR`: 수정 리포트 경로
-- `SKILL_STORE_DIR`: skill 저장 경로, 기본값 `skills`
-- `WIKI_DIR`: wiki 문서 저장 경로, 기본값 `wiki`
-- `WIKI_PROMPT_DIR`: 프롬프트 wiki 저장 경로, 기본값 `wiki/prompts`
+- `REGISTRATION_PACKAGE_DIR`: 등록 패키지 산출물 경로, 기본값 `.aiu/registration_packages`
+- `FIX_REPORT_DIR`: 수정 리포트 경로, 기본값 `.aiu/fix_reports`
+- `SKILL_STORE_DIR`: skill 저장 경로, 기본값 `deep_agent/skills`
+- `WIKI_DIR`: wiki 문서 저장 경로, 기본값 `deep_agent/wiki`
+- `WIKI_PROMPT_DIR`: 프롬프트 wiki 저장 경로, 기본값 `deep_agent/wiki/prompts`
 
 설정 요약 확인:
 
@@ -215,8 +216,8 @@ Windows 10/11:
 
 ## 프롬프트와 스킬
 
-기본 프롬프트는 `PROMPT_STORE_PATH` 값이 가리키는 `prompt_templates.json`에 저장됩니다.
-`./ml-agent init`을 실행하면 프롬프트가 `wiki/prompts/` 아래 Markdown/JSON 파일로 자동 저장됩니다.
+기본 프롬프트는 `PROMPT_STORE_PATH` 값이 가리키는 `deep_agent/prompts/prompt_templates.json`에 저장됩니다.
+`aiu init`을 실행하면 프롬프트가 `deep_agent/wiki/prompts/` 아래 Markdown/JSON 파일로 자동 저장됩니다.
 
 ```bash
 ./ml-agent prompts
@@ -230,11 +231,11 @@ Windows 10/11:
 .\ml-agent.cmd prompts --json
 ```
 
-기본 스킬은 `skills/` 아래에 저장됩니다.
-`./ml-agent init`은 앱이 관리하는 기본 스킬을 최신 내용으로 갱신하고, 사용자가 만든 커스텀 스킬 폴더는 유지합니다.
+기본 스킬은 `deep_agent/skills/` 아래에 저장됩니다.
+`aiu init`은 앱이 관리하는 기본 스킬을 최신 내용으로 갱신하고, 사용자가 만든 커스텀 스킬 폴더는 유지합니다.
 
 ```text
-skills/
+deep_agent/skills/
 ├── agent-evaluation/
 ├── analyze-mlflow-chat-session/
 ├── analyze-mlflow-trace/
@@ -258,7 +259,7 @@ MLflow skill 구성은 [mlflow/skills](https://github.com/mlflow/skills)의 skil
 
 ## 에러 로그 관리
 
-에러 로그는 `CHAT_ERROR_DIR` 값이 가리키는 `chat_errors/`에 저장됩니다.
+에러 로그는 `CHAT_ERROR_DIR` 값이 가리키는 `.aiu/chat_errors/`에 저장됩니다.
 저장된 에러 로그는 이후 재분석해서 dry-run 수정안을 다시 만드는 기준으로 사용합니다.
 
 에러 로그 저장:

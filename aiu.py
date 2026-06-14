@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import sys
 
-import ml_agent
+from deep_agent import cli
 
 
 def main(argv: list[str] | None = None) -> int:
-    return ml_agent.main(sys.argv[1:] if argv is None else argv)
+    return cli.main(sys.argv[1:] if argv is None else argv)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .pycache/
 .pytest_cache/
+.aiu/
 .env
 chat_errors/
 sessions/

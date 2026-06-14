@@ -91,7 +91,10 @@ def _extract_project_value(pyproject_text: str, key: str) -> str | None:
 
 
 def _default_source_candidates() -> list[Path]:
+    package_root = Path(__file__).resolve().parent
     return [
+        package_root / "vendor" / "deepagents" / "deepagents-main",
+        package_root / "vendor" / "deepagents",
         Path.cwd() / "deepagents_source" / "deepagents-main",
         Path.cwd() / "deepagents_source",
         Path.cwd() / "deepagents-main.zip",

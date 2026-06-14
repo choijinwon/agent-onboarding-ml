@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from app_config import AppConfig
+from deep_agent.app_config import AppConfig
 
 
 UrlOpen = Callable[[urllib.request.Request, float], Any]

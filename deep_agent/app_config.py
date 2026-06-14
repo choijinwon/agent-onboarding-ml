@@ -17,15 +17,15 @@ DEFAULT_ENV = {
     "ENABLE_RICH_CONSOLE": "true",
     "ENABLE_TUI_BACKGROUND": "false",
     "ENABLE_TUI_INPUT_PANEL": "true",
-    "PROMPT_STORE_PATH": "prompt_templates.json",
-    "WIKI_DIR": "wiki",
-    "WIKI_PROMPT_DIR": "wiki/prompts",
-    "CHAT_ERROR_DIR": "chat_errors",
-    "SESSION_DIR": "sessions",
+    "PROMPT_STORE_PATH": "deep_agent/prompts/prompt_templates.json",
+    "WIKI_DIR": "deep_agent/wiki",
+    "WIKI_PROMPT_DIR": "deep_agent/wiki/prompts",
+    "CHAT_ERROR_DIR": ".aiu/chat_errors",
+    "SESSION_DIR": ".aiu/sessions",
     "MASK_SENSITIVE_LOGS": "true",
-    "REGISTRATION_PACKAGE_DIR": "registration_packages",
-    "FIX_REPORT_DIR": "fix_reports",
-    "SKILL_STORE_DIR": "skills",
+    "REGISTRATION_PACKAGE_DIR": ".aiu/registration_packages",
+    "FIX_REPORT_DIR": ".aiu/fix_reports",
+    "SKILL_STORE_DIR": "deep_agent/skills",
 }
 
 DIRECTORY_KEYS = (
@@ -470,7 +470,7 @@ def ensure_runtime_layout(config: AppConfig) -> list[Path]:
         created_or_existing.append(directory)
     _ensure_skill_readme(config.skill_store_dir())
     _ensure_default_skills(config.skill_store_dir())
-    from prompt_store import export_prompt_templates_to_wiki
+    from deep_agent.stores.prompt_store import export_prompt_templates_to_wiki
 
     export_prompt_templates_to_wiki(config)
     return created_or_existing
