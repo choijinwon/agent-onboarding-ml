@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib.util import find_spec
 from pathlib import Path
 import os
@@ -60,8 +60,24 @@ def missing_textual_message() -> str:
 
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
-        return f"[Build Chat · {model}] 수정 적용 가능 - 질문 또는 '수정해줘' 입력, 다음, 1, /exit"
-    return f"[Plan Chat · {model}] 읽기 전용 질문 입력 - 경로 붙여넣기/드롭, /sample tensorflow, 다음, /exit"
+        return f"[Build Chat · {model}] 수정 적용 가능 - /model, 질문 또는 '수정해줘'"
+    return f"[Plan Chat · {model}] 읽기 전용 - /model, 경로 붙여넣기/드롭, 다음"
+
+
+def available_models_from_config(config: AppConfig) -> list[str]:
+    models = [model.strip() for model in config.get("QWEN_MODELS").split(",") if model.strip()]
+    if config.get("QWEN_MODEL") and config.get("QWEN_MODEL") not in models:
+        models.insert(0, config.get("QWEN_MODEL"))
+    return models or ["qwen3.6"]
+
+
+def parse_model_command(command: str) -> str | None:
+    parts = command.strip().split()
+    if not parts or parts[0] not in {"/model", "/모델"}:
+        return None
+    if len(parts) == 1:
+        return ""
+    return parts[1].strip()
 
 
 def is_fix_request(command: str) -> bool:
@@ -123,8 +139,10 @@ class BeginnerTuiController:
     def __post_init__(self) -> None:
         self.project_path = ""
         self.sample_message: str | None = None
+        self.app_config = AppConfig.load()
+        self.available_models = available_models_from_config(self.app_config)
         if self.qwen_config is None:
-            self.qwen_config = QwenChatConfig.from_app_config(AppConfig.load())
+            self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
         self.set_project(self.project_input)
         self.log_lines.extend(
             [
@@ -171,6 +189,20 @@ class BeginnerTuiController:
         self.agent_mode = "Build" if self.agent_mode == "Plan" else "Plan"
         return f"현재 Agent 모드: {self.agent_mode}"
 
+    def select_model(self, model: str) -> str:
+        if not model:
+            message = "선택 가능한 모델: " + ", ".join(self.available_models)
+            self.log_lines.append(message)
+            return message
+        if model not in self.available_models:
+            message = f"지원하지 않는 모델입니다: {model}\n선택 가능한 모델: " + ", ".join(self.available_models)
+            self.log_lines.append(message)
+            return message
+        self.qwen_config = replace(self.qwen_config or QwenChatConfig.from_app_config(self.app_config), model=model)
+        message = f"현재 모델이 {model}로 변경되었습니다."
+        self.log_lines.append(message)
+        return message
+
     def submit(self, raw: str) -> str:
         command = raw.strip()
         if not command:
@@ -187,6 +219,10 @@ class BeginnerTuiController:
             message = f"현재 모드가 {MODE_LABELS[mode]}로 변경되었습니다.\n{MODE_CHANGE_MESSAGES[mode]}"
             self.log_lines.append(message)
             return message
+
+        model = parse_model_command(command)
+        if model is not None:
+            return self.select_model(model)
 
         if command.startswith("/sample ") or command.startswith("/샘플 "):
             self.set_project(command)
@@ -474,12 +510,14 @@ def run_tui(project_path: str = "") -> int:
 __all__ = [
     "AIOnboardingTuiApp",
     "BeginnerTuiController",
+    "available_models_from_config",
     "CommandInput",
     "LogView",
     "StatusBar",
     "is_fix_request",
     "is_wizard_navigation",
     "normalize_input_path",
+    "parse_model_command",
     "missing_textual_message",
     "run_tui",
     "textual_available",

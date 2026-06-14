@@ -33,7 +33,7 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
-from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message, normalize_input_path
+from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message, normalize_input_path, parse_model_command
 
 
 class QwenChatTest(unittest.TestCase):
@@ -907,6 +907,37 @@ class WindowsSetupTest(unittest.TestCase):
     def test_tui_command_placeholder_mentions_qwen_chat(self):
         self.assertIn("Chat", command_placeholder_for_mode("Plan", "qwen3.6"))
         self.assertIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
+
+    def test_tui_command_placeholder_mentions_model_command(self):
+        self.assertIn("/model", command_placeholder_for_mode("Plan", "qwen3.6"))
+        self.assertIn("/model", command_placeholder_for_mode("Build", "gamma"))
+
+    def test_tui_parse_model_commands(self):
+        self.assertEqual(parse_model_command("/model qwen3.5"), "qwen3.5")
+        self.assertEqual(parse_model_command("/모델 gamma"), "gamma")
+        self.assertEqual(parse_model_command("/model"), "")
+        self.assertIsNone(parse_model_command("모델 gamma"))
+
+    def test_tui_controller_lists_and_selects_model_from_input_box(self):
+        controller = BeginnerTuiController("")
+
+        list_output = controller.submit("/model")
+        self.assertIn("qwen3.6", list_output)
+        self.assertIn("gamma", list_output)
+
+        output = controller.submit("/model gamma")
+
+        self.assertIn("gamma", output)
+        self.assertEqual(controller.qwen_model, "gamma")
+        self.assertIn("gamma", command_placeholder_for_mode(controller.agent_mode, controller.qwen_model))
+
+    def test_tui_controller_rejects_unknown_model(self):
+        controller = BeginnerTuiController("")
+
+        output = controller.submit("/model unknown-model")
+
+        self.assertIn("지원하지 않는 모델", output)
+        self.assertEqual(controller.qwen_model, "qwen3.6")
 
     def test_tui_detects_fix_request_text(self):
         self.assertTrue(is_fix_request("코드 자동 수정해줘"))
