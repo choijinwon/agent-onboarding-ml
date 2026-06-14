@@ -9,6 +9,7 @@ deepagents = ["deepagents>=0.6.8", "langchain-openai>=0.3"]
 tui = ["textual>=0.85"]
 
 [project.scripts]
+aiu = "aiu.__main__:main"
 ml-agent = "ml_agent:main"
 
 [tool.setuptools]
@@ -24,3 +25,5 @@ py-modules = [
     "prompt_store",
     "qwen_chat",
 ]
+
+packages = ["aiu"]

@@ -106,7 +106,11 @@ registration_packages/
 ```powershell
 py -3 -m pip install ".[tui,deepagents]"
 .\ml-agent.cmd tui
+aiu tui
 ```
+
+macOS에서 테스트할 때는 `python3 -m aiu tui` 또는 `python3 aiu.py tui`도 사용할 수 있습니다.
+TUI 하단 입력 영역의 `Plan`, `Build`, `Chatbot` 선택 박스는 `Tab`으로 전환합니다.
 
 Textual 미설치 상태에서는 설치 안내가 출력되고 기존 콘솔 Wizard는 계속 사용할 수 있습니다.
 
@@ -121,6 +125,7 @@ Textual 미설치 상태에서는 설치 안내가 출력되고 기존 콘솔 Wi
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
 .\ml-agent.cmd tui
+aiu tui
 .\ml-agent.cmd deepagents
 .\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
 .\ml-agent.cmd config
@@ -130,6 +135,7 @@ Textual 미설치 상태에서는 설치 안내가 출력되고 기존 콘솔 Wi
 
 여기서 `.\project`는 등록하려는 ML 모델 프로젝트 경로입니다.
 예를 들어 학습 코드, `requirements.txt`, MLflow artifact, 모델 파일이 들어 있는 폴더를 넘깁니다.
+초급자 Step 1에서 `/sample large10`을 입력하면 대형 모델 샘플 10개를 로컬에 생성해 테스트할 수 있습니다.
 
 JSON 출력:
 
@@ -292,6 +298,7 @@ cp .env.example .env
 ./ml-agent init
 ./ml-agent config
 ./ml-agent prompts
+python3 -m aiu tui
 ./ml-agent
 ```
 

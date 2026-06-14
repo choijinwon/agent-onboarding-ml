@@ -102,6 +102,7 @@ MODEL_ARTIFACT_SUFFIXES = {
     ".pkl",
     ".pt",
     ".pth",
+    ".safetensors",
 }
 
 HEAVY_SAMPLE_ALIASES = {
@@ -115,6 +116,23 @@ HEAVY_SAMPLE_ALIASES = {
     "무거운모델",
     "샘플 대형모델",
     "샘플 무거운모델",
+}
+
+LARGE10_SAMPLE_ALIASES = {
+    "/sample large10",
+    "/sample big10",
+    "/sample heavy10",
+    "/samples large10",
+    "/samples big10",
+    "/샘플 대형10",
+    "/샘플 무거운10",
+    "large10",
+    "big10",
+    "heavy10",
+    "대형10",
+    "무거운10",
+    "샘플 대형10",
+    "샘플 무거운10",
 }
 
 SAMPLE_KIND_ALIASES = {
@@ -343,6 +361,222 @@ SAMPLE_MODEL_SPECS = {
         ),
     ),
 }
+
+
+LARGE_MODEL_SAMPLE_SPECS = (
+    SampleModelSpec(
+        kind="large_tensorflow",
+        title="대형 TensorFlow Keras 모델",
+        directory="large-tensorflow-model",
+        artifact_path="model/large-tensorflow.keras",
+        artifact_size_bytes=96 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "tensorflow==2.17.0", "numpy==1.26.4"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/large-tensorflow.keras')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'tensorflow')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_pytorch",
+        title="대형 PyTorch 체크포인트",
+        directory="large-pytorch-checkpoint",
+        artifact_path="model/large-pytorch.pt",
+        artifact_size_bytes=128 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "torch==2.5.1", "numpy==1.26.4"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/large-pytorch.pt')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'pytorch')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_onnx_transformer",
+        title="대형 ONNX Transformer 모델",
+        directory="large-onnx-transformer",
+        artifact_path="model/large-transformer.onnx",
+        artifact_size_bytes=192 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "onnx==1.17.0", "onnxruntime==1.20.1"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/large-transformer.onnx')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('architecture', 'transformer')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_sklearn_bundle",
+        title="대형 scikit-learn 번들",
+        directory="large-sklearn-bundle",
+        artifact_path="model/large-sklearn.joblib",
+        artifact_size_bytes=72 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "joblib==1.4.2"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/large-sklearn.joblib')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('framework', 'scikit-learn')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_sora_video",
+        title="대형 Sora 스타일 비디오 모델",
+        directory="large-sora-video-model",
+        artifact_path="model/large-sora-video.onnx",
+        artifact_size_bytes=256 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "torch==2.5.1", "opencv-python==4.10.0.84"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/large-sora-video.onnx')\n"
+            "    parser.add_argument('--duration-seconds', type=int, default=8)\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('model_family', 'sora-style-video-generation')\n"
+            "        mlflow.log_param('duration_seconds', args.duration_seconds)\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_vision_embedding",
+        title="대형 Vision Embedding 모델",
+        directory="large-vision-embedding",
+        artifact_path="model/vision-embedding.pt",
+        artifact_size_bytes=144 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "torch==2.5.1", "pillow==11.0.0"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/vision-embedding.pt')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('task', 'vision-embedding')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_llm_adapter",
+        title="대형 LLM Adapter 모델",
+        directory="large-llm-adapter",
+        artifact_path="model/llm-adapter.safetensors",
+        artifact_size_bytes=160 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "transformers==4.46.3", "safetensors==0.4.5"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/llm-adapter.safetensors')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('task', 'llm-adapter')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_recommender",
+        title="대형 추천 모델",
+        directory="large-recommender-model",
+        artifact_path="model/recommender.pkl",
+        artifact_size_bytes=80 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "pandas==2.2.3"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/recommender.pkl')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('task', 'recommender')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_timeseries",
+        title="대형 시계열 예측 모델",
+        directory="large-timeseries-forecast",
+        artifact_path="model/timeseries-forecast.onnx",
+        artifact_size_bytes=112 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "onnx==1.17.0", "pandas==2.2.3"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/timeseries-forecast.onnx')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('task', 'time-series-forecasting')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    SampleModelSpec(
+        kind="large_tabular_ensemble",
+        title="대형 Tabular Ensemble 모델",
+        directory="large-tabular-ensemble",
+        artifact_path="model/tabular-ensemble.joblib",
+        artifact_size_bytes=88 * 1024 * 1024,
+        requirements=["mlflow==2.17.0", "xgboost==2.1.2", "joblib==1.4.2"],
+        train_body=(
+            "import argparse\n"
+            "import mlflow\n\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--model-path', default='model/tabular-ensemble.joblib')\n"
+            "    args = parser.parse_args()\n"
+            "    with mlflow.start_run():\n"
+            "        mlflow.log_param('task', 'tabular-ensemble')\n"
+            "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -890,6 +1124,15 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
             str(sample_paths[0]),
             format_sample_matrix_message(sample_paths),
         )
+    if normalized in LARGE10_SAMPLE_ALIASES:
+        sample_paths = create_large_model_samples(Path.cwd() / "sample_projects")
+        return (
+            str(sample_paths[0]),
+            format_sample_matrix_message(
+                sample_paths,
+                title="대형 모델 테스트 샘플 10개를 생성하고 Step 1 검증을 완료했습니다.",
+            ),
+        )
     if normalized in {"/sample all", "/samples", "/샘플 전체", "sample all", "samples", "샘플 전체"}:
         sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
         first_path = sample_paths[0]
@@ -935,6 +1178,7 @@ def build_beginner_intro() -> str:
         "- /sample sora",
         "- /sample sora-error",
         "- /sample heavy",
+        "- /sample large10",
         "- /sample all",
         "- /sample matrix",
     ]
@@ -1002,8 +1246,32 @@ def create_all_model_samples(root: Path) -> list[Path]:
     ]
 
 
-def format_sample_matrix_message(sample_paths: list[Path]) -> str:
-    rows = ["다양한 모델 테스트 샘플을 생성하고 Step 1 검증을 완료했습니다."]
+def create_large_model_samples(
+    root: Path,
+    artifact_size_bytes: int | None = None,
+) -> list[Path]:
+    sample_paths = []
+    for spec in LARGE_MODEL_SAMPLE_SPECS:
+        active_spec = spec
+        if artifact_size_bytes is not None:
+            active_spec = SampleModelSpec(
+                kind=spec.kind,
+                title=spec.title,
+                directory=spec.directory,
+                artifact_path=spec.artifact_path,
+                artifact_size_bytes=artifact_size_bytes,
+                requirements=spec.requirements,
+                train_body=spec.train_body,
+            )
+        sample_paths.append(create_model_sample(root / spec.directory, active_spec))
+    return sample_paths
+
+
+def format_sample_matrix_message(
+    sample_paths: list[Path],
+    title: str = "다양한 모델 테스트 샘플을 생성하고 Step 1 검증을 완료했습니다.",
+) -> str:
+    rows = [title]
     for path in sample_paths:
         analysis = analyze_project(str(path))
         artifact = analysis.scan.model_artifacts[0] if analysis.scan.model_artifacts else None

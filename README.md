@@ -36,9 +36,11 @@ py -3 ml_agent.py
 ```powershell
 py -3 -m pip install ".[tui,deepagents]"
 .\ml-agent.cmd tui
+aiu tui
 ```
 
 Textual 또는 DeepAgents 의존성이 설치되지 않은 상태에서는 안내를 출력하고 기존 콘솔 모드는 그대로 유지됩니다.
+macOS/Linux에서는 `python3 -m aiu tui` 또는 `python3 aiu.py tui`로도 같은 TUI를 실행할 수 있습니다.
 
 필수 조건:
 
@@ -100,6 +102,8 @@ ENABLE_TUI_INPUT_PANEL=true
 ./ml-agent report ./project
 ./ml-agent chat
 ./ml-agent tui
+python3 -m aiu tui
+python3 aiu.py tui
 ./ml-agent profile
 ./ml-agent config
 ./ml-agent init
@@ -119,6 +123,7 @@ Windows 10/11:
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd chat
 .\ml-agent.cmd tui
+aiu tui
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
 .\ml-agent.cmd init
@@ -146,6 +151,7 @@ Windows 10/11:
 
 이 POC는 [langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)의 agent harness와 [deepagents/libs](https://github.com/langchain-ai/deepagents/tree/main/libs) 구조를 참고했습니다.
 터미널 화면 구성은 DeepAgents 실행 흐름에 맞춘 자체 Textual TUI로 제공합니다.
+TUI 하단 입력 영역은 `Plan`, `Build`, `Chatbot` 선택 박스를 제공하며 `Tab`으로 순환하거나 `/agent chat`, `/agent build`, `/agent plan`으로 직접 선택할 수 있습니다.
 
 DeepAgents 소스는 repo 안의 `deepagents_source/deepagents-main/libs`에 포함되어 있습니다.
 
@@ -168,6 +174,9 @@ pip install ".[deepagents,tui]"
 `ml-agent deepagents`는 기본적으로 repo 내부의 `deepagents_source/deepagents-main/libs`를 먼저 읽습니다. 다른 DeepAgents archive로 비교 검증할 때만 `--source <zip 경로>`를 지정합니다.
 
 `libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/talon`, `libs/partners/*`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
+
+초급자 Step 1에서 대형 모델 샘플 10개를 만들려면 `/sample large10`을 입력합니다.
+샘플은 `sample_projects/` 아래에 생성되고 Git에는 포함되지 않습니다.
 
 ## 환경 변수
 

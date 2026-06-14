@@ -1,5 +1,7 @@
 import json
 import os
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -26,6 +28,7 @@ from ml_agent import (
     build_beginner_wizard,
     build_parser,
     create_heavy_model_sample,
+    create_large_model_samples,
     format_beginner_tab,
     handle_advanced_input,
     handle_intermediate_request,
@@ -38,11 +41,13 @@ from ml_agent import (
 from ml_agent_tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
+    format_agent_mode_selector,
     format_model_choices,
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
     normalize_input_path,
+    parse_agent_mode_command,
     parse_model_command,
     path_candidates_from_input,
     strip_path_command,
@@ -648,6 +653,39 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("issues=0", message)
             self.assertIn("issues=2", message)
 
+    def test_large10_sample_alias_creates_ten_large_model_projects(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample large10")
+            finally:
+                os.chdir(cwd)
+
+            root = Path(tmpdir) / "sample_projects"
+            projects = sorted(path for path in root.iterdir() if path.is_dir())
+
+            self.assertIsNotNone(message)
+            self.assertEqual(len(projects), 10)
+            self.assertEqual(Path(path).resolve(), (root / "large-tensorflow-model").resolve())
+            self.assertTrue((root / "large-sora-video-model" / "model" / "large-sora-video.onnx").exists())
+            self.assertTrue((root / "large-llm-adapter" / "model" / "llm-adapter.safetensors").exists())
+            self.assertIn("대형 모델 테스트 샘플 10개", message)
+            self.assertIn("large-sora-video-model: 등록 가능", message)
+
+    def test_create_large_model_samples_supports_small_test_artifacts(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "sample_projects"
+            sample_paths = create_large_model_samples(root, artifact_size_bytes=1024)
+
+            self.assertEqual(len(sample_paths), 10)
+            for sample in sample_paths:
+                analysis = analyze_project(str(sample))
+                self.assertEqual(analysis.registration_status, "등록 가능")
+                self.assertEqual(analysis.scan.model_artifacts[0].size_bytes, 1024)
+
 
 class ProjectAnalysisTest(unittest.TestCase):
     def test_missing_path_is_not_registerable(self):
@@ -972,6 +1010,16 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertEqual(args.command, "tui")
 
+    def test_aiu_module_entrypoint_delegates_to_ml_agent(self):
+        from aiu.__main__ import main as aiu_main
+
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = aiu_main(["config"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Environment Config", stdout.getvalue())
+
     def test_tui_missing_textual_message_is_actionable(self):
         message = missing_textual_message()
 
@@ -984,6 +1032,19 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("읽기 전용", command_placeholder_for_mode("Plan"))
         self.assertIn("[Build DeepAgents", command_placeholder_for_mode("Build"))
         self.assertIn("승인 후 수정 가능", command_placeholder_for_mode("Build"))
+        self.assertIn("[Chatbot DeepAgents", command_placeholder_for_mode("Chatbot"))
+        self.assertIn("자연어", command_placeholder_for_mode("Chatbot"))
+
+    def test_tui_agent_mode_selector_and_command_parser(self):
+        self.assertIn("[ Plan* ]", format_agent_mode_selector("Plan"))
+        self.assertIn("[ Build* ]", format_agent_mode_selector("Build"))
+        self.assertIn("[ Chatbot* ]", format_agent_mode_selector("Chatbot"))
+        self.assertEqual(parse_agent_mode_command("/agent plan"), "Plan")
+        self.assertEqual(parse_agent_mode_command("/agent build"), "Build")
+        self.assertEqual(parse_agent_mode_command("/agent chat"), "Chatbot")
+        self.assertEqual(parse_agent_mode_command("/에이전트 챗봇"), "Chatbot")
+        self.assertEqual(parse_agent_mode_command("/agent"), "")
+        self.assertIsNone(parse_agent_mode_command("agent chat"))
 
     def test_tui_command_placeholder_mentions_deepagents_model(self):
         self.assertIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
@@ -1178,6 +1239,22 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.agent_mode, "Build")
         self.assertNotIn("현재 Agent 모드", controller.render_log())
 
+        controller.toggle_agent()
+        self.assertEqual(controller.agent_mode, "Chatbot")
+        controller.toggle_agent()
+        self.assertEqual(controller.agent_mode, "Plan")
+        controller.previous_agent()
+        self.assertEqual(controller.agent_mode, "Chatbot")
+
+    def test_tui_controller_selects_agent_mode_from_input_box(self):
+        controller = BeginnerTuiController("")
+
+        output = controller.submit("/agent chat")
+
+        self.assertIn("Chatbot", output)
+        self.assertEqual(controller.agent_mode, "Chatbot")
+        self.assertIn("[ Chatbot* ]", controller.submit("/agent"))
+
     def test_tui_controller_plan_mode_does_not_apply_files(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1206,6 +1283,7 @@ class WindowsSetupTest(unittest.TestCase):
             train.write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
             controller = BeginnerTuiController(str(root))
+            controller.select_agent_mode("Chatbot")
 
             output = controller.submit("코드 자동 수정해줘")
 
@@ -1214,7 +1292,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
-    def test_tui_chat_fix_request_in_build_mode_requires_deepagents_runtime(self):
+    def test_tui_build_mode_text_points_to_chatbot_without_modifying_files(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             requirements = root / "requirements.txt"
@@ -1227,8 +1305,8 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("코드 자동 수정해줘")
 
-            self.assertIn("DeepAgents runtime", output)
-            self.assertIn("파일은 수정하지 않았습니다", output)
+            self.assertIn("Build 모드", output)
+            self.assertIn("Chatbot 모드", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
@@ -1252,6 +1330,7 @@ class WindowsSetupTest(unittest.TestCase):
                 (root / "model.onnx").write_text("sample")
                 fake = FakeRuntime()
                 controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("프로젝트 분석해줘")
             finally:
@@ -1289,6 +1368,7 @@ class WindowsSetupTest(unittest.TestCase):
                 (root / "model.keras").write_text("sample")
                 fake = FakeRuntime()
                 controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("코드 자동 수정해줘")
             finally:
@@ -1317,6 +1397,7 @@ class WindowsSetupTest(unittest.TestCase):
                 path, _ = resolve_beginner_project_input("/sample sora-error")
                 sample = Path(path)
                 controller = BeginnerTuiController(str(sample), deepagents_runtime=FakeRuntime())
+                controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("문제 발견하면 자동 수정해줘")
             finally:

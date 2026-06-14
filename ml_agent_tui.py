@@ -29,6 +29,20 @@ from qwen_chat import QwenChatConfig
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
+AGENT_MODES = ("Plan", "Build", "Chatbot")
+AGENT_MODE_ALIASES = {
+    "plan": "Plan",
+    "플랜": "Plan",
+    "계획": "Plan",
+    "build": "Build",
+    "빌드": "Build",
+    "수정": "Build",
+    "chat": "Chatbot",
+    "chatbot": "Chatbot",
+    "챗봇": "Chatbot",
+    "쳇봇": "Chatbot",
+    "대화": "Chatbot",
+}
 
 
 class LogView:
@@ -36,6 +50,10 @@ class LogView:
 
 
 class CommandInput:
+    pass
+
+
+class ModeSelector:
     pass
 
 
@@ -65,7 +83,25 @@ def missing_textual_message() -> str:
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
         return f"[Build DeepAgents · {model}] 승인 후 수정 가능 - /path, /model, 질문"
+    if agent_mode == "Chatbot":
+        return f"[Chatbot DeepAgents · {model}] 자연어로 분석/자동수정 요청"
     return f"[Plan DeepAgents · {model}] 읽기 전용 - /path 경로, 드롭/붙여넣기, 다음"
+
+
+def format_agent_mode_selector(agent_mode: str) -> str:
+    parts = []
+    for mode in AGENT_MODES:
+        parts.append(f"[ {mode}* ]" if mode == agent_mode else f"[ {mode} ]")
+    return " ".join(parts)
+
+
+def parse_agent_mode_command(command: str) -> str | None:
+    parts = command.strip().split()
+    if not parts or parts[0] not in {"/agent", "/에이전트"}:
+        return None
+    if len(parts) == 1:
+        return ""
+    return AGENT_MODE_ALIASES.get(parts[1].strip().lower())
 
 
 def model_selection_placeholder(models: list[str]) -> str:
@@ -246,8 +282,24 @@ class BeginnerTuiController:
         return self.available_models[self.model_selection_index]
 
     def toggle_agent(self) -> str:
-        self.agent_mode = "Build" if self.agent_mode == "Plan" else "Plan"
+        index = AGENT_MODES.index(self.agent_mode) if self.agent_mode in AGENT_MODES else 0
+        self.agent_mode = AGENT_MODES[(index + 1) % len(AGENT_MODES)]
         return f"현재 Agent 모드: {self.agent_mode}"
+
+    def previous_agent(self) -> str:
+        index = AGENT_MODES.index(self.agent_mode) if self.agent_mode in AGENT_MODES else 0
+        self.agent_mode = AGENT_MODES[(index - 1) % len(AGENT_MODES)]
+        return f"현재 Agent 모드: {self.agent_mode}"
+
+    def select_agent_mode(self, mode: str) -> str:
+        if mode not in AGENT_MODES:
+            message = "지원하지 않는 Agent 모드입니다. Plan, Build, Chatbot 중 하나를 선택하세요."
+            self.log_lines.append(message)
+            return message
+        self.agent_mode = mode
+        message = f"현재 Agent 모드: {self.agent_mode}"
+        self.log_lines.append(message)
+        return message
 
     def start_model_selection(self) -> str:
         self.awaiting_model_selection = True
@@ -302,6 +354,14 @@ class BeginnerTuiController:
             self.log_lines.append(message)
             return message
 
+        agent_mode = parse_agent_mode_command(command)
+        if agent_mode is not None:
+            if not agent_mode:
+                message = format_agent_mode_selector(self.agent_mode)
+                self.log_lines.append(message)
+                return message
+            return self.select_agent_mode(agent_mode)
+
         model = parse_model_command(command)
         if model is not None:
             return self.select_model(model)
@@ -334,6 +394,8 @@ class BeginnerTuiController:
             return self._handle_approval_choice(command)
         if is_wizard_navigation(command, self.total):
             return self._handle_navigation(command)
+        if self.agent_mode != "Chatbot":
+            return self._handle_non_chatbot_text(command)
         return self.handle_chat_message(command)
 
     def handle_chat_message(self, command: str) -> str:
@@ -352,6 +414,26 @@ class BeginnerTuiController:
         self.log_lines.append(f"Agent: {response}")
         self._save_chat_session(command, response, applied_changes, final_analysis)
         return response
+
+    def _handle_non_chatbot_text(self, command: str) -> str:
+        analysis = analyze_project(self.project_path)
+        self.log_lines.append(f"나: {command}")
+        if self.agent_mode == "Build":
+            message = (
+                "Build 모드는 승인된 수정안을 적용하는 모드입니다. "
+                "자연어 대화와 자동 수정은 Chatbot 모드에서 실행하세요."
+            )
+        else:
+            message = (
+                "Plan 모드는 읽기 전용입니다. 자연어 대화와 자동 수정은 Chatbot 모드에서 실행하세요."
+            )
+        previews = build_fix_previews(analysis)
+        if previews:
+            message += "\n현재 미리보기 가능한 수정안: " + ", ".join(preview.title for preview in previews)
+        else:
+            message += f"\n현재 등록 상태: {analysis.registration_status}"
+        self.log_lines.append(f"Agent: {message}")
+        return message
 
     def _invoke_deepagents(self, command: str, agent_mode: str | None = None):
         runtime = self.deepagents_runtime or DeepAgentsRuntime(self.app_config)
@@ -513,7 +595,7 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CommandInput, LogView, StatusBar
+    global AIOnboardingTuiApp, CommandInput, LogView, ModeSelector, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
@@ -538,6 +620,14 @@ def run_tui(project_path: str = "") -> int:
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app.action_toggle_agent()
+            if event.key == "shift+tab":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.app.action_previous_agent()
+
+    class ModeSelector(Static):
+        pass
 
     class StatusBar(Static):
         pass
@@ -586,6 +676,28 @@ def run_tui(project_path: str = "") -> int:
             background: #302817;
             border-left: solid #f0b429;
         }
+        #command.chatbot {
+            background: #1c2630;
+            border-left: solid #3fb950;
+        }
+        #command.chatbot:focus {
+            background: #203040;
+            border-left: solid #3fb950;
+        }
+        #mode-selector {
+            height: 1;
+            color: #9a9a9a;
+            background: #080808;
+        }
+        #mode-selector.plan {
+            color: #58a6ff;
+        }
+        #mode-selector.build {
+            color: #f0b429;
+        }
+        #mode-selector.chatbot {
+            color: #3fb950;
+        }
         #status {
             height: 1;
             color: #9a9a9a;
@@ -594,6 +706,7 @@ def run_tui(project_path: str = "") -> int:
         """
         BINDINGS = [
             Binding("tab", "toggle_agent", "agents", show=True, priority=True),
+            Binding("shift+tab", "previous_agent", "prev agent", show=False, priority=True),
             Binding("escape", "quit", "interrupt", show=True),
         ]
 
@@ -605,6 +718,7 @@ def run_tui(project_path: str = "") -> int:
             with Vertical(id="shell"):
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
                 yield LogView("", id="log")
+                yield ModeSelector("", id="mode-selector")
                 yield CommandInput(placeholder=command_placeholder_for_mode("Plan", self.controller.qwen_model), id="command")
                 yield StatusBar("", id="status")
 
@@ -619,6 +733,16 @@ def run_tui(project_path: str = "") -> int:
                 self._focus_command()
                 return
             self.controller.toggle_agent()
+            self._refresh()
+            self._focus_command()
+
+        def action_previous_agent(self) -> None:
+            if self.controller.awaiting_model_selection:
+                self.controller.cycle_model_selection(-1)
+                self._refresh(force_model_value=True)
+                self._focus_command()
+                return
+            self.controller.previous_agent()
             self._refresh()
             self._focus_command()
 
@@ -668,6 +792,12 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.action_toggle_agent()
                 return
+            if event.key == "shift+tab":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.action_previous_agent()
+                return
             if self.focused is command:
                 return
             if event.key == "enter":
@@ -696,7 +826,13 @@ def run_tui(project_path: str = "") -> int:
             else:
                 command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
+            command.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).update(self.controller.render_log())
+            selector = self.query_one(ModeSelector)
+            selector.update(format_agent_mode_selector(self.controller.agent_mode))
+            selector.set_class(self.controller.agent_mode == "Plan", "plan")
+            selector.set_class(self.controller.agent_mode == "Build", "build")
+            selector.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             input_state = "Model Select" if self.controller.awaiting_model_selection else self.controller.agent_mode
             self.query_one(StatusBar).update(
                 f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "
@@ -712,17 +848,21 @@ def run_tui(project_path: str = "") -> int:
 
 __all__ = [
     "AIOnboardingTuiApp",
+    "AGENT_MODES",
     "BeginnerTuiController",
     "available_models_from_config",
     "CommandInput",
+    "ModeSelector",
     "LogView",
     "StatusBar",
+    "format_agent_mode_selector",
     "format_model_choices",
     "is_fix_request",
     "is_wizard_navigation",
     "model_selection_placeholder",
     "normalize_input_path",
     "path_candidates_from_input",
+    "parse_agent_mode_command",
     "parse_model_command",
     "strip_path_command",
     "missing_textual_message",
