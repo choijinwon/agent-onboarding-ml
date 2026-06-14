@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib.util import find_spec
+from pathlib import Path
+import os
+import shlex
 
 from app_config import AppConfig
 
@@ -58,7 +61,7 @@ def missing_textual_message() -> str:
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
         return f"[Build Chat · {model}] 수정 적용 가능 - 질문 또는 '수정해줘' 입력, 다음, 1, /exit"
-    return f"[Plan Chat · {model}] 읽기 전용 질문 입력 - 프로젝트 경로, /sample tensorflow, 다음, /exit"
+    return f"[Plan Chat · {model}] 읽기 전용 질문 입력 - 경로 붙여넣기/드롭, /sample tensorflow, 다음, /exit"
 
 
 def is_fix_request(command: str) -> bool:
@@ -80,6 +83,31 @@ def is_wizard_navigation(command: str, total: int) -> bool:
     if command in {"다음", "next", "n", "이전", "prev", "previous", "p"}:
         return True
     return command.isdigit() and 1 <= int(command) <= total
+
+
+def normalize_input_path(raw: str) -> Path | None:
+    value = raw.strip()
+    if not value:
+        return None
+    if value.startswith("file://"):
+        value = value.removeprefix("file://")
+    try:
+        parts = shlex.split(value)
+    except ValueError:
+        parts = []
+    if len(parts) == 1:
+        value = parts[0]
+    else:
+        value = value.strip('"').strip("'")
+    expanded = os.path.expandvars(os.path.expanduser(value))
+    path = Path(expanded).resolve()
+    if not path.exists():
+        return None
+    if path.is_file():
+        return path.parent
+    if path.is_dir():
+        return path
+    return None
 
 
 @dataclass
@@ -118,6 +146,16 @@ class BeginnerTuiController:
         self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
         self.index = 0
 
+    def select_project_path(self, path: Path) -> str:
+        self.project_path = str(path)
+        self.sample_message = None
+        self.applied_changes = None
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        self.index = 0
+        message = f"프로젝트 경로를 선택했습니다.\n- 위치: {path}"
+        self.log_lines.append(message)
+        return self.current_screen()
+
     def current_screen(self) -> str:
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
@@ -155,6 +193,10 @@ class BeginnerTuiController:
             message = self.sample_message or "샘플 프로젝트를 선택했습니다."
             self.log_lines.append(message)
             return self.current_screen()
+
+        selected_path = normalize_input_path(command)
+        if selected_path is not None:
+            return self.select_project_path(selected_path)
 
         if self.index == 3:
             return self._handle_issue_choice(command)
@@ -437,6 +479,7 @@ __all__ = [
     "StatusBar",
     "is_fix_request",
     "is_wizard_navigation",
+    "normalize_input_path",
     "missing_textual_message",
     "run_tui",
     "textual_available",

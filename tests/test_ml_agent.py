@@ -33,7 +33,7 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
-from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message
+from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message, normalize_input_path
 
 
 class QwenChatTest(unittest.TestCase):
@@ -912,6 +912,36 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertTrue(is_fix_request("코드 자동 수정해줘"))
         self.assertTrue(is_fix_request("please fix this project"))
         self.assertFalse(is_fix_request("프로젝트 상태 알려줘"))
+
+    def test_tui_normalizes_direct_folder_path_input(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+
+            self.assertEqual(normalize_input_path(str(root)), root.resolve())
+            self.assertEqual(normalize_input_path(f'"{root}"'), root.resolve())
+
+    def test_tui_normalizes_file_path_to_parent_project(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            train = root / "train.py"
+            train.write_text("print('train')\n")
+
+            self.assertEqual(normalize_input_path(str(train)), root.resolve())
+
+    def test_tui_controller_selects_direct_path_from_input_box(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            controller = BeginnerTuiController("")
+            output = controller.submit(f'"{root}"')
+
+            self.assertEqual(controller.project_path, str(root.resolve()))
+            self.assertEqual(controller.index, 0)
+            self.assertIn("Current: Tab 1/10", output)
+            self.assertIn("프로젝트 경로를 선택했습니다", controller.render_log())
+            self.assertNotIn("Qwen qwen3.6:", controller.render_log())
 
     def test_tui_controller_handles_navigation_and_exit(self):
         with TemporaryDirectory() as tmpdir:
