@@ -11,6 +11,7 @@ from deep_agent_profile import build_ml_platform_profile, format_profile
 from deepagents_libs import deepagents_libs_as_dict
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
+from qwen_chat import QwenChatConfig, chat_with_qwen
 from ml_agent import (
     ConsoleAssistant,
     LAUNCH_SCREEN,
@@ -32,7 +33,25 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
-from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, missing_textual_message
+from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message
+
+
+class QwenChatTest(unittest.TestCase):
+    def test_qwen_config_treats_sample_values_as_unconfigured(self):
+        config = QwenChatConfig(
+            api_key="your-internal-qwen-key",
+            base_url="http://xxx.xxx.xxx.xxx:port/v1",
+            model="qwen3.6",
+        )
+
+        self.assertFalse(config.is_configured())
+        self.assertIn("Qwen 3.6 연결 설정", chat_with_qwen("안녕", config=config))
+
+    def test_qwen_endpoint_uses_openai_compatible_chat_completions(self):
+        config = QwenChatConfig(api_key="secret", base_url="http://qwen.local/v1", model="qwen3.6")
+
+        self.assertTrue(config.is_configured())
+        self.assertEqual(config.endpoint(), "http://qwen.local/v1/chat/completions")
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -831,7 +850,7 @@ class AdvancedModeTest(unittest.TestCase):
         output = handle_advanced_input("ml-agent config")
 
         self.assertIn("Environment Config", output)
-        self.assertIn("qwen_model=qwen3.5", output)
+        self.assertIn("qwen_model=qwen3.6", output)
         self.assertIn("skill_store_dir", output)
 
     def test_prompts_command_outputs_prompt_templates(self):
@@ -880,10 +899,19 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Windows Terminal", message)
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
-        self.assertIn("[Plan]", command_placeholder_for_mode("Plan"))
+        self.assertIn("[Plan Chat", command_placeholder_for_mode("Plan"))
         self.assertIn("읽기 전용", command_placeholder_for_mode("Plan"))
-        self.assertIn("[Build]", command_placeholder_for_mode("Build"))
+        self.assertIn("[Build Chat", command_placeholder_for_mode("Build"))
         self.assertIn("수정 적용 가능", command_placeholder_for_mode("Build"))
+
+    def test_tui_command_placeholder_mentions_qwen_chat(self):
+        self.assertIn("Chat", command_placeholder_for_mode("Plan", "qwen3.6"))
+        self.assertIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
+
+    def test_tui_detects_fix_request_text(self):
+        self.assertTrue(is_fix_request("코드 자동 수정해줘"))
+        self.assertTrue(is_fix_request("please fix this project"))
+        self.assertFalse(is_fix_request("프로젝트 상태 알려줘"))
 
     def test_tui_controller_handles_navigation_and_exit(self):
         with TemporaryDirectory() as tmpdir:
@@ -931,6 +959,40 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Build 모드에서만", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
+
+    def test_tui_chat_fix_request_in_plan_mode_only_previews(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+
+            output = controller.submit("코드 자동 수정해줘")
+
+            self.assertIn("Plan 모드", output)
+            self.assertIn("미리보기", output)
+            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
+            self.assertNotIn("import mlflow", train.read_text())
+
+    def test_tui_chat_fix_request_in_build_mode_applies(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+            controller.toggle_agent()
+
+            output = controller.submit("코드 자동 수정해줘")
+
+            self.assertIn("적용 완료", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
 
     def test_tui_controller_build_mode_applies_only_after_approval(self):
         with TemporaryDirectory() as tmpdir:

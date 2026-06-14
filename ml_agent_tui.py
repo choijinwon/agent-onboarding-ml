@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 
+from app_config import AppConfig
+
 from ml_agent import (
     AppliedChange,
     MODE_CHANGE_MESSAGES,
@@ -16,6 +18,7 @@ from ml_agent import (
     parse_mode_command,
     resolve_beginner_project_input,
 )
+from qwen_chat import QwenChatConfig, chat_with_qwen
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
@@ -52,10 +55,31 @@ def missing_textual_message() -> str:
     )
 
 
-def command_placeholder_for_mode(agent_mode: str) -> str:
+def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
-        return "[Build] 승인 후 수정 적용 가능 - 다음, 1, /sample tensorflow, /exit"
-    return "[Plan] 읽기 전용 - 프로젝트 경로, /sample tensorflow, 다음, 1, /exit"
+        return f"[Build Chat · {model}] 수정 적용 가능 - 질문 또는 '수정해줘' 입력, 다음, 1, /exit"
+    return f"[Plan Chat · {model}] 읽기 전용 질문 입력 - 프로젝트 경로, /sample tensorflow, 다음, /exit"
+
+
+def is_fix_request(command: str) -> bool:
+    lowered = command.lower()
+    keywords = (
+        "수정",
+        "고쳐",
+        "fix",
+        "apply",
+        "자동",
+        "반영",
+        "패치",
+        "patch",
+    )
+    return any(keyword in lowered for keyword in keywords)
+
+
+def is_wizard_navigation(command: str, total: int) -> bool:
+    if command in {"다음", "next", "n", "이전", "prev", "previous", "p"}:
+        return True
+    return command.isdigit() and 1 <= int(command) <= total
 
 
 @dataclass
@@ -66,16 +90,19 @@ class BeginnerTuiController:
     applied_changes: list[AppliedChange] | None = None
     exited: bool = False
     log_lines: list[str] = field(default_factory=list)
+    qwen_config: QwenChatConfig | None = None
 
     def __post_init__(self) -> None:
         self.project_path = ""
         self.sample_message: str | None = None
+        if self.qwen_config is None:
+            self.qwen_config = QwenChatConfig.from_app_config(AppConfig.load())
         self.set_project(self.project_input)
         self.log_lines.extend(
             [
                 "# AI ML Onboarding workflow",
                 "초급자 Wizard TUI가 시작되었습니다.",
-                "하단 입력 박스에 프로젝트 경로, /sample tensorflow, 다음, 1 같은 값을 입력하세요.",
+                "하단 Chat 입력창에서 Qwen 3.6에게 질문하거나, Build 모드에서 수정 요청을 할 수 있습니다.",
             ]
         )
         if self.sample_message:
@@ -97,6 +124,10 @@ class BeginnerTuiController:
     def render_log(self) -> str:
         recent = "\n".join(self.log_lines[-12:])
         return f"{recent}\n\n{self.current_screen()}"
+
+    @property
+    def qwen_model(self) -> str:
+        return self.qwen_config.model if self.qwen_config else "qwen3.6"
 
     def toggle_agent(self) -> str:
         self.agent_mode = "Build" if self.agent_mode == "Plan" else "Plan"
@@ -127,9 +158,50 @@ class BeginnerTuiController:
 
         if self.index == 3:
             return self._handle_issue_choice(command)
-        if self.index == 5:
+        if self.index == 5 and command in {"1", "2", "3"}:
             return self._handle_approval_choice(command)
-        return self._handle_navigation(command)
+        if is_wizard_navigation(command, self.total):
+            return self._handle_navigation(command)
+        return self._handle_chat(command)
+
+    def _handle_chat(self, command: str) -> str:
+        self.log_lines.append(f"나: {command}")
+        if is_fix_request(command):
+            return self._handle_chat_fix_request(command)
+        answer = chat_with_qwen(
+            command,
+            config=self.qwen_config or QwenChatConfig.from_app_config(AppConfig.load()),
+            project_path=self.project_path,
+            agent_mode=self.agent_mode,
+        )
+        self.log_lines.append(f"Qwen {self.qwen_model}: {answer}")
+        return answer
+
+    def _handle_chat_fix_request(self, command: str) -> str:
+        analysis = analyze_project(self.project_path)
+        previews = build_fix_previews(analysis)
+        if self.agent_mode != "Build":
+            message = (
+                "Plan 모드라 파일을 수정하지 않았습니다. "
+                "Tab으로 Build 모드로 전환한 뒤 다시 '수정해줘'라고 입력하면 적용합니다."
+            )
+            if previews:
+                preview_titles = ", ".join(preview.title for preview in previews)
+                message += f"\n미리보기: {preview_titles}"
+            else:
+                message += "\n현재 자동 수정할 항목이 없습니다."
+            self.log_lines.append(f"Agent: {message}")
+            return message
+        if not previews:
+            message = "자동 수정할 항목이 없습니다. 현재 분석 기준으로 적용 가능한 preview가 없습니다."
+            self.log_lines.append(f"Agent: {message}")
+            return message
+        self.applied_changes = apply_fix_previews(self.project_path, previews)
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        self.index = min(6, len(self.steps) - 1)
+        result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
+        self.log_lines.append(f"Agent: Build 모드 요청으로 자동 수정했습니다.\n{result}")
+        return result
 
     def _handle_issue_choice(self, command: str) -> str:
         if command == "1":
@@ -288,7 +360,7 @@ def run_tui(project_path: str = "") -> int:
             with Vertical(id="shell"):
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
                 yield LogView("", id="log")
-                yield CommandInput(placeholder=command_placeholder_for_mode("Plan"), id="command")
+                yield CommandInput(placeholder=command_placeholder_for_mode("Plan", self.controller.qwen_model), id="command")
                 yield StatusBar("", id="status")
 
         def on_mount(self) -> None:
@@ -342,12 +414,12 @@ def run_tui(project_path: str = "") -> int:
 
         def _refresh(self) -> None:
             command = self.query_one(CommandInput)
-            command.placeholder = command_placeholder_for_mode(self.controller.agent_mode)
+            command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
             self.query_one(LogView).update(self.controller.render_log())
             self.query_one(StatusBar).update(
                 f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "
-                f"{self.controller.agent_mode}  |  esc interrupt   tab agents"
+                f"{self.controller.agent_mode}  |  {self.controller.qwen_model}  |  esc interrupt   tab agents"
             )
 
         def _focus_command(self) -> None:
@@ -363,6 +435,8 @@ __all__ = [
     "CommandInput",
     "LogView",
     "StatusBar",
+    "is_fix_request",
+    "is_wizard_navigation",
     "missing_textual_message",
     "run_tui",
     "textual_available",

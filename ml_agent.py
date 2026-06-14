@@ -1107,7 +1107,7 @@ def render_rich_beginner_tab(
     rows.extend(
         [
             rich_row(width=width),
-            rich_row(f"□  {active_mode} · qwen3.5 · AI ML Onboarding", role="normal", indent=6, width=width),
+            rich_row(f"□  {active_mode} · qwen3.6 · AI ML Onboarding", role="normal", indent=6, width=width),
             rich_row(width=width),
             rich_input_panel_line("█", width=width),
             rich_input_panel_line(active_mode, inactive_mode, "OpenCode Zen", width=width),
@@ -1201,7 +1201,7 @@ def render_tui_footer(index: int) -> str:
         "+" + "-" * width + "+",
         input_line,
         f"| {mode_line:<{width - 1}}|",
-        f"| {'Active agent: ' + agent + ' . Model: qwen3.5 . Workspace: AI ML Onboarding':<{width - 1}}|",
+        f"| {'Active agent: ' + agent + ' . Model: qwen3.6 . Workspace: AI ML Onboarding':<{width - 1}}|",
         shortcut_line,
         "+" + "=" * width + "+",
     ]

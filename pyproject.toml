@@ -20,4 +20,5 @@ py-modules = [
     "ml_agent",
     "ml_agent_tui",
     "prompt_store",
+    "qwen_chat",
 ]

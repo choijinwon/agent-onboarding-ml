@@ -10,8 +10,8 @@ from pathlib import Path
 DEFAULT_ENV = {
     "QWEN_API_KEY": "your-internal-qwen-key",
     "QWEN_BASE_URL": "http://xxx.xxx.xxx.xxx:port/v1",
-    "QWEN_MODEL": "qwen3.5",
-    "QWEN_MODELS": "qwen3.5,gpt20,gamma",
+    "QWEN_MODEL": "qwen3.6",
+    "QWEN_MODELS": "qwen3.6,qwen3.5,gpt20,gamma",
     "ENABLE_MULTI_AGENT": "true",
     "ENABLE_HARNESS_SKILLS": "true",
     "ENABLE_RICH_CONSOLE": "true",
