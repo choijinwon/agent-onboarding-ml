@@ -8,6 +8,7 @@ import shlex
 from urllib.parse import unquote, urlparse
 
 from app_config import AppConfig
+from chat_session_store import append_chat_session_event
 
 from ml_agent import (
     AppliedChange,
@@ -19,6 +20,7 @@ from ml_agent import (
     build_fix_previews,
     format_beginner_apply_result,
     format_beginner_tab,
+    format_beginner_fix_preview,
     parse_mode_command,
     resolve_beginner_project_input,
 )
@@ -332,22 +334,86 @@ class BeginnerTuiController:
             return self._handle_approval_choice(command)
         if is_wizard_navigation(command, self.total):
             return self._handle_navigation(command)
-        return self._handle_chat(command)
+        return self.handle_chat_message(command)
 
-    def _handle_chat(self, command: str) -> str:
+    def handle_chat_message(self, command: str) -> str:
         self.log_lines.append(f"나: {command}")
-        result = self._invoke_deepagents(command)
+        result = self._invoke_deepagents(command, agent_mode="AutoFix")
+        applied_changes: list[AppliedChange] = []
+        final_analysis = analyze_project(self.project_path)
         if result.used_deepagents:
-            self.log_lines.append(f"DeepAgents {self.qwen_model}: {result.content}")
-            return result.content
-        if is_fix_request(command):
-            return self._handle_chat_fix_request(command, unavailable_reason=result.content)
-        self.log_lines.append(f"DeepAgents: {result.content}")
-        return result.content
+            applied_changes = self._apply_fixable_issues_after_chat()
+            final_analysis = analyze_project(self.project_path)
+            response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
+            self.log_lines.append(f"Agent: {response}")
+            self._save_chat_session(command, response, applied_changes, final_analysis)
+            return response
+        response = f"{result.content}\n파일은 수정하지 않았습니다."
+        self.log_lines.append(f"Agent: {response}")
+        self._save_chat_session(command, response, applied_changes, final_analysis)
+        return response
 
-    def _invoke_deepagents(self, command: str):
+    def _invoke_deepagents(self, command: str, agent_mode: str | None = None):
         runtime = self.deepagents_runtime or DeepAgentsRuntime(self.app_config)
-        return runtime.invoke(command, project_path=self.project_path, agent_mode=self.agent_mode)
+        return runtime.invoke(command, project_path=self.project_path, agent_mode=agent_mode or self.agent_mode)
+
+    def _apply_fixable_issues_after_chat(self) -> list[AppliedChange]:
+        analysis = analyze_project(self.project_path)
+        previews = build_fix_previews(analysis)
+        if not previews:
+            return []
+        self.applied_changes = apply_fix_previews(self.project_path, previews)
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        self.index = min(6, len(self.steps) - 1)
+        return self.applied_changes
+
+    def _format_chatbot_response(
+        self,
+        agent_content: str,
+        applied_changes: list[AppliedChange],
+        final_analysis,
+    ) -> str:
+        rows = [agent_content]
+        if applied_changes:
+            applied_count = len([change for change in applied_changes if change.status == "applied"])
+            rows.append("")
+            rows.append(f"자동 수정 결과: {applied_count}/{len(applied_changes)}개 적용")
+            rows.extend(f"- {change.target}: {change.message}" for change in applied_changes)
+            if final_analysis.issue_details:
+                rows.append("남은 문제:")
+                rows.extend(f"- {issue.title}: {issue.recommendation}" for issue in final_analysis.issue_details[:5])
+        else:
+            preview = format_beginner_fix_preview(final_analysis)
+            rows.append("")
+            rows.append("자동 수정 결과: 적용 가능한 항목이 없습니다.")
+            if final_analysis.issue_details:
+                rows.append("남은 문제:")
+                rows.extend(f"- {issue.title}: {issue.recommendation}" for issue in final_analysis.issue_details[:5])
+            elif "미리보기 항목: 0개" not in preview:
+                rows.append(preview)
+        rows.append("")
+        rows.append(f"최종 등록 상태: {final_analysis.registration_status}")
+        return "\n".join(rows)
+
+    def _save_chat_session(
+        self,
+        user_message: str,
+        agent_response: str,
+        applied_changes: list[AppliedChange],
+        final_analysis,
+    ) -> None:
+        append_chat_session_event(
+            self.app_config,
+            {
+                "project_path": self.project_path,
+                "user_message": user_message,
+                "selected_model": self.qwen_model,
+                "analysis_status": final_analysis.registration_status,
+                "applied_changes": [change.as_dict() for change in applied_changes],
+                "agent_response": agent_response,
+                "remaining_issues": [issue.as_dict() for issue in final_analysis.issue_details],
+            },
+        )
 
     def _handle_chat_fix_request(self, command: str, unavailable_reason: str = "") -> str:
         analysis = analyze_project(self.project_path)

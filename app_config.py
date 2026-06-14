@@ -19,6 +19,7 @@ DEFAULT_ENV = {
     "ENABLE_TUI_INPUT_PANEL": "true",
     "PROMPT_STORE_PATH": "prompt_templates.json",
     "CHAT_ERROR_DIR": "chat_errors",
+    "SESSION_DIR": "sessions",
     "MASK_SENSITIVE_LOGS": "true",
     "REGISTRATION_PACKAGE_DIR": "registration_packages",
     "FIX_REPORT_DIR": "fix_reports",
@@ -27,6 +28,7 @@ DEFAULT_ENV = {
 
 DIRECTORY_KEYS = (
     "CHAT_ERROR_DIR",
+    "SESSION_DIR",
     "REGISTRATION_PACKAGE_DIR",
     "FIX_REPORT_DIR",
     "SKILL_STORE_DIR",

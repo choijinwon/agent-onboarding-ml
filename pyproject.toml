@@ -14,6 +14,7 @@ ml-agent = "ml_agent:main"
 [tool.setuptools]
 py-modules = [
     "app_config",
+    "chat_session_store",
     "deep_agent_profile",
     "deepagents_libs",
     "deepagents_runtime",

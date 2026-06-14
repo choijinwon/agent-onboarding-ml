@@ -10,6 +10,7 @@ from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
 from deepagents_libs import deepagents_libs_as_dict
 from deepagents_runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
+from chat_session_store import append_chat_session_event, mask_sensitive_text
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
 from qwen_chat import QwenChatConfig, chat_with_qwen
@@ -84,11 +85,14 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
     def test_deepagents_prompt_enforces_plan_and_build_policies(self):
         plan_prompt = build_deepagents_system_prompt("/tmp/model", "Plan")
         build_prompt = build_deepagents_system_prompt("/tmp/model", "Build")
+        autofix_prompt = build_deepagents_system_prompt("/tmp/model", "AutoFix")
 
         self.assertIn("Plan mode: do not modify files", plan_prompt)
         self.assertIn("preview_ml_fixes", plan_prompt)
         self.assertIn("Build mode", build_prompt)
         self.assertIn("apply_ml_fixes", build_prompt)
+        self.assertIn("AutoFix mode", autofix_prompt)
+        self.assertIn("apply_ml_fixes automatically", autofix_prompt)
 
     def test_extract_deepagents_content_reads_last_message(self):
         class Message:
@@ -1193,7 +1197,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
-    def test_tui_chat_fix_request_in_plan_mode_only_previews(self):
+    def test_tui_chat_without_deepagents_config_does_not_modify_files(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             requirements = root / "requirements.txt"
@@ -1205,8 +1209,8 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("코드 자동 수정해줘")
 
-            self.assertIn("Plan 모드", output)
-            self.assertIn("미리보기", output)
+            self.assertIn("DeepAgents runtime", output)
+            self.assertIn("QWEN_API_KEY", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
@@ -1224,7 +1228,7 @@ class WindowsSetupTest(unittest.TestCase):
             output = controller.submit("코드 자동 수정해줘")
 
             self.assertIn("DeepAgents runtime", output)
-            self.assertIn("실행하지 않았습니다", output)
+            self.assertIn("파일은 수정하지 않았습니다", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
@@ -1237,16 +1241,33 @@ class WindowsSetupTest(unittest.TestCase):
                 self.calls.append((prompt, project_path, agent_mode))
                 return DeepAgentsRunResult("DeepAgents 응답", True)
 
-        fake = FakeRuntime()
-        controller = BeginnerTuiController("/tmp/sample-project", deepagents_runtime=fake)
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                (root / "requirements.txt").write_text("mlflow\n")
+                (root / "train.py").write_text("import mlflow\n")
+                (root / "model.onnx").write_text("sample")
+                fake = FakeRuntime()
+                controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
 
-        output = controller.submit("프로젝트 분석해줘")
+                output = controller.submit("프로젝트 분석해줘")
+            finally:
+                os.chdir(cwd)
 
-        self.assertEqual(output, "DeepAgents 응답")
-        self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", controller.project_path, "Plan"))
-        self.assertIn("DeepAgents qwen3.6: DeepAgents 응답", controller.render_log())
+            self.assertIn("DeepAgents 응답", output)
+            self.assertIn("최종 등록 상태", output)
+            self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
+            self.assertIn("Agent: DeepAgents 응답", controller.render_log())
+            session_files = list((Path(tmpdir) / "sessions").glob("chat-session-*.jsonl"))
+            self.assertEqual(len(session_files), 1)
+            session_payload = json.loads(session_files[0].read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(session_payload["user_message"], "프로젝트 분석해줘")
+            self.assertEqual(session_payload["analysis_status"], "등록 가능")
 
-    def test_tui_chat_routes_fix_requests_through_deepagents_runtime_first(self):
+    def test_tui_chat_autofix_applies_fixable_issues_after_deepagents_success(self):
         class FakeRuntime:
             def __init__(self):
                 self.calls = []
@@ -1256,21 +1277,58 @@ class WindowsSetupTest(unittest.TestCase):
                 return DeepAgentsRunResult("DeepAgents 수정 완료", True)
 
         with TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            requirements = root / "requirements.txt"
-            train = root / "train.py"
-            requirements.write_text("tensorflow==2.17.0\n")
-            train.write_text("print('train')\n")
-            fake = FakeRuntime()
-            controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
-            controller.toggle_agent()
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                requirements = root / "requirements.txt"
+                train = root / "train.py"
+                requirements.write_text("tensorflow==2.17.0\n")
+                train.write_text("print('train')\n")
+                (root / "model.keras").write_text("sample")
+                fake = FakeRuntime()
+                controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
 
-            output = controller.submit("코드 자동 수정해줘")
+                output = controller.submit("코드 자동 수정해줘")
+            finally:
+                os.chdir(cwd)
 
-            self.assertEqual(output, "DeepAgents 수정 완료")
-            self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "Build"))
-            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
-            self.assertNotIn("import mlflow", train.read_text())
+            self.assertIn("DeepAgents 수정 완료", output)
+            self.assertIn("자동 수정 결과", output)
+            self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "AutoFix"))
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
+            self.assertEqual(controller.index, 6)
+            session_file = next((Path(tmpdir) / "sessions").glob("chat-session-*.jsonl"))
+            session_payload = json.loads(session_file.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(session_payload["selected_model"], "qwen3.6")
+            self.assertTrue(session_payload["applied_changes"])
+
+    def test_tui_chat_autofix_leaves_manual_sora_artifact_issue(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                return DeepAgentsRunResult("Sora 오류를 점검했습니다.", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                path, _ = resolve_beginner_project_input("/sample sora-error")
+                sample = Path(path)
+                controller = BeginnerTuiController(str(sample), deepagents_runtime=FakeRuntime())
+
+                output = controller.submit("문제 발견하면 자동 수정해줘")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("자동 수정 결과", output)
+            self.assertIn("모델 산출물 없음", output)
+            self.assertIn("mlflow", (sample / "requirements.txt").read_text().lower())
+            final_codes = {issue.code for issue in analyze_project(str(sample)).issue_details}
+            self.assertIn("MODEL_ARTIFACT_MISSING", final_codes)
+            self.assertNotIn("MLFLOW_DEPENDENCY_MISSING", final_codes)
+            self.assertNotIn("MLFLOW_CODE_MISSING", final_codes)
 
     def test_tui_controller_build_mode_applies_only_after_approval(self):
         with TemporaryDirectory() as tmpdir:
@@ -1326,6 +1384,7 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("ENABLE_RICH_CONSOLE=true", content)
         self.assertIn("ENABLE_TUI_BACKGROUND=false", content)
         self.assertIn("ENABLE_TUI_INPUT_PANEL=true", content)
+        self.assertIn("SESSION_DIR=sessions", content)
         self.assertIn("SKILL_STORE_DIR=skills", content)
 
     def test_runtime_layout_creates_skill_store(self):
@@ -1335,10 +1394,37 @@ class AppConfigTest(unittest.TestCase):
             directories = ensure_runtime_layout(config)
 
             self.assertIn(root / "skills", directories)
+            self.assertIn(root / "sessions", directories)
             self.assertTrue((root / "skills" / "README.md").exists())
             self.assertTrue((root / "skills" / "instrumenting-with-mlflow-tracing" / "SKILL.md").exists())
             self.assertTrue((root / "skills" / "agent-evaluation" / "SKILL.md").exists())
             self.assertTrue((root / "registration_packages").exists())
+
+    def test_chat_session_store_masks_sensitive_values(self):
+        with TemporaryDirectory() as tmpdir:
+            config = AppConfig(
+                values={
+                    "SESSION_DIR": "sessions",
+                    "MASK_SENSITIVE_LOGS": "true",
+                    "QWEN_API_KEY": "secret-key",
+                    "QWEN_BASE_URL": "http://internal-qwen/v1",
+                },
+                root_dir=Path(tmpdir),
+            )
+
+            path = append_chat_session_event(
+                config,
+                {
+                    "user_message": "key secret-key url http://internal-qwen/v1",
+                    "agent_response": "ok secret-key",
+                },
+            )
+
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("***", content)
+            self.assertNotIn("secret-key", content)
+            self.assertNotIn("http://internal-qwen/v1", content)
+            self.assertEqual(mask_sensitive_text("secret-key", config), "***")
 
 
 

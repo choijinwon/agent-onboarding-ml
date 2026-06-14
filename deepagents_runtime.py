@@ -85,11 +85,16 @@ class DeepAgentsRuntime:
 
 
 def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
-    apply_policy = (
-        "Build mode: if the user asks to fix, modify, patch, or apply changes, you may call apply_ml_fixes."
-        if agent_mode == "Build"
-        else "Plan mode: do not modify files. Use analyze_ml_project and preview_ml_fixes only."
-    )
+    if agent_mode == "AutoFix":
+        apply_policy = (
+            "AutoFix mode: first call analyze_ml_project. If fixable issues are found, call preview_ml_fixes "
+            "and apply_ml_fixes automatically. Do not create unsupported artifacts, delete files, or perform "
+            "large structural rewrites. Explain manual-only issues after applying supported fixes."
+        )
+    elif agent_mode == "Build":
+        apply_policy = "Build mode: if the user asks to fix, modify, patch, or apply changes, you may call apply_ml_fixes."
+    else:
+        apply_policy = "Plan mode: do not modify files. Use analyze_ml_project and preview_ml_fixes only."
     return (
         "You are AI ML Onboarding Deep Agent for a closed-network ML Platform POC. "
         "Answer in Korean. Use the provided ML onboarding tools before giving conclusions. "
