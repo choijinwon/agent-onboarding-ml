@@ -762,7 +762,7 @@ def build_beginner_step_tabs(project_path: str) -> list[str]:
         "Step 9. 로컬 서빙 테스트\n"
         f"{format_beginner_local_serving(analysis)}",
         "Step 10. 분석 리포트 생성\n"
-        "- 최종 결과와 다음 조치를 리포트로 남깁니다.",
+        f"{format_beginner_report(analysis)}",
     ]
 
 
@@ -1692,6 +1692,39 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
         rows.append("- 보완 항목을 수정한 뒤 다시 로컬 서빙 테스트를 진행합니다.")
     else:
         rows.append("- 차단 항목이 있어 아직 로컬 서빙을 실행하지 않습니다.")
+    return "\n".join(rows)
+
+
+def format_beginner_report(analysis: ProjectAnalysis) -> str:
+    report_path = Path(analysis.path or ".") / "ml-agent-report.json"
+    rows = [
+        "- 최종 결과 요약:",
+        f"  - 프로젝트: {analysis.path}",
+        f"  - 등록 상태: {analysis.registration_status}",
+        f"  - MLflow: {'정상' if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else '보완 필요'}",
+        f"  - Job Template: {'준비 가능' if analysis.job_template_ready else '보완 필요'}",
+        f"  - 로컬 서빙: {analysis.local_serving.status}",
+        f"  - 문제 수: {len(analysis.issue_details)}개",
+    ]
+    if analysis.issue_details:
+        rows.append("- 남은 문제:")
+        for index, issue in enumerate(analysis.issue_details[:3], start=1):
+            rows.append(f"  - [{index}] {issue.title}: {issue.recommendation}")
+        if len(analysis.issue_details) > 3:
+            rows.append(f"  - 외 {len(analysis.issue_details) - 3}개")
+    else:
+        rows.append("- 남은 문제: 없음")
+
+    rows.append("- 다음 조치:")
+    rows.extend(f"  - {action}" for action in analysis.next_actions[:3])
+    rows.extend(
+        [
+            "- 리포트 저장:",
+            f"  - 저장 경로: {report_path}",
+            f"  - 저장 명령: ml-agent report {analysis.path}",
+            "- 콘솔에는 위 요약을 표시했고, 파일 저장은 사용자가 리포트 생성을 실행할 때 수행합니다.",
+        ]
+    )
     return "\n".join(rows)
 
 

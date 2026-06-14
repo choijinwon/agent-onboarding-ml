@@ -122,6 +122,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("문제 수: 0개", output)
             self.assertIn("상태: 준비 가능", output)
             self.assertIn("http://127.0.0.1:8000/health", output)
+            self.assertIn("최종 결과 요약", output)
+            self.assertIn("리포트 저장", output)
 
     def test_beginner_wizard_lists_step4_issue_details(self):
         with TemporaryDirectory() as tmpdir:
@@ -215,6 +217,25 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("FastAPI 기본 서버", output)
             self.assertIn("ml-agent serve", output)
             self.assertIn("/predict", output)
+
+    def test_beginner_wizard_shows_step10_report_summary(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            steps = build_beginner_step_tabs(str(root))
+            output = steps[9]
+
+            self.assertIn("Step 10. 분석 리포트 생성", output)
+            self.assertIn("최종 결과 요약", output)
+            self.assertIn("등록 상태: 등록 가능", output)
+            self.assertIn("로컬 서빙: 준비 가능", output)
+            self.assertIn("남은 문제: 없음", output)
+            self.assertIn("저장 경로:", output)
+            self.assertIn("ml-agent-report.json", output)
+            self.assertIn("저장 명령: ml-agent report", output)
 
     def test_heavy_model_sample_can_be_selected_from_step1(self):
         with TemporaryDirectory() as tmpdir:
