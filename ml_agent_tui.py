@@ -52,6 +52,12 @@ def missing_textual_message() -> str:
     )
 
 
+def command_placeholder_for_mode(agent_mode: str) -> str:
+    if agent_mode == "Build":
+        return "[Build] 승인 후 수정 적용 가능 - 다음, 1, /sample tensorflow, /exit"
+    return "[Plan] 읽기 전용 - 프로젝트 경로, /sample tensorflow, 다음, 1, /exit"
+
+
 @dataclass
 class BeginnerTuiController:
     project_input: str = ""
@@ -258,6 +264,14 @@ def run_tui(project_path: str = "") -> int:
             background: #242424;
             border-left: solid #58a6ff;
         }
+        #command.build {
+            background: #2a2418;
+            border-left: solid #f0b429;
+        }
+        #command.build:focus {
+            background: #302817;
+            border-left: solid #f0b429;
+        }
         #status {
             height: 1;
             color: #9a9a9a;
@@ -277,7 +291,7 @@ def run_tui(project_path: str = "") -> int:
             with Vertical(id="shell"):
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
                 yield LogView("", id="log")
-                yield CommandInput(placeholder="프로젝트 경로, /sample tensorflow, 다음, 1, /exit", id="command")
+                yield CommandInput(placeholder=command_placeholder_for_mode("Plan"), id="command")
                 yield StatusBar("", id="status")
 
         def on_mount(self) -> None:
@@ -330,6 +344,9 @@ def run_tui(project_path: str = "") -> int:
                 command.insert_text_at_cursor(event.character)
 
         def _refresh(self) -> None:
+            command = self.query_one(CommandInput)
+            command.placeholder = command_placeholder_for_mode(self.controller.agent_mode)
+            command.set_class(self.controller.agent_mode == "Build", "build")
             self.query_one(LogView).update(self.controller.render_log())
             self.query_one(StatusBar).update(
                 f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "

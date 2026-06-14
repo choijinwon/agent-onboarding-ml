@@ -32,7 +32,7 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
-from ml_agent_tui import BeginnerTuiController, missing_textual_message
+from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, missing_textual_message
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -878,6 +878,12 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Textual", message)
         self.assertIn('pip install ".[tui]"', message)
         self.assertIn("Windows Terminal", message)
+
+    def test_tui_command_placeholder_shows_active_agent_mode(self):
+        self.assertIn("[Plan]", command_placeholder_for_mode("Plan"))
+        self.assertIn("읽기 전용", command_placeholder_for_mode("Plan"))
+        self.assertIn("[Build]", command_placeholder_for_mode("Build"))
+        self.assertIn("수정 적용 가능", command_placeholder_for_mode("Build"))
 
     def test_tui_controller_handles_navigation_and_exit(self):
         with TemporaryDirectory() as tmpdir:
