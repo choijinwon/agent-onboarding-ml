@@ -174,12 +174,20 @@ OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI
 
 ```env
 ENABLE_RICH_CONSOLE=true
+ENABLE_TUI_BACKGROUND=false
 ```
 
 위 이미지처럼 보이지 않으면 현재 세션에서 컬러 출력을 강제로 켭니다.
 
 ```powershell
 $env:FORCE_COLOR=1
+.\ml-agent.cmd
+```
+
+화면에 흰 박스가 생기면 배경색 렌더링을 끄세요.
+
+```powershell
+$env:DISABLE_TUI_BACKGROUND=1
 .\ml-agent.cmd
 ```
 

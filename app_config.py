@@ -15,6 +15,7 @@ DEFAULT_ENV = {
     "ENABLE_MULTI_AGENT": "true",
     "ENABLE_HARNESS_SKILLS": "true",
     "ENABLE_RICH_CONSOLE": "true",
+    "ENABLE_TUI_BACKGROUND": "false",
     "PROMPT_STORE_PATH": "prompt_templates.json",
     "CHAT_ERROR_DIR": "chat_errors",
     "MASK_SENSITIVE_LOGS": "true",
@@ -476,6 +477,7 @@ def format_config_summary(config: AppConfig) -> str:
         f"- multi_agent={config.get_bool('ENABLE_MULTI_AGENT')}\n"
         f"- harness_skills={config.get_bool('ENABLE_HARNESS_SKILLS')}\n"
         f"- rich_console={config.get_bool('ENABLE_RICH_CONSOLE')}\n"
+        f"- tui_background={config.get_bool('ENABLE_TUI_BACKGROUND')}\n"
         f"- skill_store_dir={config.skill_store_dir()}\n\n"
         "runtime_directories:\n"
         f"{directories}"

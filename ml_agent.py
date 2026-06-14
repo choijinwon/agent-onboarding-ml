@@ -61,6 +61,17 @@ MODE_CHANGE_MESSAGES = {
 
 ANSI_RESET = "\033[0m"
 ANSI_STYLES = {
+    "chrome": "\033[38;2;86;92;112m",
+    "window": "\033[38;2;200;204;216m",
+    "title": "\033[1m\033[38;2;245;245;245m",
+    "panel": "\033[38;2;230;230;230m",
+    "normal": "\033[38;2;235;235;235m",
+    "muted": "\033[38;2;130;130;130m",
+    "accent": "\033[38;2;87;166;255m",
+    "input": "\033[38;2;245;245;245m",
+    "status": "\033[38;2;170;170;170m",
+}
+ANSI_BACKGROUND_STYLES = {
     "chrome": "\033[48;2;6;6;7m\033[38;2;86;92;112m",
     "window": "\033[48;2;48;52;72m\033[38;2;200;204;216m",
     "title": "\033[1m\033[48;2;20;20;20m\033[38;2;245;245;245m",
@@ -549,13 +560,21 @@ def rich_console_enabled() -> bool:
 def tui_style(line: str, role: str = "normal") -> str:
     if not rich_console_enabled():
         return line
-    return f"{ANSI_STYLES.get(role, ANSI_STYLES['normal'])}{line}{ANSI_RESET}"
+    styles = ANSI_BACKGROUND_STYLES if tui_background_enabled() else ANSI_STYLES
+    return f"{styles.get(role, styles['normal'])}{line}{ANSI_RESET}"
 
 
 def tui_segment(text: str, role: str = "normal") -> str:
     if not rich_console_enabled():
         return text
-    return f"{ANSI_STYLES.get(role, ANSI_STYLES['normal'])}{text}{ANSI_RESET}"
+    styles = ANSI_BACKGROUND_STYLES if tui_background_enabled() else ANSI_STYLES
+    return f"{styles.get(role, styles['normal'])}{text}{ANSI_RESET}"
+
+
+def tui_background_enabled() -> bool:
+    if os.environ.get("DISABLE_TUI_BACKGROUND"):
+        return False
+    return AppConfig.load().get_bool("ENABLE_TUI_BACKGROUND")
 
 
 def style_tui_lines(lines: list[str], roles: list[str]) -> str:
