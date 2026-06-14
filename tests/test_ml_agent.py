@@ -958,6 +958,7 @@ class WindowsSetupTest(unittest.TestCase):
 
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
+        self.assertIn("Tab/화살표", model_selection_placeholder(["qwen3.6"]))
         self.assertIn("모델명", model_selection_placeholder([]))
 
     def test_tui_parse_model_commands(self):
@@ -993,6 +994,26 @@ class WindowsSetupTest(unittest.TestCase):
 
         controller.submit("/model")
         output = controller.submit("2")
+
+        self.assertIn("qwen3.5", output)
+        self.assertEqual(controller.qwen_model, "qwen3.5")
+        self.assertFalse(controller.awaiting_model_selection)
+
+    def test_tui_controller_cycles_model_selection_for_input_box(self):
+        controller = BeginnerTuiController("")
+
+        controller.submit("/model")
+        self.assertEqual(controller.highlighted_model, "qwen3.6")
+        self.assertEqual(controller.cycle_model_selection(1), "qwen3.5")
+        self.assertEqual(controller.cycle_model_selection(1), "gpt20")
+        self.assertEqual(controller.cycle_model_selection(-1), "qwen3.5")
+
+    def test_tui_controller_enter_selects_highlighted_model_when_input_empty(self):
+        controller = BeginnerTuiController("")
+
+        controller.submit("/model")
+        controller.cycle_model_selection(1)
+        output = controller.submit("")
 
         self.assertIn("qwen3.5", output)
         self.assertEqual(controller.qwen_model, "qwen3.5")

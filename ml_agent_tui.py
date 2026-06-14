@@ -69,7 +69,7 @@ def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str
 def model_selection_placeholder(models: list[str]) -> str:
     if not models:
         return "[Model Select] 모델명을 입력하세요"
-    return f"[Model Select] 1-{len(models)} 번호 또는 모델명 입력"
+    return f"[Model Select] Tab/화살표 선택, Enter 확정, 1-{len(models)} 번호 가능"
 
 
 def available_models_from_config(config: AppConfig) -> list[str]:
@@ -181,6 +181,7 @@ class BeginnerTuiController:
     qwen_config: QwenChatConfig | None = None
     deepagents_runtime: DeepAgentsRuntime | None = None
     awaiting_model_selection: bool = False
+    model_selection_index: int = 0
 
     def __post_init__(self) -> None:
         self.project_path = ""
@@ -233,16 +234,39 @@ class BeginnerTuiController:
     def qwen_model(self) -> str:
         return self.qwen_config.model if self.qwen_config else "qwen3.6"
 
+    @property
+    def highlighted_model(self) -> str:
+        if not self.available_models:
+            return self.qwen_model
+        if self.qwen_model in self.available_models and not self.awaiting_model_selection:
+            self.model_selection_index = self.available_models.index(self.qwen_model)
+        self.model_selection_index %= len(self.available_models)
+        return self.available_models[self.model_selection_index]
+
     def toggle_agent(self) -> str:
         self.agent_mode = "Build" if self.agent_mode == "Plan" else "Plan"
         return f"현재 Agent 모드: {self.agent_mode}"
 
+    def start_model_selection(self) -> str:
+        self.awaiting_model_selection = True
+        if self.qwen_model in self.available_models:
+            self.model_selection_index = self.available_models.index(self.qwen_model)
+        message = format_model_choices(self.available_models, self.qwen_model)
+        self.log_lines.append(message)
+        return message
+
+    def cycle_model_selection(self, delta: int = 1) -> str:
+        self.awaiting_model_selection = True
+        if self.available_models:
+            self.model_selection_index = (self.model_selection_index + delta) % len(self.available_models)
+        return self.highlighted_model
+
     def select_model(self, model: str) -> str:
         if not model:
-            self.awaiting_model_selection = True
-            message = format_model_choices(self.available_models, self.qwen_model)
-            self.log_lines.append(message)
-            return message
+            if self.awaiting_model_selection:
+                model = self.highlighted_model
+            else:
+                return self.start_model_selection()
         if model.isdigit() and 1 <= int(model) <= len(self.available_models):
             model = self.available_models[int(model) - 1]
         if model not in self.available_models:
@@ -259,6 +283,8 @@ class BeginnerTuiController:
 
     def submit(self, raw: str) -> str:
         command = raw.strip()
+        if not command and self.awaiting_model_selection:
+            return self.select_model("")
         if not command:
             command = "다음"
 
@@ -521,6 +547,11 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def action_toggle_agent(self) -> None:
+            if self.controller.awaiting_model_selection:
+                self.controller.cycle_model_selection(1)
+                self._refresh(force_model_value=True)
+                self._focus_command()
+                return
             self.controller.toggle_agent()
             self._refresh()
             self._focus_command()
@@ -549,6 +580,22 @@ def run_tui(project_path: str = "") -> int:
 
         def on_key(self, event) -> None:
             command = self.query_one(CommandInput)
+            if self.controller.awaiting_model_selection and event.key in {"up", "left", "shift+tab"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_model_selection(-1)
+                self._refresh(force_model_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_model_selection and event.key in {"down", "right"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_model_selection(1)
+                self._refresh(force_model_value=True)
+                self._focus_command()
+                return
             if event.key == "tab":
                 event.stop()
                 if hasattr(event, "prevent_default"):
@@ -573,10 +620,13 @@ def run_tui(project_path: str = "") -> int:
                 self._focus_command()
                 command.insert_text_at_cursor(event.character)
 
-        def _refresh(self) -> None:
+        def _refresh(self, force_model_value: bool = False) -> None:
             command = self.query_one(CommandInput)
             if self.controller.awaiting_model_selection:
                 command.placeholder = model_selection_placeholder(self.controller.available_models)
+                if force_model_value or not command.value:
+                    command.value = self.controller.highlighted_model
+                    command.cursor_position = len(command.value)
             else:
                 command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
