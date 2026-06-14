@@ -8,12 +8,15 @@ from deep_agent_profile import build_ml_platform_profile, format_profile
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
 from ml_agent import (
+    ConsoleAssistant,
     MODE_ADVANCED,
     MODE_BEGINNER,
     MODE_INTERMEDIATE,
     analyze_project,
+    build_beginner_step_tabs,
     build_beginner_wizard,
     create_heavy_model_sample,
+    format_beginner_tab,
     handle_advanced_input,
     handle_intermediate_request,
     parse_mode,
@@ -40,6 +43,40 @@ class ModeParsingTest(unittest.TestCase):
 
 
 class BeginnerWizardTest(unittest.TestCase):
+    def test_beginner_wizard_builds_separate_step_tabs(self):
+        steps = build_beginner_step_tabs("/workspace/my-model")
+        first_tab = format_beginner_tab(0, len(steps), steps[0])
+
+        self.assertEqual(len(steps), 10)
+        self.assertIn("Step 1. 프로젝트 선택", steps[0])
+        self.assertIn("Step 2. 프로젝트 자동 스캔", steps[1])
+        self.assertNotIn("Step 2. 프로젝트 자동 스캔", steps[0])
+        self.assertIn("[Tab 1]", first_tab)
+        self.assertIn("현재 단계: Tab 1/10", first_tab)
+        self.assertIn("Enter=다음", first_tab)
+
+    def test_beginner_console_advances_one_tab_at_a_time(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            inputs = iter([str(root), "", "종료"])
+            outputs: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: next(inputs),
+                output_fn=outputs.append,
+            )
+
+            assistant.run_beginner_mode()
+
+            self.assertIn("현재 단계: Tab 1/10", outputs[0])
+            self.assertIn("Step 1. 프로젝트 선택", outputs[0])
+            self.assertNotIn("Step 2. 프로젝트 자동 스캔", outputs[0])
+            self.assertIn("현재 단계: Tab 2/10", outputs[1])
+            self.assertIn("Step 2. 프로젝트 자동 스캔", outputs[1])
+            self.assertIn("초급자 Wizard를 종료합니다", outputs[-1])
+
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
 

@@ -584,7 +584,32 @@ class ConsoleAssistant:
         project_path, message = resolve_beginner_project_input(project_path)
         if message:
             self.output_fn(message)
-        self.output_fn(build_beginner_wizard(project_path))
+        self.run_beginner_step_tabs(project_path)
+
+    def run_beginner_step_tabs(self, project_path: str) -> None:
+        steps = build_beginner_step_tabs(project_path)
+        index = 0
+        while 0 <= index < len(steps):
+            self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
+            if index == len(steps) - 1:
+                return
+            raw = self.input_fn("다음 > ").strip()
+            if self.change_mode(raw):
+                self.run_current_mode()
+                return
+            if raw in {"", "n", "next", "다음"}:
+                index += 1
+                continue
+            if raw in {"p", "prev", "previous", "이전"}:
+                index = max(0, index - 1)
+                continue
+            if raw in {"q", "quit", "exit", "종료", "취소"}:
+                self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
+                return
+            if raw.isdigit() and 1 <= int(raw) <= len(steps):
+                index = int(raw) - 1
+                continue
+            self.output_fn("Enter=다음, 이전, 1~10=탭 이동, 종료 중 하나를 입력하세요.")
 
     def run_intermediate_mode(self) -> None:
         self.output_fn(INTERMEDIATE_MENU)
@@ -710,30 +735,47 @@ def ensure_sparse_file(path: Path, size_bytes: int) -> None:
 
 
 def build_beginner_wizard(project_path: str) -> str:
+    return "\n\n".join(build_beginner_step_tabs(project_path))
+
+
+def build_beginner_step_tabs(project_path: str) -> list[str]:
     display_path = project_path or "(프로젝트 경로 미입력)"
     profile = build_ml_platform_profile(MODE_BEGINNER)
     analysis = analyze_project(project_path)
-    return (
+    return [
         "Step 1. 프로젝트 선택\n"
-        f"- 선택된 경로: {display_path}\n\n"
+        f"- 선택된 경로: {display_path}",
         "Step 2. 프로젝트 자동 스캔\n"
-        f"{format_beginner_scan(analysis.scan, profile.subagents[0].name)}\n\n"
+        f"{format_beginner_scan(analysis.scan, profile.subagents[0].name)}",
         "Step 3. 등록 가능 여부 분석\n"
-        f"{format_beginner_analysis(analysis)}\n\n"
+        f"{format_beginner_analysis(analysis)}",
         "Step 4. 문제 목록 확인\n"
-        f"{format_beginner_issues(analysis)}\n\n"
+        f"{format_beginner_issues(analysis)}",
         "Step 5. 수정안 미리보기\n"
-        f"{format_beginner_fix_preview(analysis)}\n\n"
+        f"{format_beginner_fix_preview(analysis)}",
         "Step 6. 사용자 승인\n"
-        f"{format_beginner_approval(analysis, profile.approval_policy)}\n\n"
+        f"{format_beginner_approval(analysis, profile.approval_policy)}",
         "Step 7. 파일 생성 또는 수정\n"
-        f"{format_beginner_apply_step(analysis)}\n\n"
+        f"{format_beginner_apply_step(analysis)}",
         "Step 8. 재검증\n"
-        "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.\n\n"
+        "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.",
         "Step 9. 로컬 서빙 테스트\n"
-        f"{format_beginner_local_serving(analysis)}\n\n"
+        f"{format_beginner_local_serving(analysis)}",
         "Step 10. 분석 리포트 생성\n"
-        "- 최종 결과와 다음 조치를 리포트로 남깁니다."
+        "- 최종 결과와 다음 조치를 리포트로 남깁니다.",
+    ]
+
+
+def format_beginner_tab(index: int, total: int, body: str) -> str:
+    tabs = " ".join(
+        f"[Tab {step}]" if step == index + 1 else f" Tab {step} "
+        for step in range(1, total + 1)
+    )
+    return (
+        f"{tabs}\n"
+        f"현재 단계: Tab {index + 1}/{total}\n"
+        "명령: Enter=다음, 이전=이전 탭, 1~10=탭 이동, 종료=중단\n\n"
+        f"{body}"
     )
 
 
