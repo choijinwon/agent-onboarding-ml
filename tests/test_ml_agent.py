@@ -816,6 +816,14 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertTrue(wrapper.exists())
         self.assertIn("py -3", wrapper.read_text())
 
+    def test_quickstart_has_windows_execution_section(self):
+        quickstart = Path(__file__).resolve().parents[1] / "QUICKSTART.md"
+        content = quickstart.read_text(encoding="utf-8")
+
+        self.assertIn("## 11. Windows 10/11 실행 환경", content)
+        self.assertIn(".\\ml-agent.cmd init", content)
+        self.assertIn("Linux/macOS에서 확인할 때만", content)
+
 
 class AppConfigTest(unittest.TestCase):
     def test_env_example_contains_qwen_and_skill_store(self):

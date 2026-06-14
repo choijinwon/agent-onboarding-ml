@@ -232,7 +232,26 @@ skills/
 └── searching-mlflow-docs/
 ```
 
-## 11. Linux/macOS 실행
+## 11. Windows 10/11 실행 환경
+
+이 POC의 기본 대상은 Windows 10/11 폐쇄망 환경입니다.
+PowerShell 또는 CMD에서 `ml-agent.cmd`를 사용합니다.
+
+```powershell
+copy .env.example .env
+.\ml-agent.cmd init
+.\ml-agent.cmd config
+.\ml-agent.cmd prompts
+.\ml-agent.cmd
+```
+
+DeepAgents zip을 다운로드한 경우:
+
+```powershell
+.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
+```
+
+Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
 
 ```bash
 cp .env.example .env
