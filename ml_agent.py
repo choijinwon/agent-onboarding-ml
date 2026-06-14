@@ -565,7 +565,7 @@ class ConsoleAssistant:
 
     def show_mode_intro(self) -> None:
         if self.mode == MODE_BEGINNER:
-            self.output_fn(BEGINNER_INTRO)
+            self.output_fn(build_beginner_intro())
         elif self.mode == MODE_INTERMEDIATE:
             self.output_fn(INTERMEDIATE_INTRO)
         else:
@@ -690,6 +690,12 @@ def parse_mode_command(value: str) -> str | None:
 
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
+    custom_sample = resolve_existing_sample_project(raw)
+    if custom_sample:
+        return (
+            str(custom_sample),
+            f"기존 샘플 프로젝트를 선택했습니다.\n- 위치: {custom_sample}\n- 초급자 Wizard가 이 경로로 계속 진행합니다.",
+        )
     if normalized in {"/sample matrix", "/samples test", "/샘플 매트릭스", "sample matrix", "샘플 매트릭스"}:
         sample_paths = create_all_model_samples(Path.cwd() / "sample_projects")
         return (
@@ -717,6 +723,66 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
         "- 실제 외부 모델 다운로드 없이 모델 artifact를 흉내냅니다.\n"
         "- 초급자 Wizard가 이 경로로 계속 진행합니다.",
     )
+
+
+def build_beginner_intro() -> str:
+    rows = [
+        "초급자 모드가 선택되었습니다.",
+        "",
+        "이 모드는 AI/ML 프로젝트 등록 절차를 잘 몰라도",
+        "단계별 안내에 따라 프로젝트를 점검할 수 있습니다.",
+        "",
+        "먼저 분석할 프로젝트 경로를 입력하세요.",
+        "샘플을 만들거나 기존 샘플을 선택하려면 다음 중 하나를 입력하세요.",
+        "- /sample tensorflow",
+        "- /sample pytorch",
+        "- /sample sklearn",
+        "- /sample onnx",
+        "- /sample sora",
+        "- /sample heavy",
+        "- /sample all",
+        "- /sample matrix",
+    ]
+    existing_samples = list_existing_sample_projects()
+    if existing_samples:
+        rows.append("")
+        rows.append("sample_projects/에 있는 기존 샘플:")
+        rows.extend(f"- /sample {path.name}  ({path})" for path in existing_samples)
+    return "\n".join(rows)
+
+
+def list_existing_sample_projects(root: Path | None = None) -> list[Path]:
+    sample_root = Path.cwd() / "sample_projects" if root is None else root
+    if not sample_root.exists() or not sample_root.is_dir():
+        return []
+    return sorted(
+        [path for path in sample_root.iterdir() if path.is_dir()],
+        key=lambda path: path.name.lower(),
+    )
+
+
+def resolve_existing_sample_project(raw: str, root: Path | None = None) -> Path | None:
+    value = raw.strip()
+    if not value:
+        return None
+    sample_root = Path.cwd() / "sample_projects" if root is None else root
+    prefixes = ("/sample ", "sample ", "/샘플 ", "샘플 ")
+    lowered = value.lower()
+    name = value
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            name = value[len(prefix):].strip()
+            break
+    if not name:
+        return None
+    candidate = (sample_root / name).resolve()
+    try:
+        candidate.relative_to(sample_root.resolve())
+    except ValueError:
+        return None
+    if candidate.exists() and candidate.is_dir():
+        return candidate
+    return None
 
 
 def create_heavy_model_sample(root: Path, artifact_size_bytes: int = DEFAULT_HEAVY_SAMPLE_BYTES) -> Path:
@@ -851,11 +917,11 @@ def render_tui_header(index: int, total: int, title: str) -> str:
         for step in range(1, total + 1)
     )
     rows = [
-        "┌" + "─" * width + "┐",
-        f"│ {'AI ML 온보딩 Assistant':<{width - 1}}│",
-        f"│ {'현재 단계: Tab ' + str(index + 1) + '/' + str(total) + ' · ' + title:<{width - 1}}│",
-        f"│ {tabs:<{width - 1}}│",
-        "└" + "─" * width + "┘",
+        "+" + "-" * width + "+",
+        f"| {'AI ML Onboarding Assistant':<{width - 1}}|",
+        f"| {'Current: Tab ' + str(index + 1) + '/' + str(total) + ' - ' + title:<{width - 1}}|",
+        f"| {tabs:<{width - 1}}|",
+        "+" + "-" * width + "+",
     ]
     return "\n".join(rows)
 
@@ -866,18 +932,18 @@ def render_tui_body(sidebar_rows: list[str], content: str) -> str:
     content_lines = content.splitlines() or [""]
     row_count = max(len(sidebar_rows), len(content_lines))
     rows = [
-        "┌" + "─" * left_width + "┬" + "─" * right_width + "┐",
-        f"│ {'STEPS':<{left_width - 1}}│ {'CURRENT PANEL':<{right_width - 1}}│",
-        "├" + "─" * left_width + "┼" + "─" * right_width + "┤",
+        "+" + "-" * left_width + "+" + "-" * right_width + "+",
+        f"| {'STEPS':<{left_width - 1}}| {'CURRENT PANEL':<{right_width - 1}}|",
+        "+" + "-" * left_width + "+" + "-" * right_width + "+",
     ]
     for row_index in range(row_count):
         left = sidebar_rows[row_index] if row_index < len(sidebar_rows) else ""
         right = content_lines[row_index] if row_index < len(content_lines) else ""
         rows.append(
-            f"│ {truncate_cell(left, left_width - 2).ljust(left_width - 2)} "
-            f"│ {truncate_cell(right, right_width - 2).ljust(right_width - 2)} │"
+            f"| {truncate_cell(left, left_width - 2).ljust(left_width - 2)} "
+            f"| {truncate_cell(right, right_width - 2).ljust(right_width - 2)} |"
         )
-    rows.append("└" + "─" * left_width + "┴" + "─" * right_width + "┘")
+    rows.append("+" + "-" * left_width + "+" + "-" * right_width + "+")
     return "\n".join(rows)
 
 
@@ -2264,23 +2330,6 @@ LAUNCH_SCREEN = """┌───────────────────�
    - CLI Command 중심
    - dry-run / apply / validate 직접 실행
    - 자동화 파이프라인 연계 가능"""
-
-
-BEGINNER_INTRO = """초급자 모드가 선택되었습니다.
-
-이 모드는 AI/ML 프로젝트 등록 절차를 잘 몰라도
-단계별 안내에 따라 프로젝트를 점검할 수 있습니다.
-
-먼저 분석할 프로젝트 경로를 입력하세요.
-샘플을 만들려면 다음 중 하나를 입력하세요.
-- /sample tensorflow
-- /sample pytorch
-- /sample sklearn
-- /sample onnx
-- /sample sora
-- /sample heavy
-- /sample all
-- /sample matrix"""
 
 
 INTERMEDIATE_INTRO = """중급자 모드가 선택되었습니다.

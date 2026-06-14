@@ -13,14 +13,17 @@ from ml_agent import (
     MODE_BEGINNER,
     MODE_INTERMEDIATE,
     analyze_project,
+    build_beginner_intro,
     build_beginner_step_tabs,
     build_beginner_wizard,
     create_heavy_model_sample,
     format_beginner_tab,
     handle_advanced_input,
     handle_intermediate_request,
+    list_existing_sample_projects,
     parse_mode,
     parse_mode_command,
+    resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
 
@@ -52,7 +55,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("Step 2. 프로젝트 자동 스캔", steps[1])
         self.assertNotIn("Step 2. 프로젝트 자동 스캔", steps[0])
         self.assertIn("[Tab 1]", first_tab)
-        self.assertIn("현재 단계: Tab 1/10", first_tab)
+        self.assertIn("Current: Tab 1/10", first_tab)
         self.assertIn("STEPS", first_tab)
         self.assertIn("CURRENT PANEL", first_tab)
         self.assertIn("> 01 프로젝트 선택", first_tab)
@@ -76,10 +79,10 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant.run_beginner_mode()
 
             self.assertGreaterEqual(len(clears), 2)
-            self.assertIn("현재 단계: Tab 1/10", outputs[0])
+            self.assertIn("Current: Tab 1/10", outputs[0])
             self.assertIn("Step 1. 프로젝트 선택", outputs[0])
             self.assertNotIn("Step 2. 프로젝트 자동 스캔", outputs[0])
-            self.assertIn("현재 단계: Tab 2/10", outputs[1])
+            self.assertIn("Current: Tab 2/10", outputs[1])
             self.assertIn("Step 2. 프로젝트 자동 스캔", outputs[1])
             self.assertIn("초급자 Wizard를 종료합니다", outputs[-1])
 
@@ -106,7 +109,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("import mlflow", train.read_text())
             self.assertIn("선택 번호 > ", prompts)
             self.assertTrue(any("1번 적용을 승인했습니다" in output for output in outputs))
-            step7_output = next(output for output in outputs if "현재 단계: Tab 7/10" in output)
+            step7_output = next(output for output in outputs if "Current: Tab 7/10" in output)
             self.assertIn("적용 완료: 2개", step7_output)
             self.assertIn("등록 상태: 등록 가능", step7_output)
 
@@ -128,8 +131,8 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant.run_beginner_mode()
 
             self.assertIn("선택 번호 > ", prompts)
-            self.assertTrue(any("현재 단계: Tab 5/10" in output for output in outputs))
-            self.assertFalse(any("현재 단계: Tab 1/10" in output for output in outputs[4:]))
+            self.assertTrue(any("Current: Tab 5/10" in output for output in outputs))
+            self.assertFalse(any("Current: Tab 1/10" in output for output in outputs[4:]))
 
     def test_beginner_console_step6_uses_number_selection_for_review(self):
         with TemporaryDirectory() as tmpdir:
@@ -150,7 +153,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("선택 번호 > ", prompts)
             self.assertEqual((root / "requirements.txt").read_text(), "tensorflow==2.17.0\n")
-            self.assertTrue(any("현재 단계: Tab 5/10" in output for output in outputs[6:]))
+            self.assertTrue(any("Current: Tab 5/10" in output for output in outputs[6:]))
 
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
@@ -343,6 +346,29 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertTrue(Path(path).exists())
             self.assertTrue((Path(path) / "model" / "heavy-model.onnx").exists())
+
+    def test_beginner_intro_lists_existing_sample_projects(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                sample = Path(tmpdir) / "sample_projects" / "custom-added-model"
+                sample.mkdir(parents=True)
+
+                intro = build_beginner_intro()
+                samples = list_existing_sample_projects()
+                resolved = resolve_existing_sample_project("/sample custom-added-model")
+                path, message = resolve_beginner_project_input("/sample custom-added-model")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("/sample custom-added-model", intro)
+            self.assertEqual([path.name for path in samples], ["custom-added-model"])
+            self.assertEqual(resolved, sample.resolve())
+            self.assertEqual(Path(path), sample.resolve())
+            self.assertIn("기존 샘플 프로젝트를 선택했습니다", message)
 
     def test_tensorflow_sample_alias_creates_fixable_project(self):
         with TemporaryDirectory() as tmpdir:
