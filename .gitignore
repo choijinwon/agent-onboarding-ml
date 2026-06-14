@@ -9,3 +9,4 @@ fix_reports/
 sample_projects/
 .DS_Store
 build/
+*.egg-info/

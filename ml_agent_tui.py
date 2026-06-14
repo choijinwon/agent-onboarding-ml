@@ -5,6 +5,7 @@ from importlib.util import find_spec
 from pathlib import Path
 import os
 import shlex
+from urllib.parse import unquote, urlparse
 
 from app_config import AppConfig
 
@@ -61,8 +62,8 @@ def missing_textual_message() -> str:
 
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
     if agent_mode == "Build":
-        return f"[Build DeepAgents · {model}] 승인 후 수정 가능 - /model, 질문 또는 '수정해줘'"
-    return f"[Plan DeepAgents · {model}] 읽기 전용 - /model, 경로 붙여넣기/드롭, 다음"
+        return f"[Build DeepAgents · {model}] 승인 후 수정 가능 - /path, /model, 질문"
+    return f"[Plan DeepAgents · {model}] 읽기 전용 - /path 경로, 드롭/붙여넣기, 다음"
 
 
 def available_models_from_config(config: AppConfig) -> list[str]:
@@ -102,28 +103,55 @@ def is_wizard_navigation(command: str, total: int) -> bool:
     return command.isdigit() and 1 <= int(command) <= total
 
 
-def normalize_input_path(raw: str) -> Path | None:
+def strip_path_command(raw: str) -> tuple[str, bool]:
     value = raw.strip()
-    if not value:
-        return None
-    if value.startswith("file://"):
-        value = value.removeprefix("file://")
-    try:
-        parts = shlex.split(value)
-    except ValueError:
-        parts = []
-    if len(parts) == 1:
-        value = parts[0]
-    else:
-        value = value.strip('"').strip("'")
-    expanded = os.path.expandvars(os.path.expanduser(value))
-    path = Path(expanded).resolve()
-    if not path.exists():
-        return None
-    if path.is_file():
-        return path.parent
-    if path.is_dir():
-        return path
+    lowered = value.lower()
+    for prefix in ("/path", "/경로"):
+        if lowered == prefix:
+            return "", True
+        if lowered.startswith(prefix + " "):
+            return value[len(prefix) :].strip(), True
+    return value, False
+
+
+def path_candidates_from_input(raw: str) -> list[str]:
+    value, _ = strip_path_command(raw)
+    candidates: list[str] = []
+    for line in value.replace("\r", "\n").split("\n"):
+        candidate = line.strip()
+        if not candidate:
+            continue
+        for prefix in (">", "경로:", "path:", "프로젝트:", "project:"):
+            if candidate.lower().startswith(prefix.lower()):
+                candidate = candidate[len(prefix) :].strip()
+        if candidate:
+            candidates.append(candidate)
+    return candidates or [value.strip()]
+
+
+def normalize_input_path(raw: str) -> Path | None:
+    for candidate in path_candidates_from_input(raw):
+        value = candidate.strip().strip('"').strip("'")
+        if not value:
+            continue
+        if value.startswith("file://"):
+            parsed = urlparse(value)
+            value = unquote(parsed.path or value.removeprefix("file://"))
+        else:
+            value = unquote(value)
+        try:
+            parts = shlex.split(value)
+        except ValueError:
+            parts = []
+        if len(parts) == 1:
+            value = parts[0]
+        expanded = os.path.expandvars(os.path.expanduser(value))
+        path = Path(expanded).resolve()
+        if path.exists():
+            if path.is_file():
+                return path.parent
+            if path.is_dir():
+                return path
     return None
 
 
@@ -230,6 +258,12 @@ class BeginnerTuiController:
         if model is not None:
             return self.select_model(model)
 
+        path_value, is_path_command = strip_path_command(command)
+        if is_path_command and not path_value:
+            message = "경로를 함께 입력하세요. 예: /path /Users/me/my-model"
+            self.log_lines.append(message)
+            return message
+
         if command.startswith("/sample ") or command.startswith("/샘플 "):
             self.set_project(command)
             message = self.sample_message or "샘플 프로젝트를 선택했습니다."
@@ -239,6 +273,10 @@ class BeginnerTuiController:
         selected_path = normalize_input_path(command)
         if selected_path is not None:
             return self.select_project_path(selected_path)
+        if is_path_command:
+            message = f"경로를 찾을 수 없습니다: {path_value}"
+            self.log_lines.append(message)
+            return message
 
         if self.index == 3:
             return self._handle_issue_choice(command)
@@ -363,6 +401,7 @@ def run_tui(project_path: str = "") -> int:
 
     global AIOnboardingTuiApp, CommandInput, LogView, StatusBar
 
+    from textual import events
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Vertical
@@ -374,6 +413,10 @@ def run_tui(project_path: str = "") -> int:
     class CommandInput(Input):
         def on_mount(self) -> None:
             self.focus()
+
+        def on_paste(self, event: events.Paste) -> None:
+            event.stop()
+            self.insert_text_at_cursor(event.text.strip())
 
         def on_key(self, event) -> None:
             if event.key == "tab":
@@ -474,6 +517,14 @@ def run_tui(project_path: str = "") -> int:
         def on_click(self) -> None:
             self._focus_command()
 
+        def on_paste(self, event: events.Paste) -> None:
+            command = self.query_one(CommandInput)
+            if self.focused is command:
+                return
+            event.stop()
+            self._focus_command()
+            command.insert_text_at_cursor(event.text.strip())
+
         def on_key(self, event) -> None:
             command = self.query_one(CommandInput)
             if event.key == "tab":
@@ -527,7 +578,9 @@ __all__ = [
     "is_fix_request",
     "is_wizard_navigation",
     "normalize_input_path",
+    "path_candidates_from_input",
     "parse_model_command",
+    "strip_path_command",
     "missing_textual_message",
     "run_tui",
     "textual_available",

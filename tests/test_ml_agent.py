@@ -34,7 +34,16 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
-from ml_agent_tui import BeginnerTuiController, command_placeholder_for_mode, is_fix_request, missing_textual_message, normalize_input_path, parse_model_command
+from ml_agent_tui import (
+    BeginnerTuiController,
+    command_placeholder_for_mode,
+    is_fix_request,
+    missing_textual_message,
+    normalize_input_path,
+    parse_model_command,
+    path_candidates_from_input,
+    strip_path_command,
+)
 
 
 class QwenChatTest(unittest.TestCase):
@@ -942,7 +951,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
 
     def test_tui_command_placeholder_mentions_model_command(self):
-        self.assertIn("/model", command_placeholder_for_mode("Plan", "qwen3.6"))
+        self.assertIn("/path", command_placeholder_for_mode("Plan", "qwen3.6"))
         self.assertIn("/model", command_placeholder_for_mode("Build", "gamma"))
 
     def test_tui_parse_model_commands(self):
@@ -984,6 +993,21 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(normalize_input_path(str(root)), root.resolve())
             self.assertEqual(normalize_input_path(f'"{root}"'), root.resolve())
 
+    def test_tui_normalizes_path_command_and_terminal_paste_variants(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            spaced = root / "model with space"
+            spaced.mkdir()
+            escaped_spaced = str(spaced).replace(" ", "\\ ")
+            url_spaced = str(spaced).replace(" ", "%20")
+
+            self.assertEqual(strip_path_command(f"/path {spaced}"), (str(spaced), True))
+            self.assertEqual(strip_path_command(f"/경로 {spaced}"), (str(spaced), True))
+            self.assertEqual(normalize_input_path(f"/path {escaped_spaced}"), spaced.resolve())
+            self.assertEqual(normalize_input_path(f"file://{url_spaced}"), spaced.resolve())
+            self.assertEqual(normalize_input_path(f"> {spaced}"), spaced.resolve())
+            self.assertEqual(path_candidates_from_input(f"\n{spaced}\nignored"), [str(spaced), "ignored"])
+
     def test_tui_normalizes_file_path_to_parent_project(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1006,6 +1030,24 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Current: Tab 1/10", output)
             self.assertIn("프로젝트 경로를 선택했습니다", controller.render_log())
             self.assertNotIn("Qwen qwen3.6:", controller.render_log())
+
+    def test_tui_controller_selects_path_command_from_input_box(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+
+            controller = BeginnerTuiController("")
+            output = controller.submit(f"/path {root}")
+
+            self.assertEqual(controller.project_path, str(root.resolve()))
+            self.assertIn("Current: Tab 1/10", output)
+
+    def test_tui_controller_reports_missing_path_for_path_command(self):
+        controller = BeginnerTuiController("")
+
+        self.assertIn("경로를 함께 입력", controller.submit("/path"))
+        self.assertIn("경로를 찾을 수 없습니다", controller.submit("/path /no/such/model"))
 
     def test_tui_controller_handles_navigation_and_exit(self):
         with TemporaryDirectory() as tmpdir:
