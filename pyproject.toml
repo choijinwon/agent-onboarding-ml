@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 deepagents = ["deepagents>=0.6.8"]
+tui = ["textual>=0.85"]
 
 [project.scripts]
 ml-agent = "ml_agent:main"

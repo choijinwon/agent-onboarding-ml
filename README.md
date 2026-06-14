@@ -31,6 +31,15 @@ py -3 ml_agent.py
 .\ml-agent.cmd
 ```
 
+OpenCode처럼 하단 박스 안에 직접 입력되는 Textual TUI는 별도 명령으로 실행합니다.
+
+```powershell
+py -3 -m pip install ".[tui]"
+.\ml-agent.cmd tui
+```
+
+Textual이 설치되지 않은 상태에서 `tui`를 실행하면 설치 안내만 출력하고 기존 콘솔 모드는 그대로 유지됩니다.
+
 필수 조건:
 
 - Windows 10 또는 Windows 11
@@ -90,6 +99,7 @@ ENABLE_TUI_INPUT_PANEL=true
 ./ml-agent serve ./project --dry-run
 ./ml-agent report ./project
 ./ml-agent chat
+./ml-agent tui
 ./ml-agent profile
 ./ml-agent config
 ./ml-agent init
@@ -108,6 +118,7 @@ Windows 10/11:
 .\ml-agent.cmd serve .\project --dry-run
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd chat
+.\ml-agent.cmd tui
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
 .\ml-agent.cmd init

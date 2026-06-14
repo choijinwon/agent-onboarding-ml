@@ -101,6 +101,15 @@ registration_packages/
 초급자 모드는 `Tab 1/10`부터 `Tab 10/10`까지 한 단계씩 보여줍니다.
 파일 수정은 미리보기와 사용자 승인 후에만 진행됩니다.
 
+OpenCode처럼 하단 입력 박스 안에서 바로 타이핑되는 TUI를 쓰려면 Textual 옵션을 설치한 뒤 실행합니다.
+
+```powershell
+py -3 -m pip install ".[tui]"
+.\ml-agent.cmd tui
+```
+
+Textual 미설치 상태에서는 설치 안내가 출력되고 기존 콘솔 Wizard는 계속 사용할 수 있습니다.
+
 ## 7. 자주 쓰는 명령
 
 ```powershell
@@ -111,6 +120,7 @@ registration_packages/
 .\ml-agent.cmd serve .\project --dry-run
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
+.\ml-agent.cmd tui
 .\ml-agent.cmd deepagents
 .\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
 .\ml-agent.cmd config
@@ -205,6 +215,18 @@ $env:DISABLE_TUI_INPUT_PANEL=1
 $env:NO_COLOR=1
 .\ml-agent.cmd
 ```
+
+실제 editable input box가 필요한 경우에는 이미지형 콘솔 대신 Textual TUI를 실행합니다.
+
+```powershell
+.\ml-agent.cmd tui
+```
+
+키 조작:
+
+- `Tab`: Plan / Build 전환
+- `Enter`: 하단 입력 박스 내용 제출
+- `Esc` 또는 `/exit`: 종료
 
 ## 10. 프롬프트 확인
 

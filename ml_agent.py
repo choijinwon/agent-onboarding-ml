@@ -2522,6 +2522,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser("chat")
+    subparsers.add_parser("tui")
     subparsers.add_parser("config")
     subparsers.add_parser("init")
     prompts_parser = subparsers.add_parser("prompts")
@@ -2548,6 +2549,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "chat":
         ConsoleAssistant().run()
         return 0
+    if args.command == "tui":
+        from ml_agent_tui import run_tui
+
+        return run_tui()
     if args.command == "config":
         print(format_config_summary(AppConfig.load()))
         return 0

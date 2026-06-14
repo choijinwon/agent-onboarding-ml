@@ -21,6 +21,7 @@ from ml_agent import (
     build_beginner_intro,
     build_beginner_step_tabs,
     build_beginner_wizard,
+    build_parser,
     create_heavy_model_sample,
     format_beginner_tab,
     handle_advanced_input,
@@ -31,6 +32,7 @@ from ml_agent import (
     resolve_existing_sample_project,
     resolve_beginner_project_input,
 )
+from ml_agent_tui import BeginnerTuiController, missing_textual_message
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -864,6 +866,78 @@ class DeepAgentProfileTest(unittest.TestCase):
 
 
 class WindowsSetupTest(unittest.TestCase):
+    def test_tui_subcommand_is_registered(self):
+        parser = build_parser()
+        args = parser.parse_args(["tui"])
+
+        self.assertEqual(args.command, "tui")
+
+    def test_tui_missing_textual_message_is_actionable(self):
+        message = missing_textual_message()
+
+        self.assertIn("Textual", message)
+        self.assertIn('pip install ".[tui]"', message)
+        self.assertIn("Windows Terminal", message)
+
+    def test_tui_controller_handles_navigation_and_exit(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+
+            self.assertEqual(controller.index, 0)
+            output = controller.submit("다음")
+            self.assertEqual(controller.index, 1)
+            self.assertIn("Current: Tab 2/10", output)
+
+            mode_output = controller.submit("/mode beginner")
+            self.assertIn("현재 모드가 초급자 모드로 변경되었습니다", mode_output)
+
+            controller.submit("/exit")
+            self.assertTrue(controller.exited)
+
+    def test_tui_controller_plan_mode_does_not_apply_files(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+            for _ in range(5):
+                controller.submit("다음")
+
+            self.assertEqual(controller.index, 5)
+            output = controller.submit("1")
+
+            self.assertIn("Build 모드에서만", output)
+            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
+            self.assertNotIn("import mlflow", train.read_text())
+
+    def test_tui_controller_build_mode_applies_only_after_approval(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+            controller.toggle_agent()
+            for _ in range(5):
+                controller.submit("다음")
+
+            output = controller.submit("1")
+
+            self.assertEqual(controller.agent_mode, "Build")
+            self.assertEqual(controller.index, 6)
+            self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
+
     def test_windows_command_wrapper_exists(self):
         wrapper = Path(__file__).resolve().parents[1] / "ml-agent.cmd"
 
