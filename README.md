@@ -6,9 +6,11 @@
 
 처음 실행하면 사용자의 숙련도에 따라 세 가지 모드 중 하나를 선택합니다.
 
-1. 초급자 모드: opencode 스타일의 터미널 로그형 TUI Wizard 방식
+1. 초급자 모드: opencode 스타일의 이미지형 터미널 로그 TUI Wizard 방식
 2. 중급자 모드: Chat + Wizard 혼합
 3. 고급자 모드: CLI Command 중심
+
+![AI ML 온보딩 TUI 미리보기](docs/tui-preview.svg)
 
 ## 실행
 
@@ -63,6 +65,13 @@ PowerShell에서 한글이 깨지면 다음을 먼저 실행합니다.
 ```powershell
 chcp 65001
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+```
+
+OpenCode처럼 어두운 배경과 하단 `Plan / Build` 상태바가 있는 TUI를 보려면 최신 터미널을 권장합니다.
+Windows에서는 Windows Terminal, WezTerm, Alacritty에서 가장 안정적입니다.
+
+```env
+ENABLE_RICH_CONSOLE=true
 ```
 
 ## 고급자 명령

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,20 @@ MODE_CHANGE_MESSAGES = {
     MODE_INTERMEDIATE: "이제부터 Chat + Wizard 혼합 방식으로 안내합니다.",
     MODE_ADVANCED: "이제부터 CLI Command 중심으로 안내합니다.",
 }
+
+ANSI_RESET = "\033[0m"
+ANSI_STYLES = {
+    "chrome": "\033[48;2;6;6;7m\033[38;2;86;92;112m",
+    "title": "\033[1m\033[48;2;20;20;20m\033[38;2;245;245;245m",
+    "panel": "\033[48;2;20;20;20m\033[38;2;230;230;230m",
+    "normal": "\033[48;2;6;6;7m\033[38;2;235;235;235m",
+    "muted": "\033[48;2;6;6;7m\033[38;2;130;130;130m",
+    "accent": "\033[48;2;20;20;20m\033[38;2;87;166;255m",
+    "input": "\033[48;2;31;31;31m\033[38;2;245;245;245m",
+    "status": "\033[48;2;6;6;7m\033[38;2;170;170;170m",
+}
+
+_RICH_CONSOLE_ENABLED: bool | None = None
 
 MODEL_ARTIFACT_SUFFIXES = {
     ".h5",
@@ -515,6 +530,48 @@ class CommandResult:
         return payload
 
 
+def rich_console_enabled() -> bool:
+    global _RICH_CONSOLE_ENABLED
+    if _RICH_CONSOLE_ENABLED is not None:
+        return _RICH_CONSOLE_ENABLED
+    forced = os.environ.get("FORCE_COLOR", "").strip().lower() in {"1", "true", "yes", "on"}
+    if os.environ.get("NO_COLOR") and not forced:
+        _RICH_CONSOLE_ENABLED = False
+        return _RICH_CONSOLE_ENABLED
+    config = AppConfig.load()
+    enabled = config.get_bool("ENABLE_RICH_CONSOLE")
+    _RICH_CONSOLE_ENABLED = enabled and (forced or sys.stdout.isatty())
+    return _RICH_CONSOLE_ENABLED
+
+
+def tui_style(line: str, role: str = "normal") -> str:
+    if not rich_console_enabled():
+        return line
+    return f"{ANSI_STYLES.get(role, ANSI_STYLES['normal'])}{line}{ANSI_RESET}"
+
+
+def style_tui_lines(lines: list[str], roles: list[str]) -> str:
+    return "\n".join(tui_style(line, roles[index] if index < len(roles) else "normal") for index, line in enumerate(lines))
+
+
+def render_launch_screen() -> str:
+    roles = []
+    for line in LAUNCH_SCREEN.splitlines():
+        if line.startswith("+"):
+            roles.append("chrome")
+        elif "# Launch" in line:
+            roles.append("title")
+        elif line.strip().startswith("| >") or "Agents:" in line:
+            roles.append("accent")
+        elif "esc interrupt" in line:
+            roles.append("status")
+        elif line.strip() == "|":
+            roles.append("normal")
+        else:
+            roles.append("panel")
+    return style_tui_lines(LAUNCH_SCREEN.splitlines(), roles)
+
+
 class ConsoleAssistant:
     def __init__(
         self,
@@ -535,7 +592,7 @@ class ConsoleAssistant:
         self.run_current_mode()
 
     def show_launch_screen(self) -> None:
-        self.output_fn(LAUNCH_SCREEN)
+        self.output_fn(render_launch_screen())
 
     def read_mode_selection(self) -> str:
         while True:
@@ -923,7 +980,7 @@ def render_tui_header(index: int, total: int, title: str) -> str:
         f"| {current:<{width - 1}}|",
         "+" + "-" * width + "+",
     ]
-    return "\n".join(rows)
+    return style_tui_lines(rows, ["chrome", "chrome", "chrome", "title", "panel", "chrome"])
 
 
 def render_tui_body(sidebar_rows: list[str], content: str) -> str:
@@ -931,29 +988,31 @@ def render_tui_body(sidebar_rows: list[str], content: str) -> str:
     content_lines = content.splitlines() or [""]
     request_line = content_lines[0].removeprefix("- ").strip()
     log_lines = build_terminal_log_lines(content_lines)
-    rows = [
-        f"| {'STEPS':<35}{'CURRENT PANEL':<{width - 36}}|",
-        "|" + " " * width + "|",
-        f"| {'Agents':<{width - 1}}|",
-        f"| {'  Plan  read-only scan, analysis, preview':<{width - 1}}|",
-        f"| {'  Build approval-gated file changes and validation':<{width - 1}}|",
-        "|" + " " * width + "|",
-        f"| {'Workflow':<{width - 1}}|",
-    ]
+    rows: list[str] = []
+    roles: list[str] = []
+
+    def add(line: str, role: str = "normal") -> None:
+        rows.append(line)
+        roles.append(role)
+
+    add(f"| {'STEPS':<35}{'CURRENT PANEL':<{width - 36}}|", "status")
+    add("|" + " " * width + "|")
+    add(f"| {'Agents':<{width - 1}}|", "status")
+    add(f"| {'  Plan  read-only scan, analysis, preview':<{width - 1}}|", "muted")
+    add(f"| {'  Build approval-gated file changes and validation':<{width - 1}}|", "muted")
+    add("|" + " " * width + "|")
+    add(f"| {'Workflow':<{width - 1}}|", "status")
     for item in sidebar_rows:
-        rows.append(f"|   {truncate_cell(item, width - 5).ljust(width - 5)} |")
-    rows.extend(
-        [
-            "|" + " " * width + "|",
-            f"| {'User request':<{width - 1}}|",
-            f"| {'> ' + truncate_cell(request_line, width - 5):<{width - 1}}|",
-            "|" + " " * width + "|",
-        ]
-    )
+        add(f"|   {truncate_cell(item, width - 5).ljust(width - 5)} |", "accent" if item.startswith(">") else "muted")
+    add("|" + " " * width + "|")
+    add(f"| {'User request':<{width - 1}}|", "status")
+    add(f"| {'> ' + truncate_cell(request_line, width - 5):<{width - 1}}|", "panel")
+    add("|" + " " * width + "|")
     for line in log_lines:
-        rows.append(f"| {truncate_cell(line, width - 3).ljust(width - 3)} |")
-    rows.append("+" + "-" * width + "+")
-    return "\n".join(rows)
+        role = "accent" if line.startswith("~") else "muted" if line.startswith("*") or line.startswith("  |") else "normal"
+        add(f"| {truncate_cell(line, width - 3).ljust(width - 3)} |", role)
+    add("+" + "-" * width + "+", "chrome")
+    return style_tui_lines(rows, roles)
 
 
 def build_terminal_log_lines(content_lines: list[str]) -> list[str]:
@@ -984,17 +1043,20 @@ def render_tui_footer(index: int) -> str:
     width = 112
     agent = tui_agent_label(index)
     mode_line = render_agent_switcher(index)
-    input_line = "| " + " " * (width - 2) + " |"
+    cursor = "█" if rich_console_enabled() else ""
+    input_line = "| " + cursor.ljust(width - 2) + " |"
     shortcut_line = f"| {truncate_cell(command, 57).ljust(57)} esc interrupt   tab agents   ctrl+p commands |"
-    return "\n".join(
-        [
-            "+" + "-" * width + "+",
-            input_line,
-            f"| {mode_line:<{width - 1}}|",
-            f"| {'Active agent: ' + agent + ' . Model: qwen3.5 . Workspace: AI ML Onboarding':<{width - 1}}|",
-            shortcut_line,
-            "+" + "=" * width + "+",
-        ]
+    rows = [
+        "+" + "-" * width + "+",
+        input_line,
+        f"| {mode_line:<{width - 1}}|",
+        f"| {'Active agent: ' + agent + ' . Model: qwen3.5 . Workspace: AI ML Onboarding':<{width - 1}}|",
+        shortcut_line,
+        "+" + "=" * width + "+",
+    ]
+    return style_tui_lines(
+        rows,
+        ["chrome", "input", "accent", "status", "status", "chrome"],
     )
 
 

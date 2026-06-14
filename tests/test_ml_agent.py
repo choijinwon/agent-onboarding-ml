@@ -845,9 +845,17 @@ class WindowsSetupTest(unittest.TestCase):
         quickstart = Path(__file__).resolve().parents[1] / "QUICKSTART.md"
         content = quickstart.read_text(encoding="utf-8")
 
-        self.assertIn("## 11. Windows 10/11 실행 환경", content)
+        self.assertIn("## 12. Windows 10/11 실행 환경", content)
         self.assertIn(".\\ml-agent.cmd init", content)
         self.assertIn("Linux/macOS에서 확인할 때만", content)
+        self.assertIn("## 9. 이미지형 TUI 화면", content)
+
+    def test_tui_preview_image_is_documented(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertTrue((root / "docs" / "tui-preview.svg").exists())
+        self.assertIn("docs/tui-preview.svg", readme)
 
 
 class AppConfigTest(unittest.TestCase):
@@ -857,6 +865,7 @@ class AppConfigTest(unittest.TestCase):
 
         self.assertIn("QWEN_API_KEY=your-internal-qwen-key", content)
         self.assertIn("QWEN_BASE_URL=http://xxx.xxx.xxx.xxx:port/v1", content)
+        self.assertIn("ENABLE_RICH_CONSOLE=true", content)
         self.assertIn("SKILL_STORE_DIR=skills", content)
 
     def test_runtime_layout_creates_skill_store(self):

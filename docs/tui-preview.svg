@@ -1,0 +1,48 @@
+<svg width="1200" height="820" viewBox="0 0 1200 820" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI ML Onboarding opencode inspired TUI preview">
+  <rect width="1200" height="820" fill="#000000"/>
+  <rect x="70" y="50" width="1060" height="720" rx="22" fill="#050506" stroke="#4b5168" stroke-width="2"/>
+  <rect x="70" y="50" width="1060" height="46" rx="22" fill="#303448"/>
+  <circle cx="96" cy="73" r="10" fill="#ff5f57"/>
+  <circle cx="126" cy="73" r="10" fill="#febc2e"/>
+  <circle cx="156" cy="73" r="10" fill="#28c840"/>
+  <text x="188" y="80" fill="#c8ccd8" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18" font-weight="700">AI ML Onboarding Console | Step 1 project scan ...</text>
+
+  <rect x="100" y="120" width="1000" height="58" fill="#151515"/>
+  <rect x="100" y="120" width="3" height="58" fill="#5a5f72"/>
+  <text x="126" y="158" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="21" font-weight="700"># Step 1. 프로젝트 선택 workflow</text>
+  <text x="912" y="158" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">Tab 1/10</text>
+
+  <rect x="100" y="200" width="1000" height="64" fill="#151515"/>
+  <rect x="100" y="200" width="3" height="64" fill="#4fa3ff"/>
+  <text x="126" y="240" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="20">/sample tensorflow 모델을 분석하고 등록 준비 상태를 확인해줘</text>
+
+  <text x="126" y="308" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">I'll inspect the project state in Plan mode and keep file changes behind approval.</text>
+  <text x="126" y="352" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">* Read requirements.txt</text>
+  <text x="126" y="382" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">* Scan train.py for mlflow.start_run and artifact logging</text>
+  <text x="126" y="412" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">* Detect model/tensorflow-sample.keras</text>
+
+  <text x="126" y="468" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">등록 가능 여부를 요약하고 수정 전 미리보기만 제공합니다.</text>
+  <text x="126" y="520" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">→ Step 2 프로젝트 자동 스캔</text>
+  <text x="126" y="550" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">→ Step 3 MLflow / Job Template 검증</text>
+  <text x="126" y="580" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">→ Step 5 수정안 미리보기</text>
+
+  <text x="126" y="635" fill="#4fa3ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="16">□</text>
+  <text x="154" y="635" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">Plan</text>
+  <text x="210" y="635" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">· qwen3.5 · AI ML Onboarding</text>
+
+  <rect x="100" y="665" width="1000" height="86" fill="#202020"/>
+  <rect x="100" y="665" width="3" height="86" fill="#4fa3ff"/>
+  <rect x="126" y="690" width="10" height="22" fill="#ffffff"/>
+  <text x="126" y="734" fill="#4fa3ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">Plan</text>
+  <text x="184" y="734" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">Build</text>
+  <text x="252" y="734" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="19">OpenCode Zen</text>
+
+  <text x="126" y="782" fill="#4fa3ff" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">.........</text>
+  <text x="226" y="782" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">esc</text>
+  <text x="270" y="782" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">interrupt</text>
+  <text x="745" y="782" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">ctrl+t</text>
+  <text x="820" y="782" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">variants</text>
+  <text x="915" y="782" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">tab</text>
+  <text x="960" y="782" fill="#8b8b8b" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">agents</text>
+  <text x="1030" y="782" fill="#f3f4f6" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="17">ctrl+p</text>
+</svg>

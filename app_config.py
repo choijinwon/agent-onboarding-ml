@@ -14,6 +14,7 @@ DEFAULT_ENV = {
     "QWEN_MODELS": "qwen3.5,gpt20,gamma",
     "ENABLE_MULTI_AGENT": "true",
     "ENABLE_HARNESS_SKILLS": "true",
+    "ENABLE_RICH_CONSOLE": "true",
     "PROMPT_STORE_PATH": "prompt_templates.json",
     "CHAT_ERROR_DIR": "chat_errors",
     "MASK_SENSITIVE_LOGS": "true",
@@ -474,6 +475,7 @@ def format_config_summary(config: AppConfig) -> str:
         f"- qwen_models={models}\n"
         f"- multi_agent={config.get_bool('ENABLE_MULTI_AGENT')}\n"
         f"- harness_skills={config.get_bool('ENABLE_HARNESS_SKILLS')}\n"
+        f"- rich_console={config.get_bool('ENABLE_RICH_CONSOLE')}\n"
         f"- skill_store_dir={config.skill_store_dir()}\n\n"
         "runtime_directories:\n"
         f"{directories}"
