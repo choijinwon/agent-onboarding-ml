@@ -2080,9 +2080,10 @@ def handle_advanced_input(command: str) -> str:
         return format_profile(profile)
     if parts[0] == "deepagents":
         as_json = "--json" in parts
+        source_zip = option_value(parts, "--source")
         if as_json:
-            return json.dumps(deepagents_libs_as_dict(), ensure_ascii=False, indent=2)
-        return format_deepagents_libs()
+            return json.dumps(deepagents_libs_as_dict(source_zip), ensure_ascii=False, indent=2)
+        return format_deepagents_libs(source_zip)
     if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report"}:
         return "unknown command. available: analyze, validate, fix, apply, serve, report, chat, profile, deepagents, config, init, prompts, errors"
     path = parts[1] if len(parts) > 1 else "."
@@ -2091,6 +2092,18 @@ def handle_advanced_input(command: str) -> str:
     if as_json:
         return json.dumps(result.as_dict(), ensure_ascii=False, indent=2)
     return format_command_result(result)
+
+
+def option_value(parts: list[str], option: str) -> str | None:
+    if option not in parts:
+        return None
+    value_index = parts.index(option) + 1
+    if value_index >= len(parts):
+        return None
+    value = parts[value_index]
+    if value.startswith("--"):
+        return None
+    return value
 
 
 def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult:
@@ -2251,6 +2264,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_parser.add_argument("--json", action="store_true")
     deepagents_parser = subparsers.add_parser("deepagents")
     deepagents_parser.add_argument("--json", action="store_true")
+    deepagents_parser.add_argument("--source")
     return parser
 
 
@@ -2290,9 +2304,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "deepagents":
         if args.json:
-            print(json.dumps(deepagents_libs_as_dict(), ensure_ascii=False, indent=2))
+            print(json.dumps(deepagents_libs_as_dict(args.source), ensure_ascii=False, indent=2))
         else:
-            print(format_deepagents_libs())
+            print(format_deepagents_libs(args.source))
         return 0
     if not args.command:
         parser.print_help()

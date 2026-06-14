@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import re
+import zipfile
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 DEEPAGENTS_LIBS_REFERENCE = "https://github.com/langchain-ai/deepagents/tree/main/libs"
+DEEPAGENTS_SOURCE_ENV = "DEEPAGENTS_SOURCE_ZIP"
+
+
+POC_USAGE_BY_PATH = {
+    "libs/deepagents": "실제 LLM runtime 연결 시 ai-ml-onboarding profile을 create_deep_agent 설정으로 옮기는 대상.",
+    "libs/code": "초급자 Wizard TUI 화면의 참고 구현 축.",
+    "libs/cli": "고급자 모드 CLI 명령 체계와 자동화 파이프라인 참고.",
+    "libs/evals": "Wizard 수정 전후 회귀 테스트와 agent 품질 평가에 연결.",
+    "libs/acp": "향후 외부 agent/client 연계가 필요할 때 선택 적용.",
+    "libs/talon": "채널/런타임 확장 방식 참고.",
+    "libs/partners/daytona": "Daytona sandbox provider 연계가 필요할 때 참고.",
+    "libs/partners/modal": "Modal sandbox provider 연계가 필요할 때 참고.",
+    "libs/partners/quickjs": "QuickJS 기반 sandbox/subagent 실행 모델 참고.",
+    "libs/partners/runloop": "Runloop sandbox provider 연계가 필요할 때 참고.",
+    "libs/partners/vercel": "Vercel sandbox provider 연계가 필요할 때 참고.",
+}
 
 
 @dataclass(frozen=True)
@@ -62,31 +82,107 @@ DEEPAGENTS_LIBS = [
 ]
 
 
+def _extract_project_value(pyproject_text: str, key: str) -> str | None:
+    match = re.search(rf"(?m)^\s*{re.escape(key)}\s*=\s*['\"]([^'\"]+)['\"]", pyproject_text)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def _default_source_zip_candidates() -> list[Path]:
+    return [
+        Path.cwd() / "deepagents-main.zip",
+        Path.home() / "Downloads" / "deepagents-main.zip",
+    ]
+
+
+def resolve_deepagents_source_zip(source_zip: str | None = None) -> Path | None:
+    candidates: list[Path] = []
+    if source_zip:
+        candidates.append(Path(source_zip).expanduser())
+    env_source = os.environ.get(DEEPAGENTS_SOURCE_ENV, "").strip()
+    if env_source:
+        candidates.append(Path(env_source).expanduser())
+    candidates.extend(_default_source_zip_candidates())
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def read_deepagents_libs_from_zip(source_zip: str | Path) -> list[DeepAgentsLibSpec]:
+    source_path = Path(source_zip).expanduser()
+    specs: list[DeepAgentsLibSpec] = []
+    with zipfile.ZipFile(source_path) as archive:
+        pyprojects = sorted(
+            name
+            for name in archive.namelist()
+            if re.match(r"^[^/]+/libs/.+/pyproject\.toml$", name)
+        )
+        for pyproject in pyprojects:
+            parts = pyproject.split("/")
+            lib_path = "/".join(parts[1:-1])
+            raw_text = archive.read(pyproject).decode("utf-8", errors="replace")
+            package_name = _extract_project_value(raw_text, "name") or lib_path.rsplit("/", 1)[-1]
+            description = _extract_project_value(raw_text, "description")
+            purpose = description or f"DeepAgents package from {lib_path}."
+            specs.append(
+                DeepAgentsLibSpec(
+                    name=package_name,
+                    path=lib_path,
+                    purpose=purpose,
+                    poc_usage=POC_USAGE_BY_PATH.get(lib_path, "DeepAgents 확장 패키지로 필요 시 선택 적용."),
+                    required_now=lib_path == "libs/deepagents" or package_name == "deepagents",
+                )
+            )
+    return specs
+
+
 def deepagents_runtime_available() -> bool:
     return importlib.util.find_spec("deepagents") is not None
 
 
-def deepagents_libs_as_dict() -> dict[str, object]:
+def _libs_for_source(source_zip: str | None = None) -> tuple[list[DeepAgentsLibSpec], Path | None, str | None]:
+    source_path = resolve_deepagents_source_zip(source_zip)
+    if not source_path:
+        return DEEPAGENTS_LIBS, None, None
+    try:
+        return read_deepagents_libs_from_zip(source_path), source_path, None
+    except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as exc:
+        return DEEPAGENTS_LIBS, source_path, f"{type(exc).__name__}: {exc}"
+
+
+def deepagents_libs_as_dict(source_zip: str | None = None) -> dict[str, object]:
+    libs, resolved_source, source_error = _libs_for_source(source_zip)
     return {
         "reference": DEEPAGENTS_LIBS_REFERENCE,
+        "source_zip": str(resolved_source) if resolved_source else None,
+        "source_zip_found": resolved_source is not None,
+        "source_error": source_error,
+        "libs_source": "zip" if resolved_source and not source_error else "fallback_manifest",
         "runtime_import": "deepagents",
         "runtime_available": deepagents_runtime_available(),
         "install_hint": "pip install '.[deepagents]' 또는 폐쇄망 wheelhouse에서 deepagents wheel 설치",
-        "libs": [spec.as_dict() for spec in DEEPAGENTS_LIBS],
+        "libs": [spec.as_dict() for spec in libs],
     }
 
 
-def format_deepagents_libs() -> str:
+def format_deepagents_libs(source_zip: str | None = None) -> str:
+    libs, resolved_source, source_error = _libs_for_source(source_zip)
     runtime = "available" if deepagents_runtime_available() else "missing"
     rows = [
         "DeepAgents Libs",
         f"- reference: {DEEPAGENTS_LIBS_REFERENCE}",
+        f"- source_zip: {resolved_source if resolved_source else 'not found'}",
+        f"- libs_source: {'zip' if resolved_source and not source_error else 'fallback_manifest'}",
         f"- runtime_import: deepagents ({runtime})",
         "- install_hint: pip install '.[deepagents]' 또는 폐쇄망 wheelhouse에서 deepagents wheel 설치",
         "",
         "libs:",
     ]
-    for spec in DEEPAGENTS_LIBS:
+    if source_error:
+        rows.extend(["", f"source_error: {source_error}", ""])
+    for spec in libs:
         required = "required" if spec.required_now else "optional"
         rows.extend(
             [

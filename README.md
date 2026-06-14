@@ -133,10 +133,13 @@ Windows 10/11:
 ```bash
 pip install ".[deepagents]"
 ./ml-agent deepagents
+./ml-agent deepagents --source ~/Downloads/deepagents-main.zip
 ./ml-agent deepagents --json
 ```
 
-`libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/partners`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
+`deepagents-main.zip`을 지정하면 zip 안의 `libs/*/pyproject.toml`을 읽어 실제 DeepAgents libs 목록을 구성합니다. 지정하지 않아도 현재 폴더 또는 `~/Downloads/deepagents-main.zip`이 있으면 자동으로 사용합니다.
+
+`libs/deepagents`는 `create_deep_agent` runtime 연결 대상이고, `libs/code`, `libs/cli`, `libs/evals`, `libs/acp`, `libs/talon`, `libs/partners/*`는 TUI/CLI/evaluation/protocol/provider 확장 참고 축으로 관리합니다.
 
 ## 환경 변수
 

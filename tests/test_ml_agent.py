@@ -2,9 +2,11 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import zipfile
 
 from app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
 from deep_agent_profile import build_ml_platform_profile, format_profile
+from deepagents_libs import deepagents_libs_as_dict
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
 from prompt_store import load_prompt_templates
 from ml_agent import (
@@ -733,6 +735,41 @@ class AdvancedModeTest(unittest.TestCase):
         self.assertEqual(payload["runtime_import"], "deepagents")
         self.assertIn("https://github.com/langchain-ai/deepagents/tree/main/libs", payload["reference"])
         self.assertTrue(any(item["path"] == "libs/deepagents" for item in payload["libs"]))
+
+    def test_deepagents_libs_can_be_read_from_source_zip(self):
+        with TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "deepagents-main.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr(
+                    "deepagents-main/libs/deepagents/pyproject.toml",
+                    '[project]\nname = "deepagents"\ndescription = "Core Deep Agents runtime."\n',
+                )
+                archive.writestr(
+                    "deepagents-main/libs/talon/pyproject.toml",
+                    '[project]\nname = "deepagents-talon"\ndescription = "Talon runtime package."\n',
+                )
+
+            payload = deepagents_libs_as_dict(str(zip_path))
+
+            self.assertEqual(payload["libs_source"], "zip")
+            self.assertEqual(payload["source_zip"], str(zip_path))
+            self.assertTrue(any(item["path"] == "libs/talon" for item in payload["libs"]))
+            self.assertTrue(any(item["required_now"] for item in payload["libs"]))
+
+    def test_deepagents_command_accepts_source_zip(self):
+        with TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "deepagents-main.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr(
+                    "deepagents-main/libs/partners/quickjs/pyproject.toml",
+                    '[project]\nname = "langchain-quickjs"\ndescription = "QuickJS sandbox package."\n',
+                )
+
+            output = handle_advanced_input(f"ml-agent deepagents --source {zip_path} --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["libs_source"], "zip")
+            self.assertTrue(any(item["path"] == "libs/partners/quickjs" for item in payload["libs"]))
 
     def test_config_command_outputs_env_summary(self):
         output = handle_advanced_input("ml-agent config")
