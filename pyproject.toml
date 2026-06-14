@@ -10,3 +10,14 @@ tui = ["textual>=0.85"]
 
 [project.scripts]
 ml-agent = "ml_agent:main"
+
+[tool.setuptools]
+py-modules = [
+    "app_config",
+    "deep_agent_profile",
+    "deepagents_libs",
+    "error_log_store",
+    "ml_agent",
+    "ml_agent_tui",
+    "prompt_store",
+]
