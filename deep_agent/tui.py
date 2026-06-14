@@ -81,17 +81,13 @@ def missing_textual_message() -> str:
 
 
 def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str:
-    if agent_mode == "Build":
-        return f"[Build DeepAgents · {model}] 승인 후 수정 가능 - /path, /model, 질문"
-    if agent_mode == "Chatbot":
-        return f"[Chatbot DeepAgents · {model}] 자연어로 분석/자동수정 요청"
-    return f"[Plan DeepAgents · {model}] 읽기 전용 - /path 경로, 드롭/붙여넣기, 다음"
+    return ""
 
 
 def format_agent_mode_selector(agent_mode: str) -> str:
     parts = []
     for mode in AGENT_MODES:
-        parts.append(f"[ {mode}* ]" if mode == agent_mode else f"[ {mode} ]")
+        parts.append(f"{mode}" if mode == agent_mode else mode.lower())
     return " ".join(parts)
 
 
@@ -231,15 +227,9 @@ class BeginnerTuiController:
         if self.deepagents_runtime is None:
             self.deepagents_runtime = DeepAgentsRuntime(self.app_config)
         self.set_project(self.project_input)
-        self.log_lines.extend(
-            [
-                "# AI ML Onboarding workflow",
-                "초급자 Wizard TUI가 시작되었습니다.",
-                "하단 Chat 입력창의 모든 요청은 DeepAgents runtime으로 처리합니다.",
-            ]
-        )
+        self.latest_message = ""
         if self.sample_message:
-            self.log_lines.append(self.sample_message)
+            self.latest_message = self.sample_message
 
     @property
     def total(self) -> int:
@@ -257,16 +247,17 @@ class BeginnerTuiController:
         self.applied_changes = None
         self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
         self.index = 0
-        message = f"프로젝트 경로를 선택했습니다.\n- 위치: {path}"
-        self.log_lines.append(message)
+        message = ""
+        self.latest_message = message
         return self.current_screen()
 
     def current_screen(self) -> str:
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
     def render_log(self) -> str:
-        recent = "\n".join(self.log_lines[-12:])
-        return f"{recent}\n\n{self.current_screen()}"
+        if self.latest_message:
+            return f"{self.latest_message}\n\n{self.current_screen()}"
+        return self.current_screen()
 
     @property
     def qwen_model(self) -> str:
@@ -294,11 +285,11 @@ class BeginnerTuiController:
     def select_agent_mode(self, mode: str) -> str:
         if mode not in AGENT_MODES:
             message = "지원하지 않는 Agent 모드입니다. Plan, Build, Chatbot 중 하나를 선택하세요."
-            self.log_lines.append(message)
+            self.latest_message = message
             return message
         self.agent_mode = mode
-        message = f"현재 Agent 모드: {self.agent_mode}"
-        self.log_lines.append(message)
+        message = ""
+        self.latest_message = message
         return message
 
     def start_model_selection(self) -> str:
@@ -306,7 +297,7 @@ class BeginnerTuiController:
         if self.qwen_model in self.available_models:
             self.model_selection_index = self.available_models.index(self.qwen_model)
         message = format_model_choices(self.available_models, self.qwen_model)
-        self.log_lines.append(message)
+        self.latest_message = message
         return message
 
     def cycle_model_selection(self, delta: int = 1) -> str:
@@ -325,14 +316,14 @@ class BeginnerTuiController:
             model = self.available_models[int(model) - 1]
         if model not in self.available_models:
             message = f"지원하지 않는 모델입니다: {model}\n선택 가능한 모델: " + ", ".join(self.available_models)
-            self.log_lines.append(message)
+            self.latest_message = message
             return message
         self.qwen_config = replace(self.qwen_config or QwenChatConfig.from_app_config(self.app_config), model=model)
         if self.deepagents_runtime is not None:
             self.deepagents_runtime.qwen_config = self.qwen_config
         self.awaiting_model_selection = False
-        message = f"현재 모델이 {model}로 변경되었습니다."
-        self.log_lines.append(message)
+        message = ""
+        self.latest_message = message
         return message
 
     def submit(self, raw: str) -> str:
@@ -344,21 +335,21 @@ class BeginnerTuiController:
 
         if command in EXIT_COMMANDS:
             self.exited = True
-            message = "초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다."
-            self.log_lines.append(message)
+            message = ""
+            self.latest_message = message
             return message
 
         mode = parse_mode_command(command)
         if mode:
             message = f"현재 모드가 {MODE_LABELS[mode]}로 변경되었습니다.\n{MODE_CHANGE_MESSAGES[mode]}"
-            self.log_lines.append(message)
+            self.latest_message = message
             return message
 
         agent_mode = parse_agent_mode_command(command)
         if agent_mode is not None:
             if not agent_mode:
                 message = format_agent_mode_selector(self.agent_mode)
-                self.log_lines.append(message)
+                self.latest_message = message
                 return message
             return self.select_agent_mode(agent_mode)
 
@@ -371,13 +362,13 @@ class BeginnerTuiController:
         path_value, is_path_command = strip_path_command(command)
         if is_path_command and not path_value:
             message = "경로를 함께 입력하세요. 예: /path /Users/me/my-model"
-            self.log_lines.append(message)
+            self.latest_message = message
             return message
 
         if command.startswith("/sample ") or command.startswith("/샘플 "):
             self.set_project(command)
-            message = self.sample_message or "샘플 프로젝트를 선택했습니다."
-            self.log_lines.append(message)
+            message = self.sample_message or ""
+            self.latest_message = message
             return self.current_screen()
 
         selected_path = normalize_input_path(command)
@@ -385,7 +376,7 @@ class BeginnerTuiController:
             return self.select_project_path(selected_path)
         if is_path_command:
             message = f"경로를 찾을 수 없습니다: {path_value}"
-            self.log_lines.append(message)
+            self.latest_message = message
             return message
 
         if self.index == 3:
@@ -399,7 +390,6 @@ class BeginnerTuiController:
         return self.handle_chat_message(command)
 
     def handle_chat_message(self, command: str) -> str:
-        self.log_lines.append(f"나: {command}")
         result = self._invoke_deepagents(command, agent_mode="AutoFix")
         applied_changes: list[AppliedChange] = []
         final_analysis = analyze_project(self.project_path)
@@ -407,33 +397,16 @@ class BeginnerTuiController:
             applied_changes = self._apply_fixable_issues_after_chat()
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
-            self.log_lines.append(f"Agent: {response}")
+            self.latest_message = response
             self._save_chat_session(command, response, applied_changes, final_analysis)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
-        self.log_lines.append(f"Agent: {response}")
+        self.latest_message = response
         self._save_chat_session(command, response, applied_changes, final_analysis)
         return response
 
     def _handle_non_chatbot_text(self, command: str) -> str:
-        analysis = analyze_project(self.project_path)
-        self.log_lines.append(f"나: {command}")
-        if self.agent_mode == "Build":
-            message = (
-                "Build 모드는 승인된 수정안을 적용하는 모드입니다. "
-                "자연어 대화와 자동 수정은 Chatbot 모드에서 실행하세요."
-            )
-        else:
-            message = (
-                "Plan 모드는 읽기 전용입니다. 자연어 대화와 자동 수정은 Chatbot 모드에서 실행하세요."
-            )
-        previews = build_fix_previews(analysis)
-        if previews:
-            message += "\n현재 미리보기 가능한 수정안: " + ", ".join(preview.title for preview in previews)
-        else:
-            message += f"\n현재 등록 상태: {analysis.registration_status}"
-        self.log_lines.append(f"Agent: {message}")
-        return message
+        return self.current_screen()
 
     def _invoke_deepagents(self, command: str, agent_mode: str | None = None):
         runtime = self.deepagents_runtime or DeepAgentsRuntime(self.app_config)
@@ -512,7 +485,7 @@ class BeginnerTuiController:
                 message += f"\n미리보기: {preview_titles}"
             else:
                 message += "\n현재 자동 수정할 항목이 없습니다."
-            self.log_lines.append(f"DeepAgents: {message}")
+            self.latest_message = message
             return message
         message = "DeepAgents runtime이 현재 사용할 수 없어 채팅 자동 수정은 실행하지 않았습니다."
         if unavailable_reason:
@@ -522,7 +495,7 @@ class BeginnerTuiController:
             message += f"\n로컬 미리보기: {preview_titles}"
         else:
             message += "\n현재 로컬 기준 자동 수정할 항목도 없습니다."
-        self.log_lines.append(f"DeepAgents: {message}")
+        self.latest_message = message
         return message
 
     def _handle_issue_choice(self, command: str) -> str:
@@ -534,46 +507,44 @@ class BeginnerTuiController:
             return self.current_screen()
         if command == "3":
             self.exited = True
-            message = "초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다."
-            self.log_lines.append(message)
+            message = ""
+            self.latest_message = message
             return message
         if command in {"다음", "next", "n"}:
             self.index += 1
             return self.current_screen()
         message = "번호로 선택하세요. 1=수정안 미리보기, 2=프로젝트 경로 확인, 3=취소"
-        self.log_lines.append(message)
-        return self.current_screen()
+        self.latest_message = message
+        return message
 
     def _handle_approval_choice(self, command: str) -> str:
         if command == "1":
             if self.agent_mode != "Build":
-                message = "Build 모드에서만 변경을 적용할 수 있습니다. Tab으로 Build 모드로 전환하세요."
-                self.log_lines.append(message)
-                return message
+                return self.current_screen()
             analysis = analyze_project(self.project_path)
             previews = build_fix_previews(analysis)
             if not previews:
                 self.index += 1
-                message = "적용할 수정안이 없습니다. 다음 단계로 이동합니다."
-                self.log_lines.append(message)
+                message = ""
+                self.latest_message = message
                 return self.current_screen()
             self.applied_changes = apply_fix_previews(self.project_path, previews)
             self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
             result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
             self.index += 1
-            self.log_lines.append(result)
+            self.latest_message = result
             return self.current_screen()
         if command == "2":
             self.index = 4
             return self.current_screen()
         if command == "3":
             self.exited = True
-            message = "초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다."
-            self.log_lines.append(message)
+            message = ""
+            self.latest_message = message
             return message
         message = "번호로 선택하세요. 1=승인, 2=다시 보기, 3=취소"
-        self.log_lines.append(message)
-        return self.current_screen()
+        self.latest_message = message
+        return message
 
     def _handle_navigation(self, command: str) -> str:
         if command in {"다음", "next", "n"}:
@@ -586,8 +557,8 @@ class BeginnerTuiController:
             self.index = int(command) - 1
             return self.current_screen()
         message = "Enter=다음, 이전, 1~10=탭 이동, /exit 중 하나를 입력하세요."
-        self.log_lines.append(message)
-        return self.current_screen()
+        self.latest_message = message
+        return message
 
 
 def run_tui(project_path: str = "") -> int:
@@ -699,7 +670,8 @@ def run_tui(project_path: str = "") -> int:
             color: #3fb950;
         }
         #status {
-            height: 1;
+            display: none;
+            height: 0;
             color: #9a9a9a;
             background: #080808;
         }
@@ -833,11 +805,7 @@ def run_tui(project_path: str = "") -> int:
             selector.set_class(self.controller.agent_mode == "Plan", "plan")
             selector.set_class(self.controller.agent_mode == "Build", "build")
             selector.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
-            input_state = "Model Select" if self.controller.awaiting_model_selection else self.controller.agent_mode
-            self.query_one(StatusBar).update(
-                f"Current: Tab {self.controller.index + 1}/{self.controller.total}  |  "
-                f"{input_state}  |  {self.controller.qwen_model}  |  esc interrupt   tab agents"
-            )
+            self.query_one(StatusBar).update("")
 
         def _focus_command(self) -> None:
             self.set_focus(self.query_one(CommandInput))

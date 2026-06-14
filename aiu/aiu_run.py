@@ -1029,17 +1029,14 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Windows Terminal", message)
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
-        self.assertIn("[Plan DeepAgents", command_placeholder_for_mode("Plan"))
-        self.assertIn("읽기 전용", command_placeholder_for_mode("Plan"))
-        self.assertIn("[Build DeepAgents", command_placeholder_for_mode("Build"))
-        self.assertIn("승인 후 수정 가능", command_placeholder_for_mode("Build"))
-        self.assertIn("[Chatbot DeepAgents", command_placeholder_for_mode("Chatbot"))
-        self.assertIn("자연어", command_placeholder_for_mode("Chatbot"))
+        self.assertEqual(command_placeholder_for_mode("Plan"), "")
+        self.assertEqual(command_placeholder_for_mode("Build"), "")
+        self.assertEqual(command_placeholder_for_mode("Chatbot"), "")
 
     def test_tui_agent_mode_selector_and_command_parser(self):
-        self.assertIn("[ Plan* ]", format_agent_mode_selector("Plan"))
-        self.assertIn("[ Build* ]", format_agent_mode_selector("Build"))
-        self.assertIn("[ Chatbot* ]", format_agent_mode_selector("Chatbot"))
+        self.assertEqual(format_agent_mode_selector("Plan"), "Plan build chatbot")
+        self.assertEqual(format_agent_mode_selector("Build"), "plan Build chatbot")
+        self.assertEqual(format_agent_mode_selector("Chatbot"), "plan build Chatbot")
         self.assertEqual(parse_agent_mode_command("/agent plan"), "Plan")
         self.assertEqual(parse_agent_mode_command("/agent build"), "Build")
         self.assertEqual(parse_agent_mode_command("/agent chat"), "Chatbot")
@@ -1048,12 +1045,12 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIsNone(parse_agent_mode_command("agent chat"))
 
     def test_tui_command_placeholder_mentions_deepagents_model(self):
-        self.assertIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
-        self.assertIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
+        self.assertNotIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
+        self.assertNotIn("qwen3.6", command_placeholder_for_mode("Build", "qwen3.6"))
 
     def test_tui_command_placeholder_mentions_model_command(self):
-        self.assertIn("/path", command_placeholder_for_mode("Plan", "qwen3.6"))
-        self.assertIn("/model", command_placeholder_for_mode("Build", "gamma"))
+        self.assertNotIn("/path", command_placeholder_for_mode("Plan", "qwen3.6"))
+        self.assertNotIn("/model", command_placeholder_for_mode("Build", "gamma"))
 
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
@@ -1083,10 +1080,10 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("/model gamma")
 
-        self.assertIn("gamma", output)
+        self.assertEqual(output, "")
         self.assertEqual(controller.qwen_model, "gamma")
         self.assertFalse(controller.awaiting_model_selection)
-        self.assertIn("gamma", command_placeholder_for_mode(controller.agent_mode, controller.qwen_model))
+        self.assertEqual(command_placeholder_for_mode(controller.agent_mode, controller.qwen_model), "")
 
     def test_tui_controller_selects_model_by_number_after_model_menu(self):
         controller = BeginnerTuiController("")
@@ -1094,7 +1091,7 @@ class WindowsSetupTest(unittest.TestCase):
         controller.submit("/model")
         output = controller.submit("2")
 
-        self.assertIn("qwen3.5", output)
+        self.assertEqual(output, "")
         self.assertEqual(controller.qwen_model, "qwen3.5")
         self.assertFalse(controller.awaiting_model_selection)
 
@@ -1114,7 +1111,7 @@ class WindowsSetupTest(unittest.TestCase):
         controller.cycle_model_selection(1)
         output = controller.submit("")
 
-        self.assertIn("qwen3.5", output)
+        self.assertEqual(output, "")
         self.assertEqual(controller.qwen_model, "qwen3.5")
         self.assertFalse(controller.awaiting_model_selection)
 
@@ -1123,7 +1120,7 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("/model 4")
 
-        self.assertIn("gamma", output)
+        self.assertEqual(output, "")
         self.assertEqual(controller.qwen_model, "gamma")
 
     def test_tui_controller_rejects_unknown_model(self):
@@ -1191,7 +1188,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.project_path, str(root.resolve()))
             self.assertEqual(controller.index, 0)
             self.assertIn("Current: Tab 1/10", output)
-            self.assertIn("프로젝트 경로를 선택했습니다", controller.render_log())
+            self.assertNotIn("프로젝트 경로를 선택했습니다", controller.render_log())
             self.assertNotIn("Qwen qwen3.6:", controller.render_log())
 
     def test_tui_controller_selects_path_command_from_input_box(self):
@@ -1252,9 +1249,9 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("/agent chat")
 
-        self.assertIn("Chatbot", output)
+        self.assertEqual(output, "")
         self.assertEqual(controller.agent_mode, "Chatbot")
-        self.assertIn("[ Chatbot* ]", controller.submit("/agent"))
+        self.assertEqual(controller.submit("/agent"), "plan build Chatbot")
 
     def test_tui_controller_plan_mode_does_not_apply_files(self):
         with TemporaryDirectory() as tmpdir:
@@ -1271,7 +1268,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 5)
             output = controller.submit("1")
 
-            self.assertIn("Build 모드에서만", output)
+            self.assertNotIn("Build 모드에서만", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
@@ -1306,8 +1303,8 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("코드 자동 수정해줘")
 
-            self.assertIn("Build 모드", output)
-            self.assertIn("Chatbot 모드", output)
+            self.assertNotIn("Build 모드", output)
+            self.assertNotIn("Chatbot 모드", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
 
@@ -1340,7 +1337,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("DeepAgents 응답", output)
             self.assertIn("최종 등록 상태", output)
             self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
-            self.assertIn("Agent: DeepAgents 응답", controller.render_log())
+            self.assertIn("DeepAgents 응답", controller.render_log())
+            self.assertNotIn("Agent:", controller.render_log())
             session_files = list((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
             self.assertEqual(len(session_files), 1)
             session_payload = json.loads(session_files[0].read_text(encoding="utf-8").splitlines()[-1])
