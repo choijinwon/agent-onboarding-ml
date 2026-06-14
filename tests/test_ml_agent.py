@@ -87,8 +87,9 @@ class BeginnerWizardTest(unittest.TestCase):
             (root / "model.keras").write_text("sample")
             inputs = iter([str(root), "", "", "", "", "", "1", "종료"])
             outputs: list[str] = []
+            prompts: list[str] = []
             assistant = ConsoleAssistant(
-                input_fn=lambda prompt: next(inputs),
+                input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
                 output_fn=outputs.append,
             )
 
@@ -96,10 +97,31 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertIn("import mlflow", train.read_text())
-            self.assertTrue(any("적용하기를 승인했습니다" in output for output in outputs))
+            self.assertIn("선택 번호 > ", prompts)
+            self.assertTrue(any("1번 적용을 승인했습니다" in output for output in outputs))
             step7_output = next(output for output in outputs if "현재 단계: Tab 7/10" in output)
             self.assertIn("적용 완료: 2개", step7_output)
             self.assertIn("등록 상태: 등록 가능", step7_output)
+
+    def test_beginner_console_step6_uses_number_selection_for_review(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            inputs = iter([str(root), "", "", "", "", "", "2", "종료"])
+            outputs: list[str] = []
+            prompts: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
+                output_fn=outputs.append,
+            )
+
+            assistant.run_beginner_mode()
+
+            self.assertIn("선택 번호 > ", prompts)
+            self.assertEqual((root / "requirements.txt").read_text(), "tensorflow==2.17.0\n")
+            self.assertTrue(any("현재 단계: Tab 5/10" in output for output in outputs[6:]))
 
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
@@ -112,7 +134,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("다음 조치", output)
         self.assertIn("수정안 미리보기", output)
         self.assertIn("파일은 수정하지 않았습니다", output)
-        self.assertIn("적용하기", output)
+        self.assertIn("번호만 입력", output)
         self.assertIn("다시 보기", output)
         self.assertIn("취소하기", output)
         self.assertIn("승인 전 상태", output)
@@ -180,7 +202,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("MLflow 의존성 추가", output)
             self.assertIn("+ mlflow", output)
             self.assertIn("MLflow 기록 코드 추가", output)
-            self.assertIn("적용하려면 다음 단계에서 '적용하기'를 선택해야 합니다", output)
+            self.assertIn("적용하려면 다음 단계에서 1번을 선택합니다", output)
 
     def test_beginner_wizard_shows_step6_approval_choices(self):
         with TemporaryDirectory() as tmpdir:
@@ -192,6 +214,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("Step 6. 사용자 승인", output)
             self.assertIn("적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.", output)
+            self.assertIn("선택 방법: 번호만 입력합니다.", output)
             self.assertIn("1. 적용하기 (선택 가능)", output)
             self.assertIn("결과: 파일 수정 있음", output)
             self.assertIn("2. 다시 보기 (선택 가능)", output)
@@ -211,7 +234,7 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("1. 적용하기 (선택 불가)", output)
-            self.assertIn("적용하기는 수정안이 있을 때만 선택할 수 있습니다.", output)
+            self.assertIn("1번은 수정안이 있을 때만 선택할 수 있습니다.", output)
 
     def test_beginner_wizard_shows_step7_apply_scope(self):
         with TemporaryDirectory() as tmpdir:
@@ -222,7 +245,7 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("Step 7. 파일 생성 또는 수정", output)
-            self.assertIn("'적용하기' 승인 후에만", output)
+            self.assertIn("Step 6에서 1번 승인 후에만", output)
             self.assertIn("삭제 작업은 수행하지 않습니다.", output)
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
             self.assertIn("train.py: MLflow 기록 코드 추가", output)

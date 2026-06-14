@@ -594,21 +594,31 @@ class ConsoleAssistant:
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
             if index == len(steps) - 1:
                 return
-            raw = self.input_fn("다음 > ").strip()
+            prompt = "선택 번호 > " if index == 5 else "다음 > "
+            raw = self.input_fn(prompt).strip()
             if self.change_mode(raw):
                 self.run_current_mode()
                 return
-            if index == 5 and raw in {"1", "apply", "적용", "적용하기", "승인", "yes", "y"}:
-                analysis = analyze_project(project_path)
-                previews = build_fix_previews(analysis)
-                if not previews:
-                    self.output_fn("적용할 수정안이 없습니다. 다음 단계로 이동합니다.")
+            if index == 5:
+                if raw == "1":
+                    analysis = analyze_project(project_path)
+                    previews = build_fix_previews(analysis)
+                    if not previews:
+                        self.output_fn("적용할 수정안이 없습니다. 다음 단계로 이동합니다.")
+                        index += 1
+                        continue
+                    applied_changes = apply_fix_previews(project_path, previews)
+                    steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
+                    self.output_fn(format_beginner_apply_result(applied_changes, analyze_project(project_path)))
                     index += 1
                     continue
-                applied_changes = apply_fix_previews(project_path, previews)
-                steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
-                self.output_fn(format_beginner_apply_result(applied_changes, analyze_project(project_path)))
-                index += 1
+                if raw == "2":
+                    index = 4
+                    continue
+                if raw == "3":
+                    self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
+                    return
+                self.output_fn("번호로 선택하세요. 1=적용, 2=다시 보기, 3=취소")
                 continue
             if raw in {"", "n", "next", "다음"}:
                 index += 1
@@ -1634,8 +1644,8 @@ def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
         rows.extend(f"    {line}" for line in preview.preview_lines)
     rows.extend(
         [
-            "- 적용하려면 다음 단계에서 '적용하기'를 선택해야 합니다.",
-            "- '다시 보기' 또는 '취소하기'를 선택하면 파일을 수정하지 않습니다.",
+            "- 적용하려면 다음 단계에서 1번을 선택합니다.",
+            "- 2번 또는 3번을 선택하면 파일을 수정하지 않습니다.",
         ]
     )
     return "\n".join(rows)
@@ -1644,9 +1654,10 @@ def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
 def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) -> str:
     options = build_approval_options(analysis)
     rows = [
-        f"- {approval_policy}",
+        "- 1번을 선택한 경우에만 변경을 적용합니다.",
         "- 승인 전 상태: 파일은 아직 수정되지 않았습니다.",
         "- 적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.",
+        "- 선택 방법: 번호만 입력합니다.",
     ]
     for index, option in enumerate(options, start=1):
         state = "선택 가능" if option.enabled else "선택 불가"
@@ -1659,7 +1670,7 @@ def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) ->
             ]
         )
     if not options[0].enabled:
-        rows.append("- 적용하기는 수정안이 있을 때만 선택할 수 있습니다.")
+        rows.append("- 1번은 수정안이 있을 때만 선택할 수 있습니다.")
     return "\n".join(rows)
 
 
@@ -1671,7 +1682,7 @@ def format_beginner_apply_step(
         applied_count = len([change for change in applied_changes if change.status == "applied"])
         skipped_count = len([change for change in applied_changes if change.status == "skipped"])
         rows = [
-            "- 사용자가 '적용하기'를 승인했습니다.",
+            "- 사용자가 1번을 선택해 적용을 승인했습니다.",
             "- Step 5의 미리보기 항목만 적용했습니다.",
             f"- 적용 완료: {applied_count}개",
             f"- 건너뜀: {skipped_count}개",
@@ -1701,7 +1712,7 @@ def format_beginner_apply_step(
             "- 삭제 작업은 수행하지 않습니다."
         )
     rows = [
-        "- '적용하기' 승인 후에만 아래 파일을 생성하거나 수정합니다.",
+        "- Step 6에서 1번 승인 후에만 아래 파일을 생성하거나 수정합니다.",
         "- 삭제 작업은 수행하지 않습니다.",
         f"- 적용 예정 항목: {len(previews)}개",
     ]
@@ -1713,7 +1724,7 @@ def format_beginner_apply_result(applied_changes: list[AppliedChange], analysis:
     applied_count = len([change for change in applied_changes if change.status == "applied"])
     skipped_count = len([change for change in applied_changes if change.status == "skipped"])
     return (
-        "적용하기를 승인했습니다.\n"
+        "1번 적용을 승인했습니다.\n"
         f"- 적용 완료: {applied_count}개\n"
         f"- 건너뜀: {skipped_count}개\n"
         f"- 재검증 등록 상태: {analysis.registration_status}\n"
