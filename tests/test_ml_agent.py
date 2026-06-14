@@ -77,6 +77,30 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("Step 2. 프로젝트 자동 스캔", outputs[1])
             self.assertIn("초급자 Wizard를 종료합니다", outputs[-1])
 
+    def test_beginner_console_applies_preview_after_step6_approval(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            inputs = iter([str(root), "", "", "", "", "", "1", "종료"])
+            outputs: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: next(inputs),
+                output_fn=outputs.append,
+            )
+
+            assistant.run_beginner_mode()
+
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
+            self.assertTrue(any("적용하기를 승인했습니다" in output for output in outputs))
+            step7_output = next(output for output in outputs if "현재 단계: Tab 7/10" in output)
+            self.assertIn("적용 완료: 2개", step7_output)
+            self.assertIn("등록 상태: 등록 가능", step7_output)
+
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
 

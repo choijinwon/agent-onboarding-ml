@@ -587,7 +587,8 @@ class ConsoleAssistant:
         self.run_beginner_step_tabs(project_path)
 
     def run_beginner_step_tabs(self, project_path: str) -> None:
-        steps = build_beginner_step_tabs(project_path)
+        applied_changes: list[AppliedChange] | None = None
+        steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
         index = 0
         while 0 <= index < len(steps):
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
@@ -597,6 +598,18 @@ class ConsoleAssistant:
             if self.change_mode(raw):
                 self.run_current_mode()
                 return
+            if index == 5 and raw in {"1", "apply", "적용", "적용하기", "승인", "yes", "y"}:
+                analysis = analyze_project(project_path)
+                previews = build_fix_previews(analysis)
+                if not previews:
+                    self.output_fn("적용할 수정안이 없습니다. 다음 단계로 이동합니다.")
+                    index += 1
+                    continue
+                applied_changes = apply_fix_previews(project_path, previews)
+                steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
+                self.output_fn(format_beginner_apply_result(applied_changes, analyze_project(project_path)))
+                index += 1
+                continue
             if raw in {"", "n", "next", "다음"}:
                 index += 1
                 continue
@@ -738,7 +751,10 @@ def build_beginner_wizard(project_path: str) -> str:
     return "\n\n".join(build_beginner_step_tabs(project_path))
 
 
-def build_beginner_step_tabs(project_path: str) -> list[str]:
+def build_beginner_step_tabs(
+    project_path: str,
+    applied_changes: list[AppliedChange] | None = None,
+) -> list[str]:
     display_path = project_path or "(프로젝트 경로 미입력)"
     profile = build_ml_platform_profile(MODE_BEGINNER)
     analysis = analyze_project(project_path)
@@ -756,7 +772,7 @@ def build_beginner_step_tabs(project_path: str) -> list[str]:
         "Step 6. 사용자 승인\n"
         f"{format_beginner_approval(analysis, profile.approval_policy)}",
         "Step 7. 파일 생성 또는 수정\n"
-        f"{format_beginner_apply_step(analysis)}",
+        f"{format_beginner_apply_step(analysis, applied_changes=applied_changes)}",
         "Step 8. 재검증\n"
         "- 적용 후 MLflow / Job Template 검증을 다시 실행합니다.",
         "Step 9. 로컬 서빙 테스트\n"
@@ -1647,7 +1663,30 @@ def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) ->
     return "\n".join(rows)
 
 
-def format_beginner_apply_step(analysis: ProjectAnalysis) -> str:
+def format_beginner_apply_step(
+    analysis: ProjectAnalysis,
+    applied_changes: list[AppliedChange] | None = None,
+) -> str:
+    if applied_changes is not None:
+        applied_count = len([change for change in applied_changes if change.status == "applied"])
+        skipped_count = len([change for change in applied_changes if change.status == "skipped"])
+        rows = [
+            "- 사용자가 '적용하기'를 승인했습니다.",
+            "- Step 5의 미리보기 항목만 적용했습니다.",
+            f"- 적용 완료: {applied_count}개",
+            f"- 건너뜀: {skipped_count}개",
+        ]
+        rows.extend(f"  - {change.message} ({change.target})" for change in applied_changes)
+        rows.extend(
+            [
+                "- 재검증 결과:",
+                f"  - 등록 상태: {analysis.registration_status}",
+                f"  - 남은 문제: {len(analysis.issue_details)}개",
+                "- 삭제 작업은 수행하지 않았습니다.",
+            ]
+        )
+        return "\n".join(rows)
+
     previews = build_fix_previews(analysis)
     if analysis.registration_status == "불가":
         return (
@@ -1668,6 +1707,18 @@ def format_beginner_apply_step(analysis: ProjectAnalysis) -> str:
     ]
     rows.extend(f"  - {preview.target}: {preview.title}" for preview in previews)
     return "\n".join(rows)
+
+
+def format_beginner_apply_result(applied_changes: list[AppliedChange], analysis: ProjectAnalysis) -> str:
+    applied_count = len([change for change in applied_changes if change.status == "applied"])
+    skipped_count = len([change for change in applied_changes if change.status == "skipped"])
+    return (
+        "적용하기를 승인했습니다.\n"
+        f"- 적용 완료: {applied_count}개\n"
+        f"- 건너뜀: {skipped_count}개\n"
+        f"- 재검증 등록 상태: {analysis.registration_status}\n"
+        f"- 남은 문제: {len(analysis.issue_details)}개"
+    )
 
 
 def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
