@@ -561,6 +561,38 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("sora-video-sample.onnx", output)
             self.assertIn("64.0 MiB", output)
 
+    def test_sora_error_alias_creates_broken_video_project(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample sora-error")
+            finally:
+                os.chdir(cwd)
+
+            sample = Path(path)
+            analysis = analyze_project(str(sample))
+            output = build_beginner_wizard(str(sample))
+
+            self.assertIsNotNone(message)
+            self.assertIn("오류/수정 흐름", message)
+            self.assertTrue((sample / "outputs" / "sora-preview.mp4").exists())
+            self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
+            self.assertEqual(analysis.registration_status, "보완 필요")
+            issue_codes = {issue.code for issue in analysis.issue_details}
+            self.assertIn("MLFLOW_DEPENDENCY_MISSING", issue_codes)
+            self.assertIn("MLFLOW_CODE_MISSING", issue_codes)
+            self.assertIn("MODEL_ARTIFACT_MISSING", issue_codes)
+            self.assertIn("sora-preview.mp4", (sample / "train.py").read_text())
+            self.assertIn("모델 파일 후보 없음", output)
+
+    def test_sora_error_korean_alias_is_available_in_intro(self):
+        intro = build_beginner_intro()
+
+        self.assertIn("/sample sora-error", intro)
+
     def test_sample_all_creates_multiple_model_projects(self):
         with TemporaryDirectory() as tmpdir:
             cwd = Path.cwd()
@@ -585,6 +617,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertEqual(Path(path).resolve(), expected[0].resolve())
             self.assertTrue(all(project.exists() for project in expected))
+            self.assertFalse((root / "sora-error-model").exists())
             statuses = {project.name: analyze_project(str(project)).registration_status for project in expected}
             self.assertEqual(statuses["tensorflow-model"], "보완 필요")
             self.assertTrue(

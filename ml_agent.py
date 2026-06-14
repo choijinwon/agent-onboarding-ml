@@ -163,6 +163,14 @@ SAMPLE_KIND_ALIASES = {
     "소라모델": "sora",
     "샘플 소라": "sora",
     "샘플 소라모델": "sora",
+    "/sample sora-error": "sora_error",
+    "/sample broken-sora": "sora_error",
+    "/샘플 소라오류": "sora_error",
+    "sora-error": "sora_error",
+    "broken-sora": "sora_error",
+    "소라오류": "sora_error",
+    "소라에러": "sora_error",
+    "샘플 소라오류": "sora_error",
 }
 
 DEFAULT_HEAVY_SAMPLE_BYTES = 128 * 1024 * 1024
@@ -309,6 +317,27 @@ SAMPLE_MODEL_SPECS = {
             "        mlflow.log_param('prompt', args.prompt)\n"
             "        mlflow.log_param('duration_seconds', args.duration_seconds)\n"
             "        mlflow.log_artifact(args.model_path)\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        ),
+    ),
+    "sora_error": SampleModelSpec(
+        kind="sora_error",
+        title="오류 재현용 Sora 스타일 비디오 모델",
+        directory="sora-error-model",
+        artifact_path="outputs/sora-preview.mp4",
+        artifact_size_bytes=8 * 1024 * 1024,
+        requirements=["torch==2.5.1", "opencv-python==4.10.0.84"],
+        train_body=(
+            "import argparse\n"
+            "\n"
+            "def main() -> None:\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--prompt', default='broken registration sample')\n"
+            "    parser.add_argument('--preview-path', default='outputs/sora-preview.mp4')\n"
+            "    args = parser.parse_args()\n"
+            "    print(f'Sora preview only: {args.preview_path}, prompt={args.prompt}')\n"
+            "    # Intentionally missing experiment tracking and a supported model artifact.\n\n"
             "if __name__ == '__main__':\n"
             "    main()\n"
         ),
@@ -875,11 +904,17 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
         return raw, None
     spec = SAMPLE_MODEL_SPECS[sample_kind]
     sample_path = create_model_sample(Path.cwd() / "sample_projects" / spec.directory, spec)
+    sample_note = (
+        "- 이 샘플은 오류/수정 흐름 재현을 위해 일부 구성이 빠져 있습니다.\n"
+        if sample_kind.endswith("_error")
+        else ""
+    )
     return (
         str(sample_path),
         f"{spec.title} 테스트 샘플을 생성했습니다.\n"
         f"- 위치: {sample_path}\n"
         "- 실제 외부 모델 다운로드 없이 모델 artifact를 흉내냅니다.\n"
+        f"{sample_note}"
         "- 초급자 Wizard가 이 경로로 계속 진행합니다.",
     )
 
@@ -898,6 +933,7 @@ def build_beginner_intro() -> str:
         "- /sample sklearn",
         "- /sample onnx",
         "- /sample sora",
+        "- /sample sora-error",
         "- /sample heavy",
         "- /sample all",
         "- /sample matrix",
@@ -962,6 +998,7 @@ def create_all_model_samples(root: Path) -> list[Path]:
     return [
         create_model_sample(root / spec.directory, spec)
         for spec in SAMPLE_MODEL_SPECS.values()
+        if not spec.kind.endswith("_error")
     ]
 
 
