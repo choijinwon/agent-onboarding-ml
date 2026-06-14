@@ -913,7 +913,8 @@ def format_beginner_tab(index: int, total: int, body: str) -> str:
 def render_tui_header(index: int, total: int, title: str) -> str:
     width = 112
     current = f"Current: Tab {index + 1}/{total} - {title}"
-    meta = f"[Tab {index + 1}] {index + 1}/{total} | Deep Agent | read-only first"
+    agent = tui_agent_label(index)
+    meta = f"[Tab {index + 1}] {index + 1}/{total} | {agent} | Deep Agent"
     rows = [
         "+" + "=" * width + "+",
         f"| {'AI ML Onboarding Console':<{width - len(meta) - 1}}{meta} |",
@@ -932,6 +933,10 @@ def render_tui_body(sidebar_rows: list[str], content: str) -> str:
     log_lines = build_terminal_log_lines(content_lines)
     rows = [
         f"| {'STEPS':<35}{'CURRENT PANEL':<{width - 36}}|",
+        "|" + " " * width + "|",
+        f"| {'Agents':<{width - 1}}|",
+        f"| {'  Plan  read-only scan, analysis, preview':<{width - 1}}|",
+        f"| {'  Build approval-gated file changes and validation':<{width - 1}}|",
         "|" + " " * width + "|",
         f"| {'Workflow':<{width - 1}}|",
     ]
@@ -953,7 +958,7 @@ def render_tui_body(sidebar_rows: list[str], content: str) -> str:
 
 def build_terminal_log_lines(content_lines: list[str]) -> list[str]:
     rows = [
-        "I'll inspect the project state and keep changes behind approval.",
+        "I'll inspect the project state in Plan mode and keep file changes behind approval.",
         "",
     ]
     for line in content_lines:
@@ -969,7 +974,6 @@ def build_terminal_log_lines(content_lines: list[str]) -> list[str]:
         [
             "",
             "~ Awaiting next step...",
-            "[] Build . qwen3.5 . AI ML Onboarding",
         ]
     )
     return rows
@@ -978,16 +982,30 @@ def build_terminal_log_lines(content_lines: list[str]) -> list[str]:
 def render_tui_footer(index: int) -> str:
     command = "선택 번호: 1=적용  2=다시 보기  3=취소" if index == 5 else "Enter=다음  이전=이전 탭  1~10=탭 이동  종료=중단"
     width = 112
+    agent = tui_agent_label(index)
+    mode_line = render_agent_switcher(index)
     input_line = "| " + " " * (width - 2) + " |"
     shortcut_line = f"| {truncate_cell(command, 57).ljust(57)} esc interrupt   tab agents   ctrl+p commands |"
     return "\n".join(
         [
             "+" + "-" * width + "+",
             input_line,
+            f"| {mode_line:<{width - 1}}|",
+            f"| {'Active agent: ' + agent + ' . Model: qwen3.5 . Workspace: AI ML Onboarding':<{width - 1}}|",
             shortcut_line,
             "+" + "=" * width + "+",
         ]
     )
+
+
+def tui_agent_label(index: int) -> str:
+    return "Build approval" if index >= 6 else "Plan read-only"
+
+
+def render_agent_switcher(index: int) -> str:
+    if index >= 6:
+        return "Plan  Build*  AI ML Onboarding"
+    return "Plan*  Build  AI ML Onboarding"
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
@@ -2365,6 +2383,8 @@ LAUNCH_SCREEN = """+============================================================
 | 사용자 모드를 선택하세요.                                                                       |
 |                                                                                                |
 | > 처음 사용하는 경우에는 1. 초급자 모드를 권장합니다.                                           |
+|                                                                                                |
+| Agents: Plan(read-only) -> Build(approval-gated apply)                                         |
 |                                                                                                |
 | 1. 초급자 모드                                                                                 |
 |    - 단계별 Wizard 방식                                                                        |

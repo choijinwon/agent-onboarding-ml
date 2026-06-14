@@ -63,13 +63,20 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("CURRENT PANEL", first_tab)
         self.assertIn("AI ML Onboarding Console", first_tab)
         self.assertIn("User request", first_tab)
+        self.assertIn("Plan*  Build", first_tab)
+        self.assertIn("Active agent: Plan read-only", first_tab)
         self.assertIn("esc interrupt", first_tab)
         self.assertIn("> 01 프로젝트 선택", first_tab)
         self.assertIn("Enter=다음", first_tab)
 
+        apply_tab = format_beginner_tab(6, len(steps), steps[6])
+        self.assertIn("Plan  Build*", apply_tab)
+        self.assertIn("Active agent: Build approval", apply_tab)
+
     def test_launch_screen_uses_terminal_console_layout(self):
         self.assertIn("AI ML Onboarding Console", LAUNCH_SCREEN)
         self.assertIn("# Launch workflow", LAUNCH_SCREEN)
+        self.assertIn("Plan(read-only)", LAUNCH_SCREEN)
         self.assertIn("esc interrupt", LAUNCH_SCREEN)
 
     def test_beginner_console_advances_one_tab_at_a_time(self):
