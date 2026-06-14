@@ -597,11 +597,26 @@ class ConsoleAssistant:
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
             if index == len(steps) - 1:
                 return
-            prompt = "선택 번호 > " if index == 5 else "다음 > "
+            prompt = "선택 번호 > " if index in {3, 5} else "다음 > "
             raw = self.input_fn(prompt).strip()
             if self.change_mode(raw):
                 self.run_current_mode()
                 return
+            if index == 3:
+                if raw == "1":
+                    index = 4
+                    continue
+                if raw == "2":
+                    index = 0
+                    continue
+                if raw == "3":
+                    self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
+                    return
+                if raw == "":
+                    index += 1
+                    continue
+                self.output_fn("번호로 선택하세요. 1=수정안 미리보기, 2=프로젝트 경로 확인, 3=취소")
+                continue
             if index == 5:
                 if raw == "1":
                     analysis = analyze_project(project_path)

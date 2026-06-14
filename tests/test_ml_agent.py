@@ -107,6 +107,27 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("적용 완료: 2개", step7_output)
             self.assertIn("등록 상태: 등록 가능", step7_output)
 
+    def test_beginner_console_step4_choice_one_moves_to_preview(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            inputs = iter([str(root), "", "", "", "1", "종료"])
+            outputs: list[str] = []
+            prompts: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
+                output_fn=outputs.append,
+                clear_fn=lambda: None,
+            )
+
+            assistant.run_beginner_mode()
+
+            self.assertIn("선택 번호 > ", prompts)
+            self.assertTrue(any("현재 단계: Tab 5/10" in output for output in outputs))
+            self.assertFalse(any("현재 단계: Tab 1/10" in output for output in outputs[4:]))
+
     def test_beginner_console_step6_uses_number_selection_for_review(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
