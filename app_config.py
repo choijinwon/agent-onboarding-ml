@@ -282,6 +282,141 @@ description: MLflow 공식 문서 또는 반입된 문서 인덱스를 기준으
 - 요약
 - 적용 예시
 """,
+    "mlflow-prompt-management": """---
+name: mlflow-prompt-management
+description: MLflow Prompt Management로 프롬프트 버전, lineage, 평가 연결 흐름을 점검한다.
+---
+
+# MLflow Prompt Management
+
+## When To Use
+
+- 프롬프트를 코드에 직접 박아두지 않고 버전 관리하고 싶을 때
+- agent 또는 LLM 앱의 prompt 변경 이력을 추적해야 할 때
+- 평가 결과와 prompt 버전을 연결해 회귀를 확인해야 할 때
+
+## Workflow
+
+- 프롬프트가 저장된 파일, 템플릿, 환경변수, 코드 위치를 찾는다.
+- prompt name, version, tag, owner, 사용 모델을 정리한다.
+- 평가 데이터셋과 prompt 버전 연결 기준을 제안한다.
+- 폐쇄망에서는 내부 prompt registry 또는 파일 기반 prompt store를 우선 사용한다.
+
+## Output
+
+- prompt inventory
+- 버전 관리 후보
+- 평가 연결 계획
+- dry-run 수정안
+""",
+    "mlflow-prompt-optimization": """---
+name: mlflow-prompt-optimization
+description: MLflow Prompt Optimization 흐름을 참고해 프롬프트 개선 실험과 평가 루프를 설계한다.
+---
+
+# MLflow Prompt Optimization
+
+## When To Use
+
+- 프롬프트를 수정했을 때 실제 품질이 좋아졌는지 검증해야 할 때
+- 여러 prompt 후보를 평가하고 최고안을 고르고 싶을 때
+- agent 응답 품질 회귀를 방지하고 싶을 때
+
+## Workflow
+
+- 목표 metric과 평가 데이터셋을 먼저 정한다.
+- baseline prompt와 후보 prompt를 분리한다.
+- judge model, rule-based scorer, human review 중 폐쇄망에서 가능한 방식을 선택한다.
+- 결과는 prompt version, score, 실패 케이스, 다음 실험으로 정리한다.
+
+## Safety
+
+- 민감정보가 포함된 prompt 또는 평가 데이터는 마스킹한다.
+- 자동 개선안은 운영 반영 전 반드시 dry-run과 평가 리포트를 거친다.
+""",
+    "mlflow-ai-gateway": """---
+name: mlflow-ai-gateway
+description: MLflow AI Gateway 개념을 참고해 내부 LLM 라우팅, 비용, 접근 제어, fallback 설정을 점검한다.
+---
+
+# MLflow AI Gateway
+
+## When To Use
+
+- 여러 LLM provider 또는 내부 모델을 하나의 OpenAI 호환 endpoint로 쓰고 싶을 때
+- Qwen, GPT 계열, 내부 모델 라우팅과 fallback을 관리해야 할 때
+- 비용, rate limit, credential 노출을 통제해야 할 때
+
+## Checklist
+
+- base URL, model catalog, route name, fallback 순서를 확인한다.
+- API key가 코드나 로그에 노출되지 않는지 확인한다.
+- rate limit, timeout, retry, streaming 옵션을 정리한다.
+- 폐쇄망에서는 외부 provider 호출을 차단하고 내부 endpoint만 허용한다.
+
+## Output
+
+- gateway readiness 요약
+- model routing 표
+- 보안/비용 위험
+- 재검증 명령
+""",
+    "mlflow-experiment-tracking": """---
+name: mlflow-experiment-tracking
+description: MLflow Experiment Tracking으로 params, metrics, artifacts, datasets 기록 상태를 점검한다.
+---
+
+# MLflow Experiment Tracking
+
+## When To Use
+
+- 학습 코드가 실험 재현에 필요한 정보를 충분히 남기는지 확인할 때
+- params, metrics, artifacts, datasets, tags 누락을 점검할 때
+- 등록 전 학습 실행 이력을 리포트로 정리해야 할 때
+
+## Checklist
+
+- tracking URI와 experiment name 설정
+- run lifecycle 시작/종료 위치
+- hyperparameter와 runtime argument logging
+- metric key와 step 기록
+- model artifact, dataset, source version 기록
+
+## Output
+
+- tracking readiness
+- 누락 logging 항목
+- 코드 수정 preview
+- validate/report 명령
+""",
+    "mlflow-model-registry-deployment": """---
+name: mlflow-model-registry-deployment
+description: MLflow Model Registry와 Deployment 흐름을 기준으로 모델 등록, 버전, 배포 준비 상태를 점검한다.
+---
+
+# MLflow Model Registry And Deployment
+
+## When To Use
+
+- 모델 파일을 registry에 등록하거나 버전 관리해야 할 때
+- batch 또는 real-time serving 배포 준비 상태를 확인할 때
+- Docker, Kubernetes, SageMaker, Azure ML 같은 배포 목표를 정리해야 할 때
+
+## Checklist
+
+- model name, version, alias 또는 stage 정책
+- signature, input example, dependency, Python version
+- artifact URI와 registry URI
+- local serving health/predict 테스트
+- rollback과 promotion 기준
+
+## Output
+
+- registry readiness
+- deployment target 후보
+- serving 검증 결과
+- 등록 패키지에 포함할 파일 목록
+""",
 }
 
 

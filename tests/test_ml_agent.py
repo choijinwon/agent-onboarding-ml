@@ -750,6 +750,11 @@ class PromptAndSkillStoreTest(unittest.TestCase):
         self.assertIn("analyze-mlflow-trace", profile.skills)
         self.assertIn("agent-evaluation", profile.skills)
         self.assertIn("searching-mlflow-docs", profile.skills)
+        self.assertIn("mlflow-prompt-management", profile.skills)
+        self.assertIn("mlflow-prompt-optimization", profile.skills)
+        self.assertIn("mlflow-ai-gateway", profile.skills)
+        self.assertIn("mlflow-experiment-tracking", profile.skills)
+        self.assertIn("mlflow-model-registry-deployment", profile.skills)
 
 
 class ErrorLogStoreTest(unittest.TestCase):

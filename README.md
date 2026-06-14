@@ -190,14 +190,19 @@ skills/
 ├── error-log-repair/
 ├── instrumenting-with-mlflow-tracing/
 ├── job-template-draft/
+├── mlflow-ai-gateway/
+├── mlflow-experiment-tracking/
+├── mlflow-model-registry-deployment/
 ├── mlflow-onboarding/
+├── mlflow-prompt-management/
+├── mlflow-prompt-optimization/
 ├── mlflow-registration-check/
 ├── querying-mlflow-metrics/
 ├── retrieving-mlflow-traces/
 └── searching-mlflow-docs/
 ```
 
-MLflow skill 구성은 [mlflow/skills](https://github.com/mlflow/skills)의 tracing, trace 분석, chat session 분석, metrics, agent evaluation, onboarding, docs search 흐름을 참고해 폐쇄망 POC용으로 정리했습니다.
+MLflow skill 구성은 [mlflow/skills](https://github.com/mlflow/skills)의 skill 구조와 [mlflow/mlflow](https://github.com/mlflow/mlflow)의 observability, evaluation, prompt management, prompt optimization, AI Gateway, experiment tracking, model registry, deployment 기능 축을 참고해 폐쇄망 POC용으로 정리했습니다.
 
 ## 에러 로그 관리
 

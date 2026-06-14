@@ -216,7 +216,12 @@ skills/
 ├── error-log-repair/
 ├── instrumenting-with-mlflow-tracing/
 ├── job-template-draft/
+├── mlflow-ai-gateway/
+├── mlflow-experiment-tracking/
+├── mlflow-model-registry-deployment/
 ├── mlflow-onboarding/
+├── mlflow-prompt-management/
+├── mlflow-prompt-optimization/
 ├── mlflow-registration-check/
 ├── querying-mlflow-metrics/
 ├── retrieving-mlflow-traces/
