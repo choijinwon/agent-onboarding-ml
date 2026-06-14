@@ -12,7 +12,7 @@ from deepagents_libs import deepagents_libs_as_dict
 from deepagents_runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
 from chat_session_store import append_chat_session_event, mask_sensitive_text
 from error_log_store import analyze_error_log, list_error_logs, save_error_log
-from prompt_store import load_prompt_templates
+from prompt_store import export_prompt_templates_to_wiki, load_prompt_templates
 from qwen_chat import QwenChatConfig, chat_with_qwen
 from ml_agent import (
     ConsoleAssistant,
@@ -1386,6 +1386,8 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("ENABLE_TUI_INPUT_PANEL=true", content)
         self.assertIn("SESSION_DIR=sessions", content)
         self.assertIn("SKILL_STORE_DIR=skills", content)
+        self.assertIn("WIKI_DIR=wiki", content)
+        self.assertIn("WIKI_PROMPT_DIR=wiki/prompts", content)
 
     def test_runtime_layout_creates_skill_store(self):
         with TemporaryDirectory() as tmpdir:
@@ -1399,6 +1401,10 @@ class AppConfigTest(unittest.TestCase):
             self.assertTrue((root / "skills" / "instrumenting-with-mlflow-tracing" / "SKILL.md").exists())
             self.assertTrue((root / "skills" / "agent-evaluation" / "SKILL.md").exists())
             self.assertTrue((root / "registration_packages").exists())
+            self.assertTrue((root / "wiki").exists())
+            self.assertTrue((root / "wiki" / "prompts").exists())
+            self.assertTrue((root / "wiki" / "prompts" / "prompt_templates.md").exists())
+            self.assertTrue((root / "wiki" / "prompts" / "prompt_templates.json").exists())
 
     def test_chat_session_store_masks_sensitive_values(self):
         with TemporaryDirectory() as tmpdir:
@@ -1444,6 +1450,54 @@ class PromptAndSkillStoreTest(unittest.TestCase):
 
         for skill_name in DEFAULT_SKILLS:
             self.assertTrue((root / "skills" / skill_name / "SKILL.md").exists(), skill_name)
+
+    def test_prompt_templates_export_to_wiki(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "prompt_templates.json").write_text(
+                json.dumps(
+                    {
+                        "templates": [
+                            {
+                                "name": "sample_prompt",
+                                "description": "샘플 프롬프트",
+                                "prompt": "프로젝트를 분석하세요.",
+                                "tags": ["sample", "wiki"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig.load(root_dir=root)
+            paths = export_prompt_templates_to_wiki(config)
+
+            markdown = root / "wiki" / "prompts" / "prompt_templates.md"
+            payload = root / "wiki" / "prompts" / "prompt_templates.json"
+            self.assertEqual(paths, [markdown, payload])
+            self.assertIn("## sample_prompt", markdown.read_text(encoding="utf-8"))
+            self.assertIn("프로젝트를 분석하세요.", markdown.read_text(encoding="utf-8"))
+            self.assertEqual(
+                json.loads(payload.read_text(encoding="utf-8"))["templates"][0]["name"],
+                "sample_prompt",
+            )
+
+    def test_runtime_layout_updates_default_skills_and_preserves_custom_skills(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = AppConfig.load(root_dir=root)
+            stale_skill = root / "skills" / "mlflow-registration-check" / "SKILL.md"
+            custom_skill = root / "skills" / "custom-user-skill" / "SKILL.md"
+            stale_skill.parent.mkdir(parents=True, exist_ok=True)
+            custom_skill.parent.mkdir(parents=True, exist_ok=True)
+            stale_skill.write_text("old content\n", encoding="utf-8")
+            custom_skill.write_text("custom content\n", encoding="utf-8")
+
+            ensure_runtime_layout(config)
+
+            self.assertEqual(stale_skill.read_text(encoding="utf-8"), DEFAULT_SKILLS["mlflow-registration-check"].strip() + "\n")
+            self.assertEqual(custom_skill.read_text(encoding="utf-8"), "custom content\n")
 
     def test_mlflow_skills_are_in_deep_agent_profile(self):
         profile = build_ml_platform_profile("advanced")

@@ -18,6 +18,8 @@ DEFAULT_ENV = {
     "ENABLE_TUI_BACKGROUND": "false",
     "ENABLE_TUI_INPUT_PANEL": "true",
     "PROMPT_STORE_PATH": "prompt_templates.json",
+    "WIKI_DIR": "wiki",
+    "WIKI_PROMPT_DIR": "wiki/prompts",
     "CHAT_ERROR_DIR": "chat_errors",
     "SESSION_DIR": "sessions",
     "MASK_SENSITIVE_LOGS": "true",
@@ -32,6 +34,8 @@ DIRECTORY_KEYS = (
     "REGISTRATION_PACKAGE_DIR",
     "FIX_REPORT_DIR",
     "SKILL_STORE_DIR",
+    "WIKI_DIR",
+    "WIKI_PROMPT_DIR",
 )
 
 
@@ -466,6 +470,9 @@ def ensure_runtime_layout(config: AppConfig) -> list[Path]:
         created_or_existing.append(directory)
     _ensure_skill_readme(config.skill_store_dir())
     _ensure_default_skills(config.skill_store_dir())
+    from prompt_store import export_prompt_templates_to_wiki
+
+    export_prompt_templates_to_wiki(config)
     return created_or_existing
 
 
@@ -517,8 +524,6 @@ def _ensure_skill_readme(skill_dir: Path) -> None:
 def _ensure_default_skills(skill_dir: Path) -> None:
     for name, content in DEFAULT_SKILLS.items():
         skill_file = skill_dir / name / "SKILL.md"
-        if skill_file.exists():
-            continue
         skill_file.parent.mkdir(parents=True, exist_ok=True)
         skill_file.write_text(content.strip() + "\n", encoding="utf-8")
 

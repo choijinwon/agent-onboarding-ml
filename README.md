@@ -189,6 +189,8 @@ Qwen 설정은 Agent가 분석과 안내에 사용하는 LLM 설정입니다.
 - `REGISTRATION_PACKAGE_DIR`: 등록 패키지 산출물 경로
 - `FIX_REPORT_DIR`: 수정 리포트 경로
 - `SKILL_STORE_DIR`: skill 저장 경로, 기본값 `skills`
+- `WIKI_DIR`: wiki 문서 저장 경로, 기본값 `wiki`
+- `WIKI_PROMPT_DIR`: 프롬프트 wiki 저장 경로, 기본값 `wiki/prompts`
 
 설정 요약 확인:
 
@@ -205,6 +207,7 @@ Windows 10/11:
 ## 프롬프트와 스킬
 
 기본 프롬프트는 `PROMPT_STORE_PATH` 값이 가리키는 `prompt_templates.json`에 저장됩니다.
+`./ml-agent init`을 실행하면 프롬프트가 `wiki/prompts/` 아래 Markdown/JSON 파일로 자동 저장됩니다.
 
 ```bash
 ./ml-agent prompts
@@ -219,6 +222,7 @@ Windows 10/11:
 ```
 
 기본 스킬은 `skills/` 아래에 저장됩니다.
+`./ml-agent init`은 앱이 관리하는 기본 스킬을 최신 내용으로 갱신하고, 사용자가 만든 커스텀 스킬 폴더는 유지합니다.
 
 ```text
 skills/

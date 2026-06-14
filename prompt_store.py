@@ -45,6 +45,49 @@ def format_prompt_templates(templates: list[PromptTemplate]) -> str:
     return f"Prompt templates: {len(templates)}\n{rows}"
 
 
+def format_prompt_templates_markdown(templates: list[PromptTemplate]) -> str:
+    lines = [
+        "# Prompt Templates",
+        "",
+        "AI ML Onboarding Console에서 사용하는 기본 프롬프트 모음입니다.",
+        "",
+        f"Total: {len(templates)}",
+        "",
+    ]
+    for template in templates:
+        tags = ", ".join(template.tags) if template.tags else "-"
+        lines.extend(
+            [
+                f"## {template.name}",
+                "",
+                f"- Description: {template.description or '-'}",
+                f"- Tags: {tags}",
+                "",
+                "```text",
+                template.prompt.strip(),
+                "```",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def export_prompt_templates_to_wiki(config: AppConfig | None = None) -> list[Path]:
+    active_config = AppConfig.load() if config is None else config
+    templates = load_prompt_templates(active_config)
+    prompt_dir = active_config.root_dir / active_config.get("WIKI_PROMPT_DIR")
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    markdown_path = prompt_dir / "prompt_templates.md"
+    json_path = prompt_dir / "prompt_templates.json"
+    markdown_path.write_text(format_prompt_templates_markdown(templates), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return [markdown_path, json_path]
+
+
 def prompt_templates_as_dict(templates: list[PromptTemplate]) -> dict[str, object]:
     return {
         "templates": [

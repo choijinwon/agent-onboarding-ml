@@ -283,6 +283,8 @@ copy .env.example .env
 .\ml-agent.cmd
 ```
 
+`init`은 `skills/`의 기본 스킬을 최신 내용으로 갱신하고, `prompt_templates.json`을 `wiki/prompts/`에 Markdown/JSON으로 저장합니다.
+
 Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
 
 ```bash
@@ -296,10 +298,13 @@ cp .env.example .env
 ## 13. 스킬 저장
 
 스킬 저장 위치는 `.env`의 `SKILL_STORE_DIR` 값으로 정합니다.
+프롬프트 wiki 저장 위치는 `WIKI_PROMPT_DIR` 값으로 정합니다.
 
 ```env
 ENABLE_HARNESS_SKILLS=true
 SKILL_STORE_DIR=skills
+WIKI_DIR=wiki
+WIKI_PROMPT_DIR=wiki/prompts
 ```
 
 스킬은 다음 구조로 저장합니다.

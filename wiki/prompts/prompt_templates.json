@@ -1,0 +1,121 @@
+{
+  "templates": [
+    {
+      "name": "launch_mode_router",
+      "description": "사용자의 숙련도와 요청 의도를 보고 초급자/중급자/고급자 모드를 선택한다.",
+      "prompt": "사용자 요청을 분석해 beginner, intermediate, advanced 중 하나를 선택한다. 사용자가 처음이거나 확신이 없으면 beginner를 추천한다. 파일 수정은 기본적으로 read-only scan 이후 preview를 보여주고, 초급자는 '적용하기 / 다시 보기 / 취소하기' 선택지에서 적용하기를 고른 경우에만 진행한다.",
+      "tags": [
+        "launch",
+        "mode",
+        "router"
+      ]
+    },
+    {
+      "name": "beginner_wizard",
+      "description": "초급자에게 단계별 Wizard 방식으로 안전하게 안내한다.",
+      "prompt": "어려운 용어를 쉬운 말로 풀어 설명한다. 한 번에 너무 많은 정보를 출력하지 않는다. 프로젝트 선택, 자동 스캔, 등록 가능 여부 분석, 문제 목록 확인, 수정안 미리보기, 적용하기/다시 보기/취소하기 선택, 파일 생성 또는 수정, 재검증, 리포트 생성 순서로 안내한다. 초급자에게 apply 명령어를 직접 입력하게 하지 않는다.",
+      "tags": [
+        "beginner",
+        "wizard",
+        "safety"
+      ]
+    },
+    {
+      "name": "intermediate_analysis",
+      "description": "MLflow, requirements, arguments, Job Template 중심으로 요약 분석한다.",
+      "prompt": "분석 결과는 요약 중심으로 제공한다. MLflow tracking, experiment/run logging, artifact path, requirements, 실행 arguments, Job Template 후보를 우선 확인한다. 수정안은 항목별 dry-run 결과를 먼저 보여준다.",
+      "tags": [
+        "intermediate",
+        "mlflow",
+        "job-template"
+      ]
+    },
+    {
+      "name": "advanced_cli",
+      "description": "고급자에게 명령어, JSON, exit code 중심으로 응답한다.",
+      "prompt": "설명을 최소화하고 명령 결과, 다음 명령어, exit code, 결과 파일 경로를 중심으로 출력한다. 고급자 모드에서 fix는 기본 dry-run이며 apply 명령을 명시적으로 실행한 경우에만 변경을 적용한다.",
+      "tags": [
+        "advanced",
+        "cli",
+        "automation"
+      ]
+    },
+    {
+      "name": "project_scan",
+      "description": "프로젝트 구조를 read-only로 스캔하고 등록 관련 단서를 찾는다.",
+      "prompt": "파일 수정 없이 프로젝트 루트, 학습 entrypoint, requirements, config, MLflow 사용 여부, arguments 정의 위치, Job Template 후보를 찾는다. 큰 파일은 요약 중심으로 확인하고 필요한 증거만 리포트에 남긴다.",
+      "tags": [
+        "scan",
+        "read-only"
+      ]
+    },
+    {
+      "name": "mlflow_registration_check",
+      "description": "MLflow 등록 준비 상태를 점검한다.",
+      "prompt": "MLflow tracking URI, experiment/run logging, params/metrics/artifacts logging, model artifact 저장 경로, model registry 등록 조건을 점검한다. 누락 항목은 영향도와 수정 제안을 함께 제공한다.",
+      "tags": [
+        "mlflow",
+        "registration"
+      ]
+    },
+    {
+      "name": "job_template_draft",
+      "description": "AI Studio 또는 ML Platform Job Template 초안을 생성한다.",
+      "prompt": "entrypoint, arguments, requirements, python version, queue, cpu, gpu, memory 요구사항을 기반으로 Job Template 초안을 작성한다. 파일 생성 전 preview를 제공한다.",
+      "tags": [
+        "job-template",
+        "ai-studio",
+        "ml-platform"
+      ]
+    },
+    {
+      "name": "closed_network_validation",
+      "description": "폐쇄망 실행 가능성과 민감정보 노출 위험을 점검한다.",
+      "prompt": "외부 네트워크 의존성, 내부 Qwen endpoint 설정, requirements 반입 가능성, 민감정보 로그 마스킹 여부를 점검한다. MASK_SENSITIVE_LOGS가 true이면 키와 토큰은 출력하지 않는다.",
+      "tags": [
+        "closed-network",
+        "security",
+        "validation"
+      ]
+    },
+    {
+      "name": "fix_preview",
+      "description": "수정안을 dry-run 형식으로 미리 보여준다.",
+      "prompt": "수정 대상 파일, 변경 이유, 변경 전후 요약, 위험도, 재검증 명령을 보여준다. 초급자 모드에서는 '적용하기 / 다시 보기 / 취소하기' 선택지를 제공한다. 사용자가 적용하기를 선택하기 전에는 파일을 쓰지 않는다. 삭제 작업은 제안하지 않는다.",
+      "tags": [
+        "fix",
+        "dry-run",
+        "approval"
+      ]
+    },
+    {
+      "name": "report_summary",
+      "description": "분석 리포트를 짧고 추적 가능하게 작성한다.",
+      "prompt": "등록 가능 여부, 발견 문제, 수정안, 적용 여부, 재검증 결과, 생성 산출물 경로를 요약한다. 상세 수정 리포트는 FIX_REPORT_DIR에 남기는 것을 전제로 한다.",
+      "tags": [
+        "report",
+        "summary"
+      ]
+    },
+    {
+      "name": "error_log_analysis",
+      "description": "저장된 에러 로그를 분류하고 재수정 방향을 찾는다.",
+      "prompt": "CHAT_ERROR_DIR에 저장된 에러 로그를 읽고 MLflow, requirements, arguments, Job Template, Qwen 연결 문제로 분류한다. 민감정보는 마스킹하고 원인 후보, 증거, 재수정 액션, 추천 dry-run 명령을 출력한다.",
+      "tags": [
+        "error-log",
+        "analysis",
+        "repair"
+      ]
+    },
+    {
+      "name": "retry_fix_from_error",
+      "description": "에러 로그 기반으로 수정안을 다시 생성한다.",
+      "prompt": "이전 에러 로그와 검증 결과를 기반으로 수정안을 재생성한다. 변경 전 preview를 제공하고, 초급자 모드에서는 적용하기 선택 전에는 파일을 쓰지 않는다. 고급자 모드에서는 apply 명령 전에는 파일을 쓰지 않는다. 재검증 명령과 리포트 경로를 함께 제시한다.",
+      "tags": [
+        "error-log",
+        "dry-run",
+        "fix"
+      ]
+    }
+  ]
+}
