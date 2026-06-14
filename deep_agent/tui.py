@@ -627,6 +627,7 @@ def run_tui(project_path: str = "") -> int:
             padding: 1 2;
             background: #080808;
             color: #e8e8e8;
+            text-style: bold;
         }
         #command {
             height: 3;

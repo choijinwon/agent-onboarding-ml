@@ -1366,8 +1366,10 @@ def format_beginner_tab(index: int, total: int, body: str) -> str:
     ]
     sidebar_rows = []
     for step, label in enumerate(step_titles[:total], start=1):
-        marker = ">" if step == index + 1 else " "
-        sidebar_rows.append(f"{marker} {step:02d} {label}")
+        if step == index + 1:
+            sidebar_rows.append(f"> Step {step:02d}. {label}  [현재]")
+        else:
+            sidebar_rows.append(f"  Step {step:02d}. {label}")
 
     if rich_console_enabled():
         return render_rich_beginner_tab(index, total, title, content or body, sidebar_rows)
@@ -1456,18 +1458,13 @@ def render_tui_body(sidebar_rows: list[str], content: str) -> str:
         rows.append(line)
         roles.append(role)
 
-    add(f"| {'STEPS':<35}{'CURRENT PANEL':<{width - 36}}|", "status")
+    add(f"| {'STEPS 1-10':<35}{'CURRENT PANEL':<{width - 36}}|", "title")
     add("|" + " " * width + "|")
-    add(f"| {'Agents':<{width - 1}}|", "status")
-    add(f"| {'  Plan  read-only scan, analysis, preview':<{width - 1}}|", "muted")
-    add(f"| {'  Build approval-gated file changes and validation':<{width - 1}}|", "muted")
-    add("|" + " " * width + "|")
-    add(f"| {'Workflow':<{width - 1}}|", "status")
     for item in sidebar_rows:
-        add(f"|   {truncate_cell(item, width - 5).ljust(width - 5)} |", "accent" if item.startswith(">") else "muted")
+        add(f"| {truncate_cell(item, width - 3).ljust(width - 3)} |", "accent" if item.startswith(">") else "normal")
     add("|" + " " * width + "|")
-    add(f"| {'User request':<{width - 1}}|", "status")
-    add(f"| {'> ' + truncate_cell(request_line, width - 5):<{width - 1}}|", "panel")
+    add(f"| {'CURRENT STEP':<{width - 1}}|", "title")
+    add(f"| {'> ' + truncate_cell(request_line, width - 5):<{width - 1}}|", "accent")
     add("|" + " " * width + "|")
     for line in log_lines:
         role = "accent" if line.startswith("~") else "muted" if line.startswith("*") or line.startswith("  |") else "normal"
