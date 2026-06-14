@@ -123,6 +123,8 @@ class ModeParsingTest(unittest.TestCase):
         self.assertEqual(parse_mode_command("/mode beginner"), MODE_BEGINNER)
         self.assertEqual(parse_mode_command("/mode intermediate"), MODE_INTERMEDIATE)
         self.assertEqual(parse_mode_command("/mode advanced"), MODE_ADVANCED)
+        self.assertEqual(parse_mode("mid"), MODE_INTERMEDIATE)
+        self.assertEqual(parse_mode("미드"), MODE_INTERMEDIATE)
 
 
 class BeginnerWizardTest(unittest.TestCase):
@@ -1007,6 +1009,9 @@ class DeepAgentProfileTest(unittest.TestCase):
 
 
 class WindowsSetupTest(unittest.TestCase):
+    def beginner_tui(self, project_path: str = "", **kwargs):
+        return BeginnerTuiController(project_path, selected_launch_mode=MODE_BEGINNER, **kwargs)
+
     def test_tui_subcommand_is_registered(self):
         parser = build_parser()
         args = parser.parse_args(["tui"])
@@ -1029,6 +1034,75 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Textual", message)
         self.assertIn('pip install ".[tui,deepagents]"', message)
         self.assertIn("Windows Terminal", message)
+
+    def test_tui_initial_screen_requires_launch_mode_selection(self):
+        controller = BeginnerTuiController("")
+        output = controller.render_log()
+
+        self.assertIsNone(controller.selected_launch_mode)
+        self.assertEqual(controller.project_path, "")
+        self.assertIn("사용자 모드를 선택하세요", output)
+        self.assertIn("1. 초급자 모드", output)
+        self.assertIn("2. 중급자 모드", output)
+        self.assertIn("3. 고급자 모드", output)
+
+    def test_tui_does_not_accept_project_path_before_launch_mode(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            controller = BeginnerTuiController("")
+
+            output = controller.submit(str(root))
+
+            self.assertIsNone(controller.selected_launch_mode)
+            self.assertEqual(controller.project_path, "")
+            self.assertIn("먼저 모드를 선택하세요", output)
+
+    def test_tui_launch_mode_selects_beginner_aliases(self):
+        for value in ["1", "초급자", "beginner"]:
+            controller = BeginnerTuiController("")
+            output = controller.submit(value)
+
+            self.assertEqual(controller.selected_launch_mode, MODE_BEGINNER)
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertIn("Step 1. 프로젝트 선택", output)
+
+    def test_tui_launch_mode_selects_intermediate_aliases(self):
+        for value in ["2", "미드", "중급자", "intermediate"]:
+            controller = BeginnerTuiController("")
+            output = controller.submit(value)
+
+            self.assertEqual(controller.selected_launch_mode, MODE_INTERMEDIATE)
+            self.assertEqual(controller.agent_mode, "Chatbot")
+            self.assertIn("무엇을 하시겠습니까?", output)
+
+    def test_tui_launch_mode_selects_advanced_aliases(self):
+        for value in ["3", "고급자", "advanced"]:
+            controller = BeginnerTuiController("")
+            output = controller.submit(value)
+
+            self.assertEqual(controller.selected_launch_mode, MODE_ADVANCED)
+            self.assertEqual(controller.agent_mode, "Build")
+            self.assertIn("사용 가능한 명령어", output)
+            self.assertIn("analyze", output)
+
+    def test_tui_intermediate_mode_handles_chat_input(self):
+        controller = BeginnerTuiController("")
+        controller.submit("2")
+
+        output = controller.submit("MLflow 설정만 확인해줘")
+
+        self.assertIn("MLflow 설정 검증", output)
+        self.assertIn("무엇을 하시겠습니까?", output)
+
+    def test_tui_advanced_mode_handles_cli_style_input(self):
+        controller = BeginnerTuiController("")
+        controller.submit("3")
+
+        output = controller.submit("analyze .")
+
+        self.assertIn("analyze:", output)
+        self.assertIn("exit_code:", output)
+        self.assertIn("사용 가능한 명령어", output)
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
         self.assertEqual(command_placeholder_for_mode("Plan"), "")
@@ -1073,7 +1147,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("번호를 입력", output)
 
     def test_tui_controller_lists_and_selects_model_from_input_box(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         list_output = controller.submit("/model")
         self.assertIn("1. qwen3.6", list_output)
@@ -1088,7 +1162,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(command_placeholder_for_mode(controller.agent_mode, controller.qwen_model), "")
 
     def test_tui_controller_selects_model_by_number_after_model_menu(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         controller.submit("/model")
         output = controller.submit("2")
@@ -1098,7 +1172,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertFalse(controller.awaiting_model_selection)
 
     def test_tui_controller_cycles_model_selection_for_input_box(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         controller.submit("/model")
         self.assertEqual(controller.highlighted_model, "qwen3.6")
@@ -1107,7 +1181,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.cycle_model_selection(-1), "qwen3.5")
 
     def test_tui_controller_enter_selects_highlighted_model_when_input_empty(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         controller.submit("/model")
         controller.cycle_model_selection(1)
@@ -1118,7 +1192,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertFalse(controller.awaiting_model_selection)
 
     def test_tui_controller_selects_model_by_number_in_model_command(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         output = controller.submit("/model 4")
 
@@ -1126,7 +1200,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.qwen_model, "gamma")
 
     def test_tui_controller_rejects_unknown_model(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         output = controller.submit("/model unknown-model")
 
@@ -1134,7 +1208,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.qwen_model, "qwen3.6")
 
     def test_tui_controller_keeps_model_menu_open_on_invalid_number(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         controller.submit("/model")
         output = controller.submit("99")
@@ -1184,7 +1258,7 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
             (root / "train.py").write_text("print('train')\n")
 
-            controller = BeginnerTuiController("")
+            controller = self.beginner_tui("")
             output = controller.submit(f'"{root}"')
 
             self.assertEqual(controller.project_path, str(root.resolve()))
@@ -1199,14 +1273,14 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
             (root / "train.py").write_text("print('train')\n")
 
-            controller = BeginnerTuiController("")
+            controller = self.beginner_tui("")
             output = controller.submit(f"/path {root}")
 
             self.assertEqual(controller.project_path, str(root.resolve()))
             self.assertIn("Current: Tab 1/10", output)
 
     def test_tui_controller_reports_missing_path_for_path_command(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         self.assertIn("경로를 함께 입력", controller.submit("/path"))
         self.assertIn("경로를 찾을 수 없습니다", controller.submit("/path /no/such/model"))
@@ -1217,7 +1291,7 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
             (root / "train.py").write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
-            controller = BeginnerTuiController(str(root))
+            controller = self.beginner_tui(str(root))
 
             self.assertEqual(controller.index, 0)
             output = controller.submit("다음")
@@ -1233,7 +1307,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertTrue(controller.exited)
 
     def test_tui_controller_toggle_agent_does_not_add_log_noise(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
         controller.toggle_agent()
 
         self.assertEqual(controller.agent_mode, "Build")
@@ -1247,7 +1321,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.agent_mode, "Chatbot")
 
     def test_tui_controller_selects_agent_mode_from_input_box(self):
-        controller = BeginnerTuiController("")
+        controller = self.beginner_tui("")
 
         output = controller.submit("/agent chat")
 
@@ -1263,7 +1337,7 @@ class WindowsSetupTest(unittest.TestCase):
             requirements.write_text("tensorflow==2.17.0\n")
             train.write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
-            controller = BeginnerTuiController(str(root))
+            controller = self.beginner_tui(str(root))
             for _ in range(5):
                 controller.submit("다음")
 
@@ -1282,7 +1356,7 @@ class WindowsSetupTest(unittest.TestCase):
             requirements.write_text("tensorflow==2.17.0\n")
             train.write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
-            controller = BeginnerTuiController(str(root))
+            controller = self.beginner_tui(str(root))
             controller.select_agent_mode("Chatbot")
 
             output = controller.submit("코드 자동 수정해줘")
@@ -1300,7 +1374,7 @@ class WindowsSetupTest(unittest.TestCase):
             requirements.write_text("tensorflow==2.17.0\n")
             train.write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
-            controller = BeginnerTuiController(str(root))
+            controller = self.beginner_tui(str(root))
             controller.toggle_agent()
 
             output = controller.submit("코드 자동 수정해줘")
@@ -1329,7 +1403,7 @@ class WindowsSetupTest(unittest.TestCase):
                 (root / "train.py").write_text("import mlflow\n")
                 (root / "model.onnx").write_text("sample")
                 fake = FakeRuntime()
-                controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
                 controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("프로젝트 분석해줘")
@@ -1368,7 +1442,7 @@ class WindowsSetupTest(unittest.TestCase):
                 train.write_text("print('train')\n")
                 (root / "model.keras").write_text("sample")
                 fake = FakeRuntime()
-                controller = BeginnerTuiController(str(root), deepagents_runtime=fake)
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
                 controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("코드 자동 수정해줘")
@@ -1397,7 +1471,7 @@ class WindowsSetupTest(unittest.TestCase):
                 os.chdir(tmpdir)
                 path, _ = resolve_beginner_project_input("/sample sora-error")
                 sample = Path(path)
-                controller = BeginnerTuiController(str(sample), deepagents_runtime=FakeRuntime())
+                controller = self.beginner_tui(str(sample), deepagents_runtime=FakeRuntime())
                 controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("문제 발견하면 자동 수정해줘")
@@ -1420,7 +1494,7 @@ class WindowsSetupTest(unittest.TestCase):
             requirements.write_text("tensorflow==2.17.0\n")
             train.write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
-            controller = BeginnerTuiController(str(root))
+            controller = self.beginner_tui(str(root))
             controller.toggle_agent()
             for _ in range(5):
                 controller.submit("다음")

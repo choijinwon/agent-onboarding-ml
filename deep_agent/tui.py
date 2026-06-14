@@ -12,8 +12,13 @@ from deep_agent.stores.chat_session_store import append_chat_session_event
 
 from deep_agent.cli import (
     AppliedChange,
+    ADVANCED_INTRO,
+    INTERMEDIATE_MENU,
+    MODE_ADVANCED,
     MODE_CHANGE_MESSAGES,
+    MODE_INTERMEDIATE,
     MODE_LABELS,
+    MODE_BEGINNER,
     analyze_project,
     apply_fix_previews,
     build_beginner_step_tabs,
@@ -21,6 +26,9 @@ from deep_agent.cli import (
     format_beginner_apply_result,
     format_beginner_tab,
     format_beginner_fix_preview,
+    handle_advanced_input,
+    handle_intermediate_request,
+    parse_mode,
     parse_mode_command,
     resolve_beginner_project_input,
 )
@@ -131,6 +139,38 @@ def format_model_choices(models: list[str], current_model: str) -> str:
     return "\n".join(lines)
 
 
+def format_tui_launch_mode_screen(message: str = "") -> str:
+    rows = [
+        "AI ML Onboarding Console",
+        "",
+        "사용자 모드를 선택하세요.",
+        "",
+        "1. 초급자 모드",
+        "   Step 1~10 Wizard",
+        "",
+        "2. 중급자 모드",
+        "   Chat + Wizard",
+        "",
+        "3. 고급자 모드",
+        "   CLI Command",
+    ]
+    if message:
+        rows.extend(["", message])
+    return "\n".join(rows)
+
+
+def format_tui_intermediate_screen(message: str = "") -> str:
+    if message:
+        return f"{message}\n\n{INTERMEDIATE_MENU}"
+    return INTERMEDIATE_MENU
+
+
+def format_tui_advanced_screen(message: str = "") -> str:
+    if message:
+        return f"{message}\n\n{ADVANCED_INTRO}"
+    return ADVANCED_INTRO
+
+
 def is_fix_request(command: str) -> bool:
     lowered = command.lower()
     keywords = (
@@ -207,6 +247,7 @@ def normalize_input_path(raw: str) -> Path | None:
 @dataclass
 class BeginnerTuiController:
     project_input: str = ""
+    selected_launch_mode: str | None = None
     agent_mode: str = "Plan"
     index: int = 0
     applied_changes: list[AppliedChange] | None = None
@@ -226,14 +267,14 @@ class BeginnerTuiController:
             self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
         if self.deepagents_runtime is None:
             self.deepagents_runtime = DeepAgentsRuntime(self.app_config)
-        self.set_project(self.project_input)
+        self.steps: list[str] = []
         self.latest_message = ""
-        if self.sample_message:
-            self.latest_message = self.sample_message
+        if self.selected_launch_mode:
+            self.activate_launch_mode(self.selected_launch_mode)
 
     @property
     def total(self) -> int:
-        return len(self.steps)
+        return len(self.steps) if self.steps else 0
 
     def set_project(self, raw: str) -> None:
         self.project_path, self.sample_message = resolve_beginner_project_input(raw)
@@ -252,11 +293,38 @@ class BeginnerTuiController:
         return self.current_screen()
 
     def current_screen(self) -> str:
+        if self.selected_launch_mode is None:
+            return format_tui_launch_mode_screen(self.latest_message)
+        if self.selected_launch_mode == MODE_INTERMEDIATE:
+            return format_tui_intermediate_screen(self.latest_message)
+        if self.selected_launch_mode == MODE_ADVANCED:
+            return format_tui_advanced_screen(self.latest_message)
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
     def render_log(self) -> str:
-        if self.latest_message:
+        if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
+            return self.current_screen()
+        if self.selected_launch_mode == MODE_BEGINNER and self.latest_message:
             return f"{self.latest_message}\n\n{self.current_screen()}"
+        return self.current_screen()
+
+    def activate_launch_mode(self, mode: str) -> str:
+        self.selected_launch_mode = mode
+        self.latest_message = ""
+        if mode == MODE_BEGINNER:
+            self.agent_mode = "Plan"
+            self.set_project(self.project_input)
+            if self.sample_message:
+                self.latest_message = self.sample_message
+            return self.current_screen()
+        if mode == MODE_INTERMEDIATE:
+            self.agent_mode = "Chatbot"
+            return self.current_screen()
+        if mode == MODE_ADVANCED:
+            self.agent_mode = "Build"
+            return self.current_screen()
+        self.selected_launch_mode = None
+        self.latest_message = "지원하지 않는 모드입니다. 1, 2, 3 중 하나를 선택하세요."
         return self.current_screen()
 
     @property
@@ -328,6 +396,21 @@ class BeginnerTuiController:
 
     def submit(self, raw: str) -> str:
         command = raw.strip()
+        if self.selected_launch_mode is None:
+            if command in EXIT_COMMANDS:
+                self.exited = True
+                return ""
+            mode = parse_mode(command)
+            if mode:
+                return self.activate_launch_mode(mode)
+            self.latest_message = "먼저 모드를 선택하세요. 1=초급자, 2=중급자, 3=고급자"
+            return self.current_screen()
+
+        if self.selected_launch_mode == MODE_INTERMEDIATE:
+            return self._submit_intermediate(command)
+        if self.selected_launch_mode == MODE_ADVANCED:
+            return self._submit_advanced(command)
+
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command:
@@ -388,6 +471,26 @@ class BeginnerTuiController:
         if self.agent_mode != "Chatbot":
             return self._handle_non_chatbot_text(command)
         return self.handle_chat_message(command)
+
+    def _submit_intermediate(self, command: str) -> str:
+        if command in EXIT_COMMANDS:
+            self.exited = True
+            return ""
+        mode = parse_mode_command(command)
+        if mode:
+            return self.activate_launch_mode(mode)
+        self.latest_message = handle_intermediate_request(command)
+        return self.current_screen()
+
+    def _submit_advanced(self, command: str) -> str:
+        if command in EXIT_COMMANDS:
+            self.exited = True
+            return ""
+        mode = parse_mode_command(command)
+        if mode:
+            return self.activate_launch_mode(mode)
+        self.latest_message = handle_advanced_input(command)
+        return self.current_screen()
 
     def handle_chat_message(self, command: str) -> str:
         result = self._invoke_deepagents(command, agent_mode="AutoFix")
@@ -802,7 +905,10 @@ def run_tui(project_path: str = "") -> int:
             command.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).update(self.controller.render_log())
             selector = self.query_one(ModeSelector)
-            selector.update(format_agent_mode_selector(self.controller.agent_mode))
+            if self.controller.selected_launch_mode is None:
+                selector.update("beginner intermediate advanced")
+            else:
+                selector.update(format_agent_mode_selector(self.controller.agent_mode))
             selector.set_class(self.controller.agent_mode == "Plan", "plan")
             selector.set_class(self.controller.agent_mode == "Build", "build")
             selector.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
