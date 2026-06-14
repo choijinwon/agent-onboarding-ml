@@ -107,6 +107,7 @@ registration_packages/
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
 .\ml-agent.cmd deepagents
+.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
 .\ml-agent.cmd config
 .\ml-agent.cmd prompts
 .\ml-agent.cmd errors list
@@ -121,8 +122,11 @@ JSON 출력:
 .\ml-agent.cmd validate .\project --json
 .\ml-agent.cmd profile --json
 .\ml-agent.cmd deepagents --json
+.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip" --json
 .\ml-agent.cmd prompts --json
 ```
+
+`deepagents`는 repo 내부 `deepagents_source`를 확인하고, `--source`는 다운로드한 DeepAgents zip으로 비교 검증할 때 사용합니다.
 
 ## 8. 프롬프트 확인
 
