@@ -1,6 +1,6 @@
 # DeepAgents Source
 
-This directory contains the DeepAgents source files imported from `deepagents-main.zip`.
+This directory contains the DeepAgents source files included with this POC.
 
 - Source root: `deepagents_source/deepagents-main`
 - Libs root: `deepagents_source/deepagents-main/libs`
@@ -12,7 +12,7 @@ The AI ML onboarding POC reads `libs/**/pyproject.toml` from this directory firs
 ./ml-agent deepagents
 ```
 
-If a different archive is needed, pass it explicitly:
+If a different archive must be compared, pass it explicitly:
 
 ```bash
 ./ml-agent deepagents --source ~/Downloads/deepagents-main.zip

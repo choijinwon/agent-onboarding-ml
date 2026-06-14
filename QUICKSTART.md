@@ -107,7 +107,6 @@ registration_packages/
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd profile
 .\ml-agent.cmd deepagents
-.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
 .\ml-agent.cmd config
 .\ml-agent.cmd prompts
 .\ml-agent.cmd errors list
@@ -122,7 +121,6 @@ JSON 출력:
 .\ml-agent.cmd validate .\project --json
 .\ml-agent.cmd profile --json
 .\ml-agent.cmd deepagents --json
-.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip" --json
 .\ml-agent.cmd prompts --json
 ```
 
@@ -247,10 +245,10 @@ copy .env.example .env
 .\ml-agent.cmd
 ```
 
-DeepAgents zip을 다운로드한 경우:
+DeepAgents 소스 확인:
 
 ```powershell
-.\ml-agent.cmd deepagents --source "$env:USERPROFILE\Downloads\deepagents-main.zip"
+.\ml-agent.cmd deepagents
 ```
 
 Linux/macOS에서 확인할 때만 아래 명령을 사용합니다.
