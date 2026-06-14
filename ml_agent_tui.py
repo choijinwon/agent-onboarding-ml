@@ -100,16 +100,12 @@ class BeginnerTuiController:
 
     def toggle_agent(self) -> str:
         self.agent_mode = "Build" if self.agent_mode == "Plan" else "Plan"
-        message = f"현재 Agent 모드: {self.agent_mode}"
-        self.log_lines.append(message)
-        return message
+        return f"현재 Agent 모드: {self.agent_mode}"
 
     def submit(self, raw: str) -> str:
         command = raw.strip()
         if not command:
             command = "다음"
-
-        self.log_lines.append(f"> {command}")
 
         if command in EXIT_COMMANDS:
             self.exited = True
@@ -138,20 +134,21 @@ class BeginnerTuiController:
     def _handle_issue_choice(self, command: str) -> str:
         if command == "1":
             self.index = 4
-            message = "수정안 미리보기 단계로 이동합니다."
-        elif command == "2":
+            return self.current_screen()
+        if command == "2":
             self.index = 0
-            message = "프로젝트 경로 확인 단계로 이동합니다."
-        elif command == "3":
+            return self.current_screen()
+        if command == "3":
             self.exited = True
             message = "초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다."
-        elif command in {"다음", "next", "n"}:
+            self.log_lines.append(message)
+            return message
+        if command in {"다음", "next", "n"}:
             self.index += 1
-            message = "다음 단계로 이동합니다."
-        else:
-            message = "번호로 선택하세요. 1=수정안 미리보기, 2=프로젝트 경로 확인, 3=취소"
+            return self.current_screen()
+        message = "번호로 선택하세요. 1=수정안 미리보기, 2=프로젝트 경로 확인, 3=취소"
         self.log_lines.append(message)
-        return message if self.exited else self.current_screen()
+        return self.current_screen()
 
     def _handle_approval_choice(self, command: str) -> str:
         if command == "1":
@@ -174,27 +171,27 @@ class BeginnerTuiController:
             return self.current_screen()
         if command == "2":
             self.index = 4
-            message = "수정안 미리보기 단계로 돌아갑니다."
-        elif command == "3":
+            return self.current_screen()
+        if command == "3":
             self.exited = True
             message = "초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다."
-        else:
-            message = "번호로 선택하세요. 1=승인, 2=다시 보기, 3=취소"
+            self.log_lines.append(message)
+            return message
+        message = "번호로 선택하세요. 1=승인, 2=다시 보기, 3=취소"
         self.log_lines.append(message)
-        return message if self.exited else self.current_screen()
+        return self.current_screen()
 
     def _handle_navigation(self, command: str) -> str:
         if command in {"다음", "next", "n"}:
             self.index = min(len(self.steps) - 1, self.index + 1)
-            message = "다음 단계로 이동합니다."
-        elif command in {"이전", "prev", "previous", "p"}:
+            return self.current_screen()
+        if command in {"이전", "prev", "previous", "p"}:
             self.index = max(0, self.index - 1)
-            message = "이전 단계로 이동합니다."
-        elif command.isdigit() and 1 <= int(command) <= len(self.steps):
+            return self.current_screen()
+        if command.isdigit() and 1 <= int(command) <= len(self.steps):
             self.index = int(command) - 1
-            message = f"Tab {command} 단계로 이동합니다."
-        else:
-            message = "Enter=다음, 이전, 1~10=탭 이동, /exit 중 하나를 입력하세요."
+            return self.current_screen()
+        message = "Enter=다음, 이전, 1~10=탭 이동, /exit 중 하나를 입력하세요."
         self.log_lines.append(message)
         return self.current_screen()
 

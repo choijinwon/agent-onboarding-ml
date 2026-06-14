@@ -897,12 +897,21 @@ class WindowsSetupTest(unittest.TestCase):
             output = controller.submit("다음")
             self.assertEqual(controller.index, 1)
             self.assertIn("Current: Tab 2/10", output)
+            self.assertNotIn("> 다음", controller.render_log())
+            self.assertNotIn("다음 단계로 이동합니다.", controller.render_log())
 
             mode_output = controller.submit("/mode beginner")
             self.assertIn("현재 모드가 초급자 모드로 변경되었습니다", mode_output)
 
             controller.submit("/exit")
             self.assertTrue(controller.exited)
+
+    def test_tui_controller_toggle_agent_does_not_add_log_noise(self):
+        controller = BeginnerTuiController("")
+        controller.toggle_agent()
+
+        self.assertEqual(controller.agent_mode, "Build")
+        self.assertNotIn("현재 Agent 모드", controller.render_log())
 
     def test_tui_controller_plan_mode_does_not_apply_files(self):
         with TemporaryDirectory() as tmpdir:
