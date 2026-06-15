@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from importlib.util import find_spec
 from pathlib import Path
 import os
+import re
 import shlex
 from threading import Thread
 from urllib.parse import unquote, urlparse
@@ -243,24 +244,53 @@ def path_candidates_from_input(raw: str) -> list[str]:
     return candidates or [value.strip()]
 
 
-def normalize_input_path(raw: str) -> Path | None:
-    for candidate in path_candidates_from_input(raw):
-        value = candidate.strip().strip('"').strip("'")
-        if not value:
-            continue
-        if value.startswith("file://"):
-            parsed = urlparse(value)
-            value = unquote(parsed.path or value.removeprefix("file://"))
-        else:
-            value = unquote(value)
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?[A-Za-z]:[\\/]")
+WINDOWS_ENV_RE = re.compile(r"%([^%]+)%")
+POWERSHELL_ENV_RE = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+def is_windows_style_path(value: str) -> bool:
+    return bool(WINDOWS_DRIVE_PATH_RE.match(value)) or value.startswith(("\\\\", "//"))
+
+
+def expand_cross_platform_vars(value: str) -> str:
+    def replace_percent(match: re.Match[str]) -> str:
+        return os.environ.get(match.group(1), match.group(0))
+
+    def replace_powershell(match: re.Match[str]) -> str:
+        return os.environ.get(match.group(1), match.group(0))
+
+    expanded = WINDOWS_ENV_RE.sub(replace_percent, value)
+    expanded = POWERSHELL_ENV_RE.sub(replace_powershell, expanded)
+    return os.path.expandvars(os.path.expanduser(expanded))
+
+
+def normalize_path_text(value: str) -> str:
+    normalized = value.strip().strip('"').strip("'")
+    if normalized.startswith("file://"):
+        parsed = urlparse(normalized)
+        normalized = unquote(parsed.path or normalized.removeprefix("file://"))
+    else:
+        normalized = unquote(normalized)
+    if WINDOWS_DRIVE_PATH_RE.match(normalized):
+        normalized = normalized.lstrip("/")
+    normalized = expand_cross_platform_vars(normalized)
+    if not is_windows_style_path(normalized):
         try:
-            parts = shlex.split(value)
+            parts = shlex.split(normalized)
         except ValueError:
             parts = []
         if len(parts) == 1:
-            value = parts[0]
-        expanded = os.path.expandvars(os.path.expanduser(value))
-        path = Path(expanded).resolve()
+            normalized = parts[0]
+    return normalized
+
+
+def normalize_input_path(raw: str) -> Path | None:
+    for candidate in path_candidates_from_input(raw):
+        value = normalize_path_text(candidate)
+        if not value:
+            continue
+        path = Path(value).resolve()
         if path.exists():
             if path.is_file():
                 return path.parent
@@ -1078,6 +1108,7 @@ __all__ = [
     "is_wizard_navigation",
     "model_selection_placeholder",
     "normalize_input_path",
+    "normalize_path_text",
     "path_candidates_from_input",
     "parse_agent_mode_command",
     "parse_model_command",

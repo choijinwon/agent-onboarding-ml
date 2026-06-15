@@ -48,6 +48,7 @@ from deep_agent.tui import (
     missing_textual_message,
     model_selection_placeholder,
     normalize_input_path,
+    normalize_path_text,
     parse_agent_mode_command,
     parse_model_command,
     path_candidates_from_input,
@@ -1330,6 +1331,38 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(normalize_input_path(f"file://{url_spaced}"), spaced.resolve())
             self.assertEqual(normalize_input_path(f"> {spaced}"), spaced.resolve())
             self.assertEqual(path_candidates_from_input(f"\n{spaced}\nignored"), [str(spaced), "ignored"])
+
+    def test_tui_preserves_windows_paths_with_backslashes_and_spaces(self):
+        self.assertEqual(
+            normalize_path_text(r"C:\Users\choi\AI ML\model"),
+            r"C:\Users\choi\AI ML\model",
+        )
+        self.assertEqual(
+            normalize_path_text(r'"C:\Users\choi\AI ML\model"'),
+            r"C:\Users\choi\AI ML\model",
+        )
+        self.assertEqual(
+            normalize_path_text("file:///C:/Users/choi/AI%20ML/model"),
+            "C:/Users/choi/AI ML/model",
+        )
+
+    def test_tui_expands_windows_env_path_variants(self):
+        old_value = os.environ.get("AIU_TEST_HOME")
+        os.environ["AIU_TEST_HOME"] = r"C:\Users\choi"
+        try:
+            self.assertEqual(
+                normalize_path_text(r"%AIU_TEST_HOME%\model"),
+                r"C:\Users\choi\model",
+            )
+            self.assertEqual(
+                normalize_path_text(r"$env:AIU_TEST_HOME\model"),
+                r"C:\Users\choi\model",
+            )
+        finally:
+            if old_value is None:
+                os.environ.pop("AIU_TEST_HOME", None)
+            else:
+                os.environ["AIU_TEST_HOME"] = old_value
 
     def test_tui_normalizes_file_path_to_parent_project(self):
         with TemporaryDirectory() as tmpdir:
