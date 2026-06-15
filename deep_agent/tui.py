@@ -1280,43 +1280,52 @@ def run_tui(project_path: str = "") -> int:
             event.stop()
             self.insert_text_at_cursor(normalize_pasted_input(event.text))
 
-        def on_key(self, event) -> None:
+        def _handle_submit_keys(self, event) -> bool:
             if event.key in {"ctrl+enter", "ctrl+j"}:
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app._submit_command_input()
-                return
+                return True
             if event.key == "shift+enter":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.insert_text_at_cursor("\n")
-                return
+                return True
             if event.key == "enter":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app._submit_command_input()
-                return
+                return True
             if event.key == "tab":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app.action_toggle_agent()
-                return
+                return True
             if event.key == "shift+tab":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app.action_previous_agent()
-                return
+                return True
             if event.key == "ctrl+space":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.insert_text_at_cursor("    ")
+                return True
+            return False
+
+        async def _on_key(self, event: events.Key) -> None:
+            if self._handle_submit_keys(event):
                 return
+            await super()._on_key(event)
+
+        def on_key(self, event) -> None:
+            self._handle_submit_keys(event)
 
     class ModeSelector(Static):
         pass
