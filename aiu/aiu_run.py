@@ -1225,7 +1225,46 @@ class WindowsSetupTest(unittest.TestCase):
         controller.set_thinking("하이")
 
         self.assertIn("생각중", controller.render_log())
-        self.assertIn("입력: 하이", controller.render_log())
+        self.assertIn("나: 하이", controller.render_log())
+        self.assertIn("Agent: 생각중", controller.render_log())
+
+    def test_tui_chatbot_response_replaces_thinking_log_entry(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                return DeepAgentsRunResult("완료 응답", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                (root / "requirements.txt").write_text("mlflow\n")
+                (root / "train.py").write_text("import mlflow\n")
+                (root / "model.onnx").write_text("sample")
+                controller = self.beginner_tui(str(root), deepagents_runtime=FakeRuntime())
+                controller.select_agent_mode("Chatbot")
+                controller.set_thinking("분석해줘")
+
+                controller.submit("분석해줘")
+            finally:
+                os.chdir(cwd)
+
+            rendered = controller.render_log()
+            self.assertIn("나: 분석해줘", rendered)
+            self.assertIn("Agent: 완료 응답", rendered)
+            self.assertNotIn("Agent: 생각중", rendered)
+
+    def test_tui_chatbot_error_is_visible_in_log(self):
+        controller = BeginnerTuiController("")
+        controller.submit("2")
+        controller.set_thinking("분석해줘")
+
+        controller._append_chat_error("분석해줘", RuntimeError("boom"))
+
+        rendered = controller.render_log()
+        self.assertIn("나: 분석해줘", rendered)
+        self.assertIn("Agent: Chatbot 응답 처리 중 오류가 발생했습니다: boom", rendered)
 
     def test_tui_thinking_is_only_for_chatbot_text(self):
         controller = BeginnerTuiController("")

@@ -407,7 +407,8 @@ class BeginnerTuiController:
 
     def set_thinking(self, raw: str) -> None:
         command = raw.strip()
-        self.latest_message = f"생각중...\n\n입력: {command}"
+        self.latest_message = f"생각중...\n\n나: {command}"
+        self._append_or_replace_chat_log(command, "생각중...", [])
 
     @property
     def qwen_model(self) -> str:
@@ -602,7 +603,7 @@ class BeginnerTuiController:
             response = greeting_response()
             self.latest_message = response
             final_analysis = analyze_project(self.project_path)
-            self._append_chat_log(command, response, [])
+            self._append_or_replace_chat_log(command, response, [])
             self._save_chat_session(command, response, [], final_analysis)
             return response
         result = self._invoke_deepagents(command, agent_mode="AutoFix")
@@ -613,12 +614,12 @@ class BeginnerTuiController:
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
             self.latest_message = response
-            self._append_chat_log(command, response, applied_changes)
+            self._append_or_replace_chat_log(command, response, applied_changes)
             self._save_chat_session(command, response, applied_changes, final_analysis)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
         self.latest_message = response
-        self._append_chat_log(command, response, applied_changes)
+        self._append_or_replace_chat_log(command, response, applied_changes)
         self._save_chat_session(command, response, applied_changes, final_analysis)
         return response
 
@@ -673,11 +674,38 @@ class BeginnerTuiController:
         agent_response: str,
         applied_changes: list[AppliedChange],
     ) -> None:
+        self.log_lines.append(self._format_chat_log(user_message, agent_response, applied_changes))
+
+    def _append_or_replace_chat_log(
+        self,
+        user_message: str,
+        agent_response: str,
+        applied_changes: list[AppliedChange],
+    ) -> None:
+        prefix = f"나: {user_message}\nAgent: "
+        replacement = self._format_chat_log(user_message, agent_response, applied_changes)
+        for index in range(len(self.log_lines) - 1, -1, -1):
+            if self.log_lines[index].startswith(prefix):
+                self.log_lines[index] = replacement
+                return
+        self.log_lines.append(replacement)
+
+    def _append_chat_error(self, user_message: str, error: Exception) -> None:
+        response = f"Chatbot 응답 처리 중 오류가 발생했습니다: {error}"
+        self.latest_message = response
+        self._append_or_replace_chat_log(user_message, response, [])
+
+    def _format_chat_log(
+        self,
+        user_message: str,
+        agent_response: str,
+        applied_changes: list[AppliedChange],
+    ) -> str:
         rows = [f"나: {user_message}", f"Agent: {agent_response}"]
         if applied_changes:
             rows.append("수정사항:")
             rows.extend(f"- {change.target}: {change.message}" for change in applied_changes)
-        self.log_lines.append("\n".join(rows))
+        return "\n".join(rows)
 
     def _save_chat_session(
         self,
@@ -1038,7 +1066,7 @@ def run_tui(project_path: str = "") -> int:
             try:
                 self.controller.submit(value)
             except Exception as exc:  # pragma: no cover - UI safety boundary
-                self.controller.latest_message = f"Chatbot 응답 처리 중 오류가 발생했습니다: {exc}"
+                self.controller._append_chat_error(value, exc)
             self.call_from_thread(self._finish_submit)
 
         def _finish_submit(self) -> None:
