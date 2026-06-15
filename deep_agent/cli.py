@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from deep_agent.app_config import AppConfig, ensure_runtime_layout, format_config_summary
+from deep_agent.app_config import AppConfig, ensure_read_write_directory, ensure_runtime_layout, format_config_summary
 from deep_agent.profile import build_ml_platform_profile, format_profile
 from deep_agent.libs import deepagents_libs_as_dict, format_deepagents_libs
 from deep_agent.stores.error_log_store import (
@@ -22,6 +24,7 @@ from deep_agent.stores.error_log_store import (
     save_error_log,
 )
 from deep_agent.stores.prompt_store import (
+    export_prompt_templates_to_wiki,
     format_prompt_templates,
     load_prompt_templates,
     prompt_templates_as_dict,
@@ -760,6 +763,7 @@ class ProjectAnalysis:
     issues: list[str]
     issue_details: list[ProjectIssue]
     next_actions: list[str]
+    model_parameters: dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -779,6 +783,7 @@ class ProjectAnalysis:
             "issues": self.issues,
             "issue_details": [issue.as_dict() for issue in self.issue_details],
             "next_actions": self.next_actions,
+            "model_parameters": self.model_parameters,
         }
 
 
@@ -1376,9 +1381,9 @@ def format_sample_matrix_message(
 
 
 def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(root)
     artifact = root / spec.artifact_path
-    artifact.parent.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(artifact.parent)
     (root / "requirements.txt").write_text("\n".join(spec.requirements) + "\n", encoding="utf-8")
     (root / "train.py").write_text(spec.train_body, encoding="utf-8")
     if not spec.kind.endswith("_error"):
@@ -1405,7 +1410,7 @@ def ensure_ai_studio_sample_runtime(root: Path) -> None:
     if not input_example_path.exists():
         input_example_path.write_text(json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     custom_dir = root / "aiu_custom"
-    custom_dir.mkdir(exist_ok=True)
+    ensure_read_write_directory(custom_dir)
     init_path = custom_dir / "__init__.py"
     if not init_path.exists():
         init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
@@ -1509,7 +1514,7 @@ def render_rich_beginner_tab(
     agent = tui_agent_label(index)
     request_line = (content.splitlines() or [""])[0].removeprefix("- ").strip()
     log_lines = build_terminal_log_lines(content.splitlines() or [""])
-    mode_line = "plan build chatbot"
+    mode_line = render_agent_switcher(index)
     active_mode = "Build" if index >= 6 else "Plan"
     inactive_mode = "Plan" if index >= 6 else "Build"
     rows = [
@@ -1536,7 +1541,7 @@ def render_rich_beginner_tab(
             rich_row(f"□  {active_mode} · qwen3.6 · AI ML Onboarding", role="normal", indent=6, width=width),
             rich_row(width=width),
             rich_input_panel_line("█", width=width),
-            rich_input_panel_line("plan", "build", "chatbot", width=width),
+            rich_input_panel_line("PLAN", "BUILD", "CHAT", width=width),
             rich_row(".........  esc interrupt      ctrl+space gap   tab agents   ctrl+p commands", role="status", width=width),
             rich_row(f"Current: Tab {index + 1}/{total} | {mode_line} | {title}", role="status", width=width),
         ]
@@ -1638,8 +1643,8 @@ def tui_agent_label(index: int) -> str:
 
 def render_agent_switcher(index: int) -> str:
     if index >= 6:
-        return "plan  build  chatbot"
-    return "plan  build  chatbot"
+        return "PLAN | [BUILD] | CHAT"
+    return "[PLAN] | BUILD | CHAT"
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
@@ -1743,6 +1748,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         relative_path(path, target)
         for path in list_project_files(target, MODEL_ARTIFACT_SUFFIXES, limit=80)
     ]
+    model_parameters = extract_model_parameters(target, scan)
     registration_checks = build_registration_checks(
         requirements_files=[relative_path(path, target) for path in requirements_files],
         has_mlflow_dependency=has_mlflow_dependency,
@@ -1860,7 +1866,71 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
         issues=issues,
         issue_details=issue_details,
         next_actions=dedupe(next_actions),
+        model_parameters=model_parameters,
     )
+
+
+def safe_read_json(path: Path) -> dict[str, object]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def flatten_model_parameter_values(prefix: str, payload: object, output: dict[str, object]) -> None:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            next_prefix = f"{prefix}.{key}" if prefix else str(key)
+            flatten_model_parameter_values(next_prefix, value, output)
+        return
+    if isinstance(payload, (str, int, float, bool)) or payload is None:
+        output[prefix] = payload
+
+
+def extract_model_parameters(root: Path, scan: ProjectScan) -> dict[str, object]:
+    config = safe_read_json(root / "config.json")
+    parameters: dict[str, object] = {}
+    for section in ("model", "training", "data"):
+        value = config.get(section)
+        if isinstance(value, dict):
+            flatten_model_parameter_values(section, value, parameters)
+    if scan.model_artifacts:
+        first = scan.model_artifacts[0]
+        parameters["artifact.primary_path"] = first.path
+        parameters["artifact.primary_size_bytes"] = first.size_bytes
+        parameters["artifact.primary_size"] = format_bytes(first.size_bytes)
+        parameters["artifact.count"] = len(scan.model_artifacts)
+    else:
+        parameters["artifact.count"] = 0
+    return parameters
+
+
+def format_model_parameters(parameters: dict[str, object], limit: int = 10) -> list[str]:
+    if not parameters:
+        return ["모델 파라미터: 없음"]
+    priority = [
+        "artifact.primary_path",
+        "artifact.primary_size",
+        "artifact.count",
+        "model.source_path",
+        "model.save_path",
+        "model.artifact_path",
+        "training.epochs",
+        "training.learning_rate",
+        "training.batch_size",
+        "training.optimizer",
+    ]
+    keys = [key for key in priority if key in parameters]
+    keys.extend(key for key in sorted(parameters) if key not in keys)
+    rows = []
+    for key in keys[:limit]:
+        rows.append(f"{key}={parameters[key]}")
+    if len(keys) > limit:
+        rows.append(f"외 {len(keys) - limit}개")
+    return rows
 
 
 def build_project_issue(
@@ -2365,7 +2435,7 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
         created.append("input_example.json")
 
     custom_dir = root / "aiu_custom"
-    custom_dir.mkdir(exist_ok=True)
+    ensure_read_write_directory(custom_dir)
     init_path = custom_dir / "__init__.py"
     if not init_path.exists():
         init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
@@ -2523,6 +2593,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import mlflow
@@ -2542,6 +2613,28 @@ def resolve_env(value: str) -> str:
     return value
 
 
+def ensure_read_write_directory(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o775)
+    except OSError:
+        pass
+    if os.name == "nt":
+        username = os.environ.get("USERNAME") or os.environ.get("USER")
+        if username:
+            try:
+                subprocess.run(
+                    ["icacls", str(path), "/grant", f"{username}:(OI)(CI)M", "/T", "/C"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except Exception:
+                pass
+    return path
+
+
 def prepare_data(config: dict):
     train_path = config["data"]["train_path"]
     test_path = config["data"]["test_path"]
@@ -2557,7 +2650,7 @@ def train_model(model, data, config: dict):
     if local_model_path:
         return Path(local_model_path)
     save_path = Path(config["model"]["save_path"])
-    save_path.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(save_path)
     (save_path / "model.txt").write_text("replace with trained model artifact\\n", encoding="utf-8")
     return save_path
 
@@ -2574,9 +2667,8 @@ def main() -> None:
     config_path = Path(os.getenv("AI_STUDIO_CONFIG_PATH", "config.json"))
     config = load_config(str(config_path))
 
-    tracking_url = resolve_env(config["mlflow_tracking_url"])
-    if tracking_url:
-        mlflow.set_tracking_uri(tracking_url)
+    tracking_url = resolve_env(config["mlflow_tracking_url"]) or "file:./mlruns"
+    mlflow.set_tracking_uri(tracking_url)
     username = resolve_env(config["mlflow_tracking_username"])
     password = resolve_env(config["mlflow_tracking_password"])
     if username:
@@ -2654,7 +2746,7 @@ def run_model_source() -> str:
 Usage:
   python run_model.py
   python run_model.py --model ./model/my-model.onnx
-  python run_model.py --env-file ai_studio.env --config config.json
+  python run_model.py --env-file ai_studio.env --config config.json --register
 """
 
 from __future__ import annotations
@@ -2663,6 +2755,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -2699,6 +2792,28 @@ def load_config(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def ensure_read_write_directory(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o775)
+    except OSError:
+        pass
+    if os.name == "nt":
+        username = os.environ.get("USERNAME") or os.environ.get("USER")
+        if username:
+            try:
+                subprocess.run(
+                    ["icacls", str(path), "/grant", f"{username}:(OI)(CI)M", "/T", "/C"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except Exception:
+                pass
+    return path
+
+
 def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
     candidates: list[Path] = []
     if explicit_model:
@@ -2729,7 +2844,7 @@ def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
 def prepare_local_model(source: Path, config: dict) -> Path:
     config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
     save_root = Path(str(config_model.get("save_path") or "saved_model"))
-    save_root.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(save_root)
     if source.is_dir():
         target = save_root / "local_model"
         if target.exists():
@@ -2749,6 +2864,8 @@ def main() -> None:
     parser.add_argument("--config", default="config.json", help="AI Studio config file path")
     parser.add_argument("--model", default="", help="Existing local model file or directory path")
     parser.add_argument("--prepare-only", action="store_true", help="Only create saved_model/local_model and skip MLflow logging")
+    parser.add_argument("--register", action="store_true", help="Run MLflow model logging/register after local model preparation")
+    parser.add_argument("--dry-run", action="store_true", help="Show the MLflow register command path without importing mlflow")
     args = parser.parse_args()
 
     load_env_file(Path(args.env_file))
@@ -2762,6 +2879,10 @@ def main() -> None:
     print(f"local model prepared: {local_model}")
 
     if args.prepare_only:
+        return
+    if args.dry_run:
+        print("dry-run register command: python run_model.py --env-file ai_studio.env --register")
+        print("mlflow tracking default: file:./mlruns when MLFLOW_TRACKING_URL is empty")
         return
     from mlflow_ai_studio_logging import main as run_mlflow_logging
 
@@ -2874,6 +2995,9 @@ def format_beginner_analysis(analysis: ProjectAnalysis) -> str:
             f"- Job Template 초안 준비: {'가능' if analysis.job_template_ready else '보완 필요'}",
         ]
     )
+    if analysis.model_parameters:
+        rows.append("- 모델 파라미터:")
+        rows.extend(f"  - {item}" for item in format_model_parameters(analysis.model_parameters, limit=8))
     return "\n".join(rows)
 
 
@@ -3096,6 +3220,7 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
 
 def format_beginner_report(analysis: ProjectAnalysis) -> str:
     report_path = Path(analysis.path or ".") / "ml-agent-report.json"
+    register_plan_path = Path(analysis.path or ".") / "mlflow-registration-plan.json"
     rows = [
         "- 최종 결과 요약:",
         f"  - 프로젝트: {analysis.path}",
@@ -3105,6 +3230,9 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
         f"  - 로컬 서빙: {analysis.local_serving.status}",
         f"  - 문제 수: {len(analysis.issue_details)}개",
     ]
+    if analysis.model_parameters:
+        rows.append("- 모델 파라미터:")
+        rows.extend(f"  - {item}" for item in format_model_parameters(analysis.model_parameters, limit=8))
     if analysis.issue_details:
         rows.append("- 남은 문제:")
         for index, issue in enumerate(analysis.issue_details[:3], start=1):
@@ -3118,6 +3246,11 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
     rows.extend(f"  - {action}" for action in analysis.next_actions[:3])
     rows.extend(
         [
+            "- MLflow 등록 테스트:",
+            f"  - dry-run: ml-agent register {analysis.path} --dry-run",
+            f"  - 실행: ml-agent register {analysis.path}",
+            "  - MLFLOW_TRACKING_URL이 비어 있으면 file:./mlruns 로컬 저장소를 사용합니다.",
+            f"  - 등록 계획 파일: {register_plan_path}",
             "- 리포트 저장:",
             f"  - 저장 경로: {report_path}",
             f"  - 저장 명령: ml-agent report {analysis.path}",
@@ -3208,7 +3341,7 @@ def handle_advanced_input(command: str) -> str:
     if not command:
         return ADVANCED_INTRO
     parts = command.split()
-    if parts[0] == "ml-agent":
+    if parts[0] in {"ml-agent", "aiu"}:
         parts = parts[1:]
     if not parts:
         return ADVANCED_INTRO
@@ -3238,8 +3371,10 @@ def handle_advanced_input(command: str) -> str:
         if as_json:
             return json.dumps(deepagents_libs_as_dict(source_zip), ensure_ascii=False, indent=2)
         return format_deepagents_libs(source_zip)
-    if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report"}:
-        return "unknown command. available: analyze, validate, fix, apply, serve, report, chat, profile, deepagents, config, init, prompts, errors"
+    if parts[0] == "sample":
+        return handle_sample_command(parts[1:])
+    if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
+        return "unknown command. available: analyze, validate, fix, apply, serve, report, register, sample, chat, profile, deepagents, config, init, prompts, errors"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
     result = run_command(parts[0], path, dry_run="--dry-run" in parts)
@@ -3260,6 +3395,80 @@ def option_value(parts: list[str], option: str) -> str | None:
     return value
 
 
+def handle_sample_command(parts: list[str]) -> str:
+    as_json = "--json" in parts
+    action = next((part for part in parts if not part.startswith("--")), "list")
+    root = sample_projects_root()
+    if action == "list":
+        payload = sample_catalog_as_dict()
+        if as_json:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        return format_sample_catalog(payload)
+    if action == "create":
+        kind = option_value(parts, "--kind") or "all"
+        if kind in {"all", "matrix"}:
+            paths = create_all_model_samples(root)
+        elif kind in {"large10", "big10", "heavy10"}:
+            paths = create_large_model_samples(root)
+        elif kind in SAMPLE_MODEL_SPECS:
+            paths = [create_model_sample(root / SAMPLE_MODEL_SPECS[kind].directory, SAMPLE_MODEL_SPECS[kind])]
+        else:
+            message = f"unknown sample kind: {kind}"
+            if as_json:
+                return json.dumps({"status": "error", "message": message, "available_kinds": sorted(SAMPLE_MODEL_SPECS)}, ensure_ascii=False, indent=2)
+            return message
+        payload = {"status": "ok", "created": [str(path) for path in paths], "count": len(paths)}
+        if as_json:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        return "sample projects created\n" + "\n".join(f"- {path}" for path in paths)
+    return "unknown sample action. available: list, create"
+
+
+def sample_catalog_as_dict() -> dict[str, object]:
+    return {
+        "sample_root": str(sample_projects_root()),
+        "basic": [
+            {
+                "kind": spec.kind,
+                "title": spec.title,
+                "directory": spec.directory,
+                "artifact_path": spec.artifact_path,
+                "artifact_size": format_bytes(spec.artifact_size_bytes),
+            }
+            for spec in SAMPLE_MODEL_SPECS.values()
+        ],
+        "large10": [
+            {
+                "kind": spec.kind,
+                "title": spec.title,
+                "directory": spec.directory,
+                "artifact_path": spec.artifact_path,
+                "artifact_size": format_bytes(spec.artifact_size_bytes),
+            }
+            for spec in LARGE_MODEL_SAMPLE_SPECS
+        ],
+    }
+
+
+def format_sample_catalog(payload: dict[str, object]) -> str:
+    rows = [
+        "Sample model catalog",
+        f"- root: {payload['sample_root']}",
+        "- create all: aiu sample create --kind all",
+        "- create one: aiu sample create --kind tensorflow",
+        "- create large10: aiu sample create --kind large10",
+        "",
+        "Basic samples:",
+    ]
+    for item in payload["basic"]:
+        rows.append(f"- {item['kind']}: {item['title']} ({item['artifact_path']}, {item['artifact_size']})")
+    rows.append("")
+    rows.append("Large10 samples:")
+    for item in payload["large10"]:
+        rows.append(f"- {item['kind']}: {item['title']} ({item['artifact_path']}, {item['artifact_size']})")
+    return "\n".join(rows)
+
+
 def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult:
     target = Path(path)
     profile = build_ml_platform_profile(MODE_ADVANCED)
@@ -3271,7 +3480,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     approval_options = build_approval_options(analysis) if command in {"fix", "apply"} else None
     applied_changes = None
 
-    if command in {"analyze", "validate", "fix", "apply", "serve", "report"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
         details.append(f"path={target}")
         details.append(f"agent_profile={profile.name}")
     if command == "fix" and not dry_run:
@@ -3283,7 +3492,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         details.append(f"applied_changes={len([change for change in applied_changes if change.status == 'applied'])}")
         details.append(f"skipped_changes={len([change for change in applied_changes if change.status == 'skipped'])}")
         analysis = analyze_project(path)
-    if command in {"analyze", "validate", "fix", "apply", "serve", "report"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
         details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
         details.append(f"preview_items={len(fix_previews or [])}")
@@ -3292,6 +3501,11 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     if command == "report":
         result_file = str(target / "ml-agent-report.json")
         details.append(f"result_file={result_file}")
+    elif command == "register":
+        result_file = str(target / "mlflow-registration-plan.json")
+        register_plan = build_registration_plan(analysis, dry_run=dry_run)
+        write_registration_plan_file(Path(result_file), register_plan)
+        details.extend(register_plan["details"])
     else:
         result_file = None
 
@@ -3309,6 +3523,9 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         status = "needs_action"
         exit_code = 1
     elif command == "serve" and analysis.local_serving.status != "준비 가능":
+        status = "needs_action"
+        exit_code = 1
+    elif command == "register" and (analysis.registration_status == "불가" or not analysis.job_template_ready):
         status = "needs_action"
         exit_code = 1
     if command == "report" and result_file:
@@ -3335,7 +3552,7 @@ def write_report_file(
     status: str,
     exit_code: int,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(path.parent)
     report = {
         "title": "AI ML 온보딩 분석 리포트",
         "agent_profile": agent_profile,
@@ -3356,6 +3573,45 @@ def write_report_file(
         "analysis": analysis.as_dict(),
     }
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def build_registration_plan(analysis: ProjectAnalysis, dry_run: bool = False) -> dict[str, object]:
+    root = Path(analysis.path or ".")
+    env_path = root / "ai_studio.env"
+    tracking_uri = ""
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("MLFLOW_TRACKING_URL="):
+                tracking_uri = line.split("=", 1)[1].strip()
+                break
+    tracking_mode = "remote" if tracking_uri else "local-file-store"
+    effective_tracking_uri = tracking_uri or "file:./mlruns"
+    command = "python run_model.py --env-file ai_studio.env --register"
+    if dry_run:
+        command += " --dry-run"
+    details = [
+        f"register_mode={'dry-run' if dry_run else 'execute'}",
+        f"mlflow_tracking_mode={tracking_mode}",
+        f"mlflow_tracking_uri={effective_tracking_uri}",
+        f"register_command={command}",
+    ]
+    if tracking_mode == "local-file-store":
+        details.append("local_mlruns_default=true")
+    return {
+        "project_path": analysis.path,
+        "status": analysis.registration_status,
+        "dry_run": dry_run,
+        "tracking_mode": tracking_mode,
+        "tracking_uri": effective_tracking_uri,
+        "command": command,
+        "details": details,
+        "ready": analysis.registration_status == "등록 가능" and analysis.job_template_ready,
+    }
+
+
+def write_registration_plan_file(path: Path, plan: dict[str, object]) -> None:
+    ensure_read_write_directory(path.parent)
+    path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def format_command_result(result: CommandResult) -> str:
@@ -3380,6 +3636,10 @@ def initialize_runtime_layout() -> str:
         f"{rows}"
         f"{notice}"
     )
+
+
+def ensure_prompt_wiki_export() -> list[Path]:
+    return export_prompt_templates_to_wiki(AppConfig.load())
 
 
 def format_runtime_migration_notice(root: Path) -> str:
@@ -3421,20 +3681,68 @@ def handle_error_command(parts: list[str]) -> str:
     return "unknown errors command. available: errors list, errors record <message>, errors analyze <id-or-path>"
 
 
+def copy_text_to_clipboard(text: str) -> tuple[bool, str]:
+    commands: list[list[str]] = []
+    if sys.platform == "darwin":
+        commands.append(["pbcopy"])
+    elif os.name == "nt":
+        commands.append(["clip"])
+    else:
+        commands.extend(
+            [
+                ["wl-copy"],
+                ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"],
+            ]
+        )
+    errors: list[str] = []
+    for command in commands:
+        executable = command[0]
+        if shutil.which(executable) is None:
+            continue
+        try:
+            subprocess.run(command, input=text, text=True, check=True, capture_output=True)
+            return True, executable
+        except (OSError, subprocess.CalledProcessError) as exc:
+            errors.append(f"{executable}: {exc}")
+    detail = "; ".join(errors) if errors else "사용 가능한 클립보드 명령을 찾지 못했습니다."
+    return False, detail
+
+
+def handle_logo_command(copy_to_clipboard: bool = False) -> str:
+    if not copy_to_clipboard:
+        return LAUNCH_SCREEN
+    copied, detail = copy_text_to_clipboard(LAUNCH_SCREEN)
+    if copied:
+        return f"{LAUNCH_SCREEN}\n\nlogo copied to clipboard: {detail}"
+    return (
+        f"{LAUNCH_SCREEN}\n\n"
+        "logo clipboard copy failed.\n"
+        f"reason: {detail}\n"
+        "위 로고 블록을 콘솔에서 직접 선택해 복사할 수 있습니다."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agent")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["analyze", "validate", "fix", "apply", "serve", "report"]:
+    for command in ["analyze", "validate", "fix", "apply", "serve", "report", "register"]:
         sub = subparsers.add_parser(command)
         sub.add_argument("path", nargs="?", default=".")
         sub.add_argument("--json", action="store_true")
         sub.add_argument("--dry-run", action="store_true")
 
+    sample_parser = subparsers.add_parser("sample")
+    sample_parser.add_argument("action", nargs="?", default="list", choices=["list", "create"])
+    sample_parser.add_argument("--kind", default="all")
+    sample_parser.add_argument("--json", action="store_true")
     subparsers.add_parser("chat")
     subparsers.add_parser("tui")
     subparsers.add_parser("config")
     subparsers.add_parser("init")
+    logo_parser = subparsers.add_parser("logo")
+    logo_parser.add_argument("--copy", action="store_true")
     prompts_parser = subparsers.add_parser("prompts")
     prompts_parser.add_argument("--json", action="store_true")
     errors_parser = subparsers.add_parser("errors")
@@ -3450,6 +3758,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    ensure_prompt_wiki_export()
     if not argv:
         ConsoleAssistant().run()
         return 0
@@ -3469,7 +3778,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init":
         print(initialize_runtime_layout())
         return 0
+    if args.command == "logo":
+        print(handle_logo_command(copy_to_clipboard=args.copy))
+        return 0
     if args.command == "prompts":
+        ensure_prompt_wiki_export()
         templates = load_prompt_templates()
         if args.json:
             print(json.dumps(prompt_templates_as_dict(templates), ensure_ascii=False, indent=2))
@@ -3478,6 +3791,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "errors":
         print(handle_error_command([args.action, *args.value]))
+        return 0
+    if args.command == "sample":
+        parts = [args.action]
+        if args.kind:
+            parts.extend(["--kind", args.kind])
+        if args.json:
+            parts.append("--json")
+        print(handle_sample_command(parts))
         return 0
     if args.command == "profile":
         profile = build_ml_platform_profile(MODE_ADVANCED)

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from deep_agent.app_config import AppConfig
+from deep_agent.app_config import AppConfig, ensure_read_write_directory
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ def save_error_log(
 ) -> ErrorLogEntry:
     active_config = AppConfig.load() if config is None else config
     directory = error_log_dir(active_config)
-    directory.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(directory)
     created_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entry = ErrorLogEntry(
         id=f"error-{created_at}",

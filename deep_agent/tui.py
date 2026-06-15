@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 
 from deep_agent.app_config import AppConfig
 from deep_agent.stores.chat_session_store import append_chat_session_event
+from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki
 
 from deep_agent.cli import (
     AppliedChange,
@@ -25,21 +26,29 @@ from deep_agent.cli import (
     apply_fix_previews,
     build_beginner_step_tabs,
     build_fix_previews,
+    format_bytes,
     format_beginner_apply_result,
     format_beginner_tab,
     format_beginner_fix_preview,
+    format_model_parameters,
     handle_advanced_input,
     handle_intermediate_request,
+    copy_text_to_clipboard,
     parse_mode,
     parse_mode_command,
     resolve_beginner_project_input,
 )
-from deep_agent.runtime import DeepAgentsRuntime
+from deep_agent.runtime import DeepAgentsRuntime, build_deepagents_system_prompt
 from deep_agent.qwen_chat import QwenChatConfig
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
 AGENT_MODES = ("Plan", "Build", "Chatbot")
+AGENT_MODE_DISPLAY = {
+    "Plan": "PLAN",
+    "Build": "BUILD",
+    "Chatbot": "CHAT",
+}
 AGENT_MODE_ALIASES = {
     "plan": "Plan",
     "플랜": "Plan",
@@ -80,6 +89,12 @@ def textual_available() -> bool:
     return find_spec("textual") is not None
 
 
+def is_right_click_event(event) -> bool:
+    button = getattr(event, "button", None)
+    button_name = str(getattr(event, "button_name", "")).lower()
+    return button == 3 or button_name == "right"
+
+
 def missing_textual_message() -> str:
     return (
         "Textual TUI를 실행하려면 Textual 패키지가 필요합니다.\n\n"
@@ -95,8 +110,20 @@ def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str
     return ""
 
 
+def format_agent_mode_label(agent_mode: str) -> str:
+    return AGENT_MODE_DISPLAY.get(agent_mode, agent_mode.upper())
+
+
 def format_agent_mode_selector(agent_mode: str) -> str:
-    return "plan build chatbot"
+    labels = []
+    for mode in AGENT_MODES:
+        label = format_agent_mode_label(mode)
+        labels.append(f"[{label}]" if mode == agent_mode else label)
+    return " | ".join(labels)
+
+
+def format_agent_mode_title(agent_mode: str) -> str:
+    return f"{format_agent_mode_label(agent_mode)} MODE"
 
 
 def parse_agent_mode_command(command: str) -> str | None:
@@ -201,16 +228,43 @@ def format_tui_advanced_screen(message: str = "") -> str:
     return ADVANCED_INTRO
 
 
+def format_tui_model_info(project_path: str) -> list[str]:
+    if not project_path:
+        return ["- 프로젝트 모델: (프로젝트 경로 미선택)"]
+    analysis = analyze_project(project_path)
+    if not analysis.exists or not analysis.is_directory:
+        return ["- 프로젝트 모델: 프로젝트 경로 확인 필요"]
+    if not analysis.scan.model_artifacts:
+        return ["- 프로젝트 모델: 모델 artifact 없음"]
+    first = analysis.scan.model_artifacts[0]
+    rows = [
+        f"- 프로젝트 모델: {first.path}",
+        f"- 모델 크기: {format_bytes(first.size_bytes)}",
+        f"- 모델 후보: {len(analysis.scan.model_artifacts)}개",
+    ]
+    if len(analysis.scan.model_artifacts) > 1:
+        rows.append(
+            "- 추가 모델: "
+            + ", ".join(item.path for item in analysis.scan.model_artifacts[1:4])
+        )
+    parameter_rows = format_model_parameters(analysis.model_parameters, limit=12)
+    rows.append("- 모델 파라미터:")
+    rows.extend(f"  - {item}" for item in parameter_rows)
+    return rows
+
+
 def format_tui_chatbot_screen(project_path: str, model: str, launch_mode: str | None = None) -> str:
     mode_label = MODE_LABELS.get(launch_mode or "", "TUI")
     project_text = project_path or "(프로젝트 경로 미선택)"
+    model_info = format_tui_model_info(project_path)
     return "\n".join(
         [
-            "Chatbot Mode",
+            format_agent_mode_title("Chatbot"),
             "",
             f"- 실행 모드: {mode_label}",
             f"- 프로젝트: {project_text}",
-            f"- 모델: {model}",
+            f"- Agent 모델: {model}",
+            *model_info,
             "- 처리 방식: DeepAgents runtime + AutoFix 정책",
             "",
             "input 창에 자연어로 입력하세요.",
@@ -221,7 +275,7 @@ def format_tui_chatbot_screen(project_path: str, model: str, launch_mode: str | 
             "명령:",
             "- /folder : 폴더 선택",
             "- /model : 모델 선택",
-            "- plan 또는 build : 모드 전환",
+            "- PLAN / BUILD / CHAT : 모드 전환",
         ]
     )
 
@@ -237,6 +291,33 @@ def is_fix_request(command: str) -> bool:
         "반영",
         "패치",
         "patch",
+    )
+    return any(keyword in lowered for keyword in keywords)
+
+
+def should_use_autofix_chat(command: str) -> bool:
+    lowered = command.lower()
+    keywords = (
+        "분석",
+        "검증",
+        "수정",
+        "고쳐",
+        "오류",
+        "에러",
+        "등록",
+        "자동",
+        "프로젝트",
+        "mlflow",
+        "requirements",
+        "requirement",
+        "job template",
+        "template",
+        "run_model",
+        "train.py",
+        "config",
+        "서빙",
+        "모델",
+        "artifact",
     )
     return any(keyword in lowered for keyword in keywords)
 
@@ -428,6 +509,7 @@ class BeginnerTuiController:
         self.project_path = ""
         self.sample_message: str | None = None
         self.app_config = AppConfig.load()
+        export_prompt_templates_to_wiki(self.app_config)
         self.available_models = available_models_from_config(self.app_config)
         if self.qwen_config is None:
             self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
@@ -781,25 +863,35 @@ class BeginnerTuiController:
         if is_greeting(command):
             response = greeting_response()
             self.latest_message = response
-            final_analysis = analyze_project(self.project_path)
             self._append_or_replace_chat_log(command, response, [])
-            self._save_chat_session(command, response, [], final_analysis)
+            self._save_chat_session(command, response, [], None)
+            self._save_used_prompt(command, response, agent_mode="Chat")
             return response
-        result = self._invoke_deepagents(command, agent_mode="AutoFix")
+        use_autofix = should_use_autofix_chat(command)
+        runtime_mode = "AutoFix" if use_autofix else "Chat"
+        result = self._invoke_deepagents(command, agent_mode=runtime_mode)
         applied_changes: list[AppliedChange] = []
-        final_analysis = analyze_project(self.project_path)
-        if result.used_deepagents:
+        if result.used_deepagents and use_autofix:
             applied_changes = self._apply_fixable_issues_after_chat()
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, applied_changes)
             self._save_chat_session(command, response, applied_changes, final_analysis)
+            self._save_used_prompt(command, response, agent_mode=runtime_mode)
+            return response
+        if result.used_deepagents:
+            response = result.content
+            self.latest_message = response
+            self._append_or_replace_chat_log(command, response, applied_changes)
+            self._save_chat_session(command, response, applied_changes, None)
+            self._save_used_prompt(command, response, agent_mode=runtime_mode)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
         self.latest_message = response
         self._append_or_replace_chat_log(command, response, applied_changes)
-        self._save_chat_session(command, response, applied_changes, final_analysis)
+        self._save_chat_session(command, response, applied_changes, analyze_project(self.project_path) if use_autofix else None)
+        self._save_used_prompt(command, response, agent_mode=runtime_mode)
         return response
 
     def _handle_non_chatbot_text(self, command: str) -> str:
@@ -899,10 +991,24 @@ class BeginnerTuiController:
                 "project_path": self.project_path,
                 "user_message": user_message,
                 "selected_model": self.qwen_model,
-                "analysis_status": final_analysis.registration_status,
+                "analysis_status": final_analysis.registration_status if final_analysis else "not_analyzed",
                 "applied_changes": [change.as_dict() for change in applied_changes],
                 "agent_response": agent_response,
-                "remaining_issues": [issue.as_dict() for issue in final_analysis.issue_details],
+                "remaining_issues": [issue.as_dict() for issue in final_analysis.issue_details] if final_analysis else [],
+            },
+        )
+
+    def _save_used_prompt(self, user_message: str, agent_response: str, *, agent_mode: str) -> None:
+        append_used_prompt_to_wiki(
+            self.app_config,
+            {
+                "project_path": self.project_path,
+                "user_prompt": user_message,
+                "system_prompt": build_deepagents_system_prompt(self.project_path, agent_mode),
+                "agent_mode": agent_mode,
+                "launch_mode": self.selected_launch_mode or "",
+                "selected_model": self.qwen_model,
+                "response_summary": agent_response,
             },
         )
 
@@ -1007,20 +1113,45 @@ def run_tui(project_path: str = "") -> int:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Vertical
-    from textual.widgets import Input, Static
+    from textual.widgets import Static, TextArea
 
     class LogView(Static):
         pass
 
-    class CommandInput(Input):
+    class CommandInput(TextArea):
+        @property
+        def value(self) -> str:
+            return self.text
+
+        @value.setter
+        def value(self, text: str) -> None:
+            self.load_text(text)
+
+        @property
+        def cursor_position(self) -> int:
+            return len(self.text)
+
+        @cursor_position.setter
+        def cursor_position(self, position: int) -> None:
+            self.cursor_location = self.document.get_location_from_index(position)
+
+        def insert_text_at_cursor(self, text: str) -> None:
+            self.insert(text)
+
         def on_mount(self) -> None:
             self.focus()
 
         def on_paste(self, event: events.Paste) -> None:
             event.stop()
-            self.insert_text_at_cursor(event.text.strip())
+            self.insert_text_at_cursor(event.text)
 
         def on_key(self, event) -> None:
+            if event.key in {"ctrl+enter", "ctrl+j"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.app._submit_command_input()
+                return
             if event.key == "tab":
                 event.stop()
                 if hasattr(event, "prevent_default"):
@@ -1073,7 +1204,7 @@ def run_tui(project_path: str = "") -> int:
             text-style: bold;
         }
         #command {
-            height: 3;
+            height: 6;
             padding: 0 1;
             background: #202020;
             color: #ffffff;
@@ -1137,7 +1268,7 @@ def run_tui(project_path: str = "") -> int:
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
                 yield LogView("", id="log")
                 yield ModeSelector("", id="mode-selector")
-                yield CommandInput(placeholder=command_placeholder_for_mode("Plan", self.controller.qwen_model), id="command")
+                yield CommandInput(id="command")
                 yield StatusBar("", id="status")
 
         def on_mount(self) -> None:
@@ -1189,14 +1320,22 @@ def run_tui(project_path: str = "") -> int:
             self.set_focus(command)
             command.insert_text_at_cursor("    ")
 
-        def on_input_submitted(self, event: Input.Submitted) -> None:
-            value = event.value
+        def _submit_command_input(self) -> None:
             command = self.query_one(CommandInput)
+            value = command.value
             command.value = ""
             self._submit_or_queue(value)
 
         def on_click(self) -> None:
             self._focus_command()
+
+        def on_mouse_down(self, event: events.MouseDown) -> None:
+            if not is_right_click_event(event):
+                return
+            event.stop()
+            if hasattr(event, "prevent_default"):
+                event.prevent_default()
+            self.action_copy_current_screen()
 
         def on_paste(self, event: events.Paste) -> None:
             command = self.query_one(CommandInput)
@@ -1263,10 +1402,28 @@ def run_tui(project_path: str = "") -> int:
                 return
             if event.key == "enter":
                 event.stop()
-                value = command.value
-                command.value = ""
-                self._submit_or_queue(value)
+                self._submit_command_input()
                 return
+            if event.key in {"ctrl+enter", "ctrl+j"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self._submit_command_input()
+                return
+
+        def action_copy_current_screen(self) -> None:
+            text = self.controller.render_log()
+            try:
+                self.copy_to_clipboard(text)
+                self.controller.latest_message = "현재 화면을 클립보드에 복사했습니다."
+            except Exception:
+                copied, detail = copy_text_to_clipboard(text)
+                if copied:
+                    self.controller.latest_message = f"현재 화면을 클립보드에 복사했습니다. ({detail})"
+                else:
+                    self.controller.latest_message = f"클립보드 복사에 실패했습니다: {detail}"
+            self._refresh()
+            self._focus_command()
 
         def _submit_or_queue(self, value: str) -> None:
             if self.controller.should_show_thinking(value):
@@ -1323,7 +1480,7 @@ def run_tui(project_path: str = "") -> int:
                     command.value = str(highlighted)
                     command.cursor_position = len(command.value)
             else:
-                command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
+                command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
             command.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).update(self.controller.render_log())
@@ -1358,9 +1515,11 @@ __all__ = [
     "StatusBar",
     "format_agent_mode_selector",
     "format_model_choices",
+    "format_tui_model_info",
     "format_tui_chatbot_screen",
     "is_fix_request",
     "is_greeting",
+    "is_right_click_event",
     "is_wizard_navigation",
     "model_selection_placeholder",
     "normalize_input_path",
@@ -1369,6 +1528,7 @@ __all__ = [
     "parse_agent_mode_command",
     "parse_folder_command",
     "parse_model_command",
+    "should_use_autofix_chat",
     "strip_path_command",
     "missing_textual_message",
     "run_tui",

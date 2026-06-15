@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import stat
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -466,7 +468,7 @@ class AppConfig:
 def ensure_runtime_layout(config: AppConfig) -> list[Path]:
     created_or_existing = []
     for directory in config.runtime_directories():
-        directory.mkdir(parents=True, exist_ok=True)
+        ensure_read_write_directory(directory)
         created_or_existing.append(directory)
     _ensure_skill_readme(config.skill_store_dir())
     _ensure_default_skills(config.skill_store_dir())
@@ -474,6 +476,45 @@ def ensure_runtime_layout(config: AppConfig) -> list[Path]:
 
     export_prompt_templates_to_wiki(config)
     return created_or_existing
+
+
+def ensure_read_write_directory(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        directory.chmod(
+            stat.S_IRUSR
+            | stat.S_IWUSR
+            | stat.S_IXUSR
+            | stat.S_IRGRP
+            | stat.S_IWGRP
+            | stat.S_IXGRP
+            | stat.S_IROTH
+            | stat.S_IXOTH
+        )
+    except OSError:
+        pass
+    if os.name == "nt":
+        grant_windows_read_write(directory)
+    return directory
+
+
+def grant_windows_read_write(directory: Path) -> bool:
+    username = os.environ.get("USERNAME") or os.environ.get("USER")
+    if not username:
+        return False
+    command = [
+        "icacls",
+        str(directory),
+        "/grant",
+        f"{username}:(OI)(CI)M",
+        "/T",
+        "/C",
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def format_config_summary(config: AppConfig) -> str:

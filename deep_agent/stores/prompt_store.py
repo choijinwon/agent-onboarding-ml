@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from deep_agent.app_config import AppConfig
+from deep_agent.app_config import AppConfig, ensure_read_write_directory
+from deep_agent.stores.chat_session_store import mask_sensitive_payload
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,7 @@ def export_prompt_templates_to_wiki(config: AppConfig | None = None) -> list[Pat
     active_config = AppConfig.load() if config is None else config
     templates = load_prompt_templates(active_config)
     prompt_dir = active_config.root_dir / active_config.get("WIKI_PROMPT_DIR")
-    prompt_dir.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(prompt_dir)
 
     markdown_path = prompt_dir / "prompt_templates.md"
     json_path = prompt_dir / "prompt_templates.json"
@@ -86,6 +89,74 @@ def export_prompt_templates_to_wiki(config: AppConfig | None = None) -> list[Pat
         encoding="utf-8",
     )
     return [markdown_path, json_path]
+
+
+def used_prompts_paths(config: AppConfig) -> tuple[Path, Path]:
+    prompt_dir = config.root_dir / config.get("WIKI_PROMPT_DIR")
+    return prompt_dir / "used_prompts.jsonl", prompt_dir / "used_prompts.md"
+
+
+def append_used_prompt_to_wiki(
+    config: AppConfig,
+    event: dict[str, Any],
+    now: datetime | None = None,
+) -> list[Path]:
+    jsonl_path, markdown_path = used_prompts_paths(config)
+    ensure_read_write_directory(jsonl_path.parent)
+    timestamp = now or datetime.now(timezone.utc)
+    payload = mask_sensitive_payload({"timestamp": timestamp.isoformat(), **event}, config)
+    with jsonl_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    if not markdown_path.exists():
+        markdown_path.write_text("# Used Prompts\n\nAI ML Onboarding Console에서 실제 사용한 프롬프트 기록입니다.\n", encoding="utf-8")
+    with markdown_path.open("a", encoding="utf-8") as file:
+        file.write(format_used_prompt_markdown(payload))
+    return [jsonl_path, markdown_path]
+
+
+def format_used_prompt_markdown(payload: dict[str, Any]) -> str:
+    user_prompt = str(payload.get("user_prompt", "")).strip()
+    system_prompt = str(payload.get("system_prompt", "")).strip()
+    response_summary = str(payload.get("response_summary", "")).strip()
+    lines = [
+        "",
+        f"## {payload.get('timestamp', '')}",
+        "",
+        f"- Mode: {payload.get('agent_mode', '-')}",
+        f"- Launch Mode: {payload.get('launch_mode', '-')}",
+        f"- Model: {payload.get('selected_model', '-')}",
+        f"- Project: {payload.get('project_path', '-')}",
+        "",
+        "### User Prompt",
+        "",
+        "```text",
+        user_prompt,
+        "```",
+        "",
+    ]
+    if system_prompt:
+        lines.extend(
+            [
+                "### System Prompt",
+                "",
+                "```text",
+                system_prompt,
+                "```",
+                "",
+            ]
+        )
+    if response_summary:
+        lines.extend(
+            [
+                "### Response Summary",
+                "",
+                "```text",
+                response_summary[:2000],
+                "```",
+                "",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def prompt_templates_as_dict(templates: list[PromptTemplate]) -> dict[str, object]:
@@ -100,3 +171,16 @@ def prompt_templates_as_dict(templates: list[PromptTemplate]) -> dict[str, objec
             for template in templates
         ]
     }
+
+
+__all__ = [
+    "PromptTemplate",
+    "append_used_prompt_to_wiki",
+    "export_prompt_templates_to_wiki",
+    "format_prompt_templates",
+    "format_prompt_templates_markdown",
+    "format_used_prompt_markdown",
+    "load_prompt_templates",
+    "prompt_templates_as_dict",
+    "used_prompts_paths",
+]

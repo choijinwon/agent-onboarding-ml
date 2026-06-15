@@ -6,17 +6,18 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import unittest
 import zipfile
 
 from deep_agent import cli as ml_agent
-from deep_agent.app_config import AppConfig, DEFAULT_SKILLS, ensure_runtime_layout
+from deep_agent.app_config import AppConfig, DEFAULT_SKILLS, ensure_read_write_directory, ensure_runtime_layout, grant_windows_read_write
 from deep_agent.profile import build_ml_platform_profile, format_profile
 from deep_agent.libs import deepagents_libs_as_dict
 from deep_agent.runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
 from deep_agent.stores.chat_session_store import append_chat_session_event, mask_sensitive_text
 from deep_agent.stores.error_log_store import analyze_error_log, list_error_logs, save_error_log
-from deep_agent.stores.prompt_store import export_prompt_templates_to_wiki, load_prompt_templates
+from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki, load_prompt_templates
 from deep_agent.qwen_chat import QwenChatConfig, chat_with_qwen
 from deep_agent.cli import (
     ConsoleAssistant,
@@ -33,6 +34,7 @@ from deep_agent.cli import (
     create_large_model_samples,
     ensure_ai_studio_sample_runtime,
     format_beginner_tab,
+    handle_logo_command,
     handle_advanced_input,
     handle_intermediate_request,
     list_existing_sample_projects,
@@ -53,6 +55,8 @@ from deep_agent.tui import (
     format_agent_mode_selector,
     format_folder_choices,
     format_model_choices,
+    format_tui_chatbot_screen,
+    format_tui_model_info,
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
@@ -62,6 +66,8 @@ from deep_agent.tui import (
     parse_folder_command,
     parse_model_command,
     path_candidates_from_input,
+    is_right_click_event,
+    should_use_autofix_chat,
     strip_path_command,
 )
 
@@ -154,7 +160,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("AI ML Onboarding Console", first_tab)
         self.assertIn("STEPS 1-10", first_tab)
         self.assertIn("CURRENT STEP", first_tab)
-        self.assertIn("plan  build  chatbot", first_tab)
+        self.assertIn("[PLAN] | BUILD | CHAT", first_tab)
         self.assertIn("Active agent: Plan read-only", first_tab)
         self.assertIn("esc interrupt", first_tab)
         self.assertIn("> Step 01. 프로젝트 선택", first_tab)
@@ -162,7 +168,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("Enter=다음", first_tab)
 
         apply_tab = format_beginner_tab(6, len(steps), steps[6])
-        self.assertIn("plan  build  chatbot", apply_tab)
+        self.assertIn("PLAN | [BUILD] | CHAT", apply_tab)
         self.assertIn("Active agent: Build approval", apply_tab)
 
     def test_launch_screen_uses_terminal_console_layout(self):
@@ -170,6 +176,27 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("# Launch workflow", LAUNCH_SCREEN)
         self.assertIn("Plan(read-only)", LAUNCH_SCREEN)
         self.assertIn("esc interrupt", LAUNCH_SCREEN)
+
+    def test_logo_command_outputs_copyable_console_logo(self):
+        output = handle_logo_command()
+
+        self.assertEqual(output, LAUNCH_SCREEN)
+        self.assertIn("AI ML Onboarding Console", output)
+
+    def test_logo_command_can_copy_console_logo(self):
+        with patch("deep_agent.cli.copy_text_to_clipboard", return_value=(True, "test-clipboard")) as copy:
+            output = handle_logo_command(copy_to_clipboard=True)
+
+        copy.assert_called_once_with(LAUNCH_SCREEN)
+        self.assertIn("AI ML Onboarding Console", output)
+        self.assertIn("logo copied to clipboard: test-clipboard", output)
+
+    def test_logo_subcommand_is_registered(self):
+        parser = build_parser()
+        args = parser.parse_args(["logo", "--copy"])
+
+        self.assertEqual(args.command, "logo")
+        self.assertTrue(args.copy)
 
     def test_forced_rich_tui_uses_deepagents_layout(self):
         previous_force = os.environ.get("FORCE_COLOR")
@@ -182,9 +209,9 @@ class BeginnerWizardTest(unittest.TestCase):
             output = format_beginner_tab(0, len(steps), steps[0])
 
             self.assertIn("\033[", output)
-            self.assertIn("plan", output)
-            self.assertIn("build", output)
-            self.assertIn("chatbot", output)
+            self.assertIn("PLAN", output)
+            self.assertIn("BUILD", output)
+            self.assertIn("CHAT", output)
             self.assertIn("ctrl+p commands", output)
             self.assertNotIn("+====", output)
             self.assertNotIn("\033[48;2;", output)
@@ -841,6 +868,39 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(artifact_check["status"], "pass")
             self.assertIn("2.0 KiB", artifact_check["detail"])
 
+    def test_sample_list_outputs_basic_and_large_catalog(self):
+        output = handle_advanced_input("aiu sample list --json")
+        payload = json.loads(output)
+
+        self.assertIn("sample_root", payload)
+        self.assertGreaterEqual(len(payload["basic"]), 6)
+        self.assertEqual(len(payload["large10"]), 10)
+        basic_kinds = {item["kind"] for item in payload["basic"]}
+        large_kinds = {item["kind"] for item in payload["large10"]}
+        self.assertIn("tensorflow", basic_kinds)
+        self.assertIn("pytorch", basic_kinds)
+        self.assertIn("large_tabular_ensemble", large_kinds)
+        self.assertIn("large_llm_adapter", large_kinds)
+
+    def test_sample_create_tensorflow_generates_register_scaffold(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                output = handle_advanced_input("aiu sample create --kind tensorflow --json")
+            finally:
+                os.chdir(cwd)
+
+            payload = json.loads(output)
+            sample = Path(payload["created"][0])
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue((sample / "run_model.py").exists())
+            self.assertTrue((sample / "config.json").exists())
+            self.assertTrue((sample / "ai_studio.env").exists())
+            self.assertTrue((sample / "input_example.json").exists())
+            self.assertIn("--register", (sample / "run_model.py").read_text(encoding="utf-8"))
+
     def test_fix_json_contains_step5_previews(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -957,6 +1017,50 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "saved_model" / "local_model.pkl").exists())
             self.assertIn("local model prepared", result.stdout)
+
+    def test_register_dry_run_writes_local_mlflow_registration_plan(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("mlflow\nscikit-learn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.pkl").write_text("sample")
+            ensure_ai_studio_sample_runtime(root)
+
+            output = handle_advanced_input(f"aiu register {root} --dry-run --json")
+            payload = json.loads(output)
+            plan_path = root / "mlflow-registration-plan.json"
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["command"], "register")
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue(plan_path.exists())
+            self.assertTrue(plan["dry_run"])
+            self.assertEqual(plan["tracking_mode"], "local-file-store")
+            self.assertEqual(plan["tracking_uri"], "file:./mlruns")
+            self.assertIn("python run_model.py --env-file ai_studio.env --register --dry-run", plan["command"])
+            self.assertIn("register_command=python run_model.py --env-file ai_studio.env --register --dry-run", payload["details"])
+
+    def test_run_model_register_dry_run_prepares_model_without_mlflow_import(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "run_model.py").write_text(run_model_source(), encoding="utf-8")
+            (root / "config.json").write_text(json.dumps({"model": {"save_path": "saved_model"}}), encoding="utf-8")
+            source = root / "my_model.onnx"
+            source.write_text("model", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, "run_model.py", "--model", str(source), "--register", "--dry-run"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
+            self.assertIn("dry-run register command", result.stdout)
+            self.assertIn("file:./mlruns", result.stdout)
 
     def test_run_model_source_prepares_explicit_local_model_without_mlflow(self):
         with TemporaryDirectory() as tmpdir:
@@ -1147,6 +1251,18 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertEqual(args.command, "tui")
 
+    def test_sample_and_register_subcommands_are_registered(self):
+        parser = build_parser()
+        sample_args = parser.parse_args(["sample", "create", "--kind", "tensorflow", "--json"])
+        register_args = parser.parse_args(["register", ".", "--dry-run", "--json"])
+
+        self.assertEqual(sample_args.command, "sample")
+        self.assertEqual(sample_args.action, "create")
+        self.assertEqual(sample_args.kind, "tensorflow")
+        self.assertTrue(sample_args.json)
+        self.assertEqual(register_args.command, "register")
+        self.assertTrue(register_args.dry_run)
+
     def test_aiu_module_entrypoint_delegates_to_ml_agent(self):
         from aiu.__main__ import main as aiu_main
 
@@ -1163,6 +1279,34 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Textual", message)
         self.assertIn('pip install ".[tui,deepagents]"', message)
         self.assertIn("Windows Terminal", message)
+
+    def test_read_write_directory_helper_creates_writable_folder(self):
+        with TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "runtime" / "sessions"
+
+            result = ensure_read_write_directory(target)
+
+            self.assertEqual(result, target)
+            self.assertTrue(target.exists())
+            probe = target / "write-check.txt"
+            probe.write_text("ok", encoding="utf-8")
+            self.assertEqual(probe.read_text(encoding="utf-8"), "ok")
+
+    def test_windows_read_write_permission_uses_icacls_for_current_user(self):
+        with TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "runtime"
+            target.mkdir()
+            completed = subprocess.CompletedProcess(args=[], returncode=0)
+            with patch.dict(os.environ, {"USERNAME": "aiu-user"}, clear=False):
+                with patch("deep_agent.app_config.subprocess.run", return_value=completed) as run:
+                    success = grant_windows_read_write(target)
+
+            self.assertTrue(success)
+            command = run.call_args.args[0]
+            self.assertEqual(command[:3], ["icacls", str(target), "/grant"])
+            self.assertIn("aiu-user:(OI)(CI)M", command)
+            self.assertIn("/T", command)
+            self.assertIn("/C", command)
 
     def test_tui_initial_screen_requires_launch_mode_selection(self):
         controller = BeginnerTuiController("")
@@ -1202,8 +1346,9 @@ class WindowsSetupTest(unittest.TestCase):
 
             self.assertEqual(controller.selected_launch_mode, MODE_INTERMEDIATE)
             self.assertEqual(controller.agent_mode, "Chatbot")
-            self.assertIn("Chatbot Mode", output)
+            self.assertIn("CHAT MODE", output)
             self.assertIn("실행 모드: 중급자 모드", output)
+            self.assertIn("Agent 모델: qwen3.6", output)
 
     def test_tui_launch_mode_selects_advanced_aliases(self):
         for value in ["3", "고급자", "advanced"]:
@@ -1216,13 +1361,19 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("analyze", output)
 
     def test_tui_intermediate_mode_handles_chat_input(self):
-        controller = BeginnerTuiController("")
-        controller.submit("2")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+                controller.submit("2")
 
-        output = controller.submit("MLflow 설정만 확인해줘")
+                output = controller.submit("MLflow 설정만 확인해줘")
+            finally:
+                os.chdir(cwd)
 
         self.assertIn("DeepAgents runtime", output)
-        self.assertIn("Chatbot Mode", output)
+        self.assertIn("CHAT MODE", output)
 
     def test_tui_intermediate_chatbot_routes_through_runtime(self):
         class FakeRuntime:
@@ -1234,16 +1385,21 @@ class WindowsSetupTest(unittest.TestCase):
                 return DeepAgentsRunResult("중급자 Chatbot 응답", True)
 
         with TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "requirements.txt").write_text("mlflow\n")
-            (root / "train.py").write_text("import mlflow\n")
-            (root / "model.onnx").write_text("sample")
-            fake = FakeRuntime()
-            controller = BeginnerTuiController("", deepagents_runtime=fake)
-            controller.submit("2")
-            controller.project_path = str(root)
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir)
+                (root / "requirements.txt").write_text("mlflow\n")
+                (root / "train.py").write_text("import mlflow\n")
+                (root / "model.onnx").write_text("sample")
+                fake = FakeRuntime()
+                controller = BeginnerTuiController("", deepagents_runtime=fake)
+                controller.submit("2")
+                controller.project_path = str(root)
 
-            output = controller.submit("프로젝트 분석해줘")
+                output = controller.submit("프로젝트 분석해줘")
+            finally:
+                os.chdir(cwd)
 
             self.assertIn("중급자 Chatbot 응답", output)
             self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
@@ -1261,10 +1417,16 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.agent_mode, "Plan")
 
     def test_tui_intermediate_mode_answers_greeting(self):
-        controller = BeginnerTuiController("")
-        controller.submit("2")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+                controller.submit("2")
 
-        output = controller.submit("하이")
+                output = controller.submit("하이")
+            finally:
+                os.chdir(cwd)
 
         self.assertIn("안녕하세요", output)
         self.assertIn("AI ML 온보딩 Agent", output)
@@ -1347,14 +1509,100 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("사용 가능한 명령어", output)
 
     def test_tui_advanced_chatbot_mode_handles_chat_input(self):
-        controller = BeginnerTuiController("")
-        controller.submit("3")
-        controller.submit("chatbot")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+                controller.submit("3")
+                controller.submit("chatbot")
 
-        output = controller.submit("하이")
+                output = controller.submit("하이")
+            finally:
+                os.chdir(cwd)
 
         self.assertIn("안녕하세요", output)
         self.assertNotIn("unknown command", output.lower())
+
+    def test_tui_chatbot_screen_shows_project_model_info(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            model_dir = root / "model"
+            model_dir.mkdir()
+            (model_dir / "sample.onnx").write_bytes(b"1234")
+            (root / "config.json").write_text(
+                json.dumps(
+                    {
+                        "model": {"source_path": "model/sample.onnx", "save_path": "saved_model"},
+                        "training": {"epochs": 3, "learning_rate": 0.01, "batch_size": 8, "optimizer": "Adam"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            model_info = format_tui_model_info(str(root))
+            output = format_tui_chatbot_screen(str(root), "qwen3.6", MODE_BEGINNER)
+
+            self.assertIn("- 프로젝트 모델: model/sample.onnx", model_info)
+            self.assertIn("- 모델 크기: 4 B", output)
+            self.assertIn("- 모델 후보: 1개", output)
+            self.assertIn("- 모델 파라미터:", output)
+            self.assertIn("training.epochs=3", output)
+            self.assertIn("training.learning_rate=0.01", output)
+            self.assertIn("training.batch_size=8", output)
+            self.assertIn("training.optimizer=Adam", output)
+            self.assertIn("- Agent 모델: qwen3.6", output)
+
+    def test_tui_chatbot_controller_render_shows_selected_project_model_info(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\n")
+            (root / "model.onnx").write_bytes(b"model")
+            controller = self.beginner_tui(str(root))
+
+            output = controller.submit("chatbot")
+
+            self.assertIn("CHAT MODE", output)
+            self.assertIn("프로젝트 모델: model.onnx", output)
+            self.assertIn("모델 크기: 5 B", output)
+
+    def test_analyze_project_loads_model_parameter_values(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\n")
+            (root / "run_model.py").write_text("print('run')\n")
+            (root / "mlflow_ai_studio_logging.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_bytes(b"12345")
+            (root / "config.json").write_text(
+                json.dumps(
+                    {
+                        "model": {
+                            "source_path": "model.onnx",
+                            "save_path": "saved_model",
+                            "artifact_path": "ai_studio",
+                        },
+                        "training": {
+                            "epochs": 5,
+                            "learning_rate": 0.001,
+                            "batch_size": 64,
+                            "optimizer": "SGD",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            analysis = analyze_project(str(root))
+            payload = analysis.as_dict()
+
+            self.assertEqual(analysis.model_parameters["model.source_path"], "model.onnx")
+            self.assertEqual(analysis.model_parameters["training.epochs"], 5)
+            self.assertEqual(analysis.model_parameters["training.learning_rate"], 0.001)
+            self.assertEqual(analysis.model_parameters["artifact.primary_path"], "model.onnx")
+            self.assertEqual(analysis.model_parameters["artifact.primary_size"], "5 B")
+            self.assertEqual(payload["model_parameters"]["training.batch_size"], 64)
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
         self.assertEqual(command_placeholder_for_mode("Plan"), "")
@@ -1362,9 +1610,9 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(command_placeholder_for_mode("Chatbot"), "")
 
     def test_tui_agent_mode_selector_and_command_parser(self):
-        self.assertEqual(format_agent_mode_selector("Plan"), "plan build chatbot")
-        self.assertEqual(format_agent_mode_selector("Build"), "plan build chatbot")
-        self.assertEqual(format_agent_mode_selector("Chatbot"), "plan build chatbot")
+        self.assertEqual(format_agent_mode_selector("Plan"), "[PLAN] | BUILD | CHAT")
+        self.assertEqual(format_agent_mode_selector("Build"), "PLAN | [BUILD] | CHAT")
+        self.assertEqual(format_agent_mode_selector("Chatbot"), "PLAN | BUILD | [CHAT]")
         self.assertEqual(parse_agent_mode_command("/agent plan"), "Plan")
         self.assertEqual(parse_agent_mode_command("/agent build"), "Build")
         self.assertEqual(parse_agent_mode_command("/agent chat"), "Chatbot")
@@ -1375,6 +1623,11 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(parse_agent_mode_command("/에이전트 챗봇"), "Chatbot")
         self.assertEqual(parse_agent_mode_command("/agent"), "")
         self.assertIsNone(parse_agent_mode_command("agent chat"))
+
+    def test_tui_chat_autofix_classifier_keeps_general_questions_fast(self):
+        self.assertFalse(should_use_autofix_chat("PLAN BUILD CHAT 차이를 알려줘"))
+        self.assertTrue(should_use_autofix_chat("프로젝트 분석해줘"))
+        self.assertTrue(should_use_autofix_chat("오류 로그 보고 자동 수정해줘"))
 
     def test_tui_command_placeholder_mentions_deepagents_model(self):
         self.assertNotIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
@@ -1394,6 +1647,31 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertIn('"ctrl+space"', source)
         self.assertIn('insert_text_at_cursor("    ")', source)
+
+    def test_tui_input_uses_multiline_text_area(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("TextArea", source)
+        self.assertIn('event.key in {"ctrl+enter", "ctrl+j"}', source)
+        self.assertIn("self.app._submit_command_input()", source)
+        self.assertNotIn("Input.Submitted", source)
+
+    def test_tui_right_click_copies_current_screen(self):
+        class Event:
+            button = 3
+            button_name = ""
+
+        class LeftEvent:
+            button = 1
+            button_name = ""
+
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertTrue(is_right_click_event(Event()))
+        self.assertFalse(is_right_click_event(LeftEvent()))
+        self.assertIn("def on_mouse_down", source)
+        self.assertIn("action_copy_current_screen", source)
+        self.assertIn("copy_to_clipboard", source)
 
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
@@ -1670,10 +1948,10 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("/agent chat")
 
-        self.assertIn("Chatbot Mode", output)
+        self.assertIn("CHAT MODE", output)
         self.assertIn("실행 모드: 초급자 모드", output)
         self.assertEqual(controller.agent_mode, "Chatbot")
-        self.assertEqual(controller.submit("/agent"), "plan build chatbot")
+        self.assertEqual(controller.submit("/agent"), "PLAN | BUILD | [CHAT]")
 
     def test_tui_controller_step6_approval_applies_files(self):
         with TemporaryDirectory() as tmpdir:
@@ -1698,16 +1976,21 @@ class WindowsSetupTest(unittest.TestCase):
 
     def test_tui_chat_without_deepagents_config_does_not_modify_files(self):
         with TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            requirements = root / "requirements.txt"
-            train = root / "train.py"
-            requirements.write_text("tensorflow==2.17.0\n")
-            train.write_text("print('train')\n")
-            (root / "model.keras").write_text("sample")
-            controller = self.beginner_tui(str(root))
-            controller.select_agent_mode("Chatbot")
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir)
+                requirements = root / "requirements.txt"
+                train = root / "train.py"
+                requirements.write_text("tensorflow==2.17.0\n")
+                train.write_text("print('train')\n")
+                (root / "model.keras").write_text("sample")
+                controller = self.beginner_tui(str(root))
+                controller.select_agent_mode("Chatbot")
 
-            output = controller.submit("코드 자동 수정해줘")
+                output = controller.submit("코드 자동 수정해줘")
+            finally:
+                os.chdir(cwd)
 
             self.assertIn("DeepAgents runtime", output)
             self.assertIn("QWEN_API_KEY", output)
@@ -1715,10 +1998,16 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertNotIn("import mlflow", train.read_text())
 
     def test_tui_chatbot_mode_answers_greeting_without_deepagents_config(self):
-        controller = self.beginner_tui("")
-        controller.select_agent_mode("Chatbot")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = self.beginner_tui("")
+                controller.select_agent_mode("Chatbot")
 
-        output = controller.submit("하이")
+                output = controller.submit("하이")
+            finally:
+                os.chdir(cwd)
 
         self.assertIn("안녕하세요", output)
         self.assertNotIn("QWEN_API_KEY", output)
@@ -1779,6 +2068,46 @@ class WindowsSetupTest(unittest.TestCase):
             session_payload = json.loads(session_files[0].read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(session_payload["user_message"], "프로젝트 분석해줘")
             self.assertEqual(session_payload["analysis_status"], "등록 가능")
+
+    def test_tui_chat_general_question_uses_fast_chat_mode_without_analysis(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("PLAN은 읽기 전용, BUILD는 승인 후 수정, CHAT은 대화입니다.", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+
+                output = controller.submit("PLAN BUILD CHAT 차이를 알려줘")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("PLAN은 읽기 전용", output)
+            self.assertNotIn("최종 등록 상태", output)
+            self.assertEqual(fake.calls[-1], ("PLAN BUILD CHAT 차이를 알려줘", str(root), "Chat"))
+            session_file = next((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
+            session_payload = json.loads(session_file.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(session_payload["analysis_status"], "not_analyzed")
+            self.assertEqual(session_payload["remaining_issues"], [])
+            used_prompt_file = Path(tmpdir) / "deep_agent" / "wiki" / "prompts" / "used_prompts.jsonl"
+            used_prompt_payload = json.loads(used_prompt_file.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(used_prompt_payload["user_prompt"], "PLAN BUILD CHAT 차이를 알려줘")
+            self.assertEqual(used_prompt_payload["agent_mode"], "Chat")
+            self.assertIn(
+                "PLAN BUILD CHAT 차이를 알려줘",
+                (Path(tmpdir) / "deep_agent" / "wiki" / "prompts" / "used_prompts.md").read_text(encoding="utf-8"),
+            )
 
     def test_tui_chat_autofix_applies_fixable_issues_after_deepagents_success(self):
         class FakeRuntime:
@@ -1913,6 +2242,7 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertIn("## 12. Windows 10/11 실행 환경", content)
         self.assertIn(".\\ml-agent.cmd init", content)
+        self.assertIn("현재 사용자 읽기/쓰기 권한", content)
         self.assertIn("Linux/macOS에서 확인할 때만", content)
         self.assertIn("## 9. 이미지형 TUI 화면", content)
 
@@ -1922,6 +2252,7 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertTrue((root / "docs" / "tui-preview.svg").exists())
         self.assertIn("docs/tui-preview.svg", readme)
+        self.assertIn("읽기/쓰기 권한", readme)
 
 
 class AppConfigTest(unittest.TestCase):
@@ -2033,6 +2364,73 @@ class PromptAndSkillStoreTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(payload.read_text(encoding="utf-8"))["templates"][0]["name"],
                 "sample_prompt",
+            )
+
+    def test_used_prompt_is_appended_to_wiki(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = AppConfig.load(root_dir=root)
+            paths = append_used_prompt_to_wiki(
+                config,
+                {
+                    "project_path": "/tmp/project",
+                    "user_prompt": "프로젝트 분석해줘",
+                    "system_prompt": "QWEN_API_KEY=secret-value",
+                    "agent_mode": "AutoFix",
+                    "launch_mode": "beginner",
+                    "selected_model": "qwen3.6",
+                    "response_summary": "분석 완료",
+                },
+            )
+
+            jsonl_path = root / "deep_agent" / "wiki" / "prompts" / "used_prompts.jsonl"
+            markdown_path = root / "deep_agent" / "wiki" / "prompts" / "used_prompts.md"
+            self.assertEqual(paths, [jsonl_path, markdown_path])
+            payload = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(payload["user_prompt"], "프로젝트 분석해줘")
+            self.assertEqual(payload["agent_mode"], "AutoFix")
+            self.assertIn("프로젝트 분석해줘", markdown_path.read_text(encoding="utf-8"))
+            self.assertIn("분석 완료", markdown_path.read_text(encoding="utf-8"))
+
+    def test_cli_start_exports_prompt_templates_to_wiki(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            prompt_file = root / "deep_agent" / "prompts" / "prompt_templates.json"
+            prompt_file.parent.mkdir(parents=True)
+            prompt_file.write_text(
+                json.dumps(
+                    {
+                        "templates": [
+                            {
+                                "name": "startup_prompt",
+                                "description": "시작 시 저장",
+                                "prompt": "실행 시작 시 wiki에 남깁니다.",
+                                "tags": ["startup"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = ml_agent.main(["config"])
+            finally:
+                os.chdir(cwd)
+
+            markdown = root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.md"
+            payload = root / "deep_agent" / "wiki" / "prompts" / "prompt_templates.json"
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(markdown.exists())
+            self.assertTrue(payload.exists())
+            self.assertIn("startup_prompt", markdown.read_text(encoding="utf-8"))
+            self.assertEqual(
+                json.loads(payload.read_text(encoding="utf-8"))["templates"][0]["name"],
+                "startup_prompt",
             )
 
     def test_runtime_layout_updates_default_skills_and_preserves_custom_skills(self):
