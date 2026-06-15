@@ -1118,6 +1118,77 @@ def sample_projects_root(config: AppConfig | None = None) -> Path:
     return active_config.root_dir / ".aiu" / "sample_projects"
 
 
+def work_project_roots(config: AppConfig | None = None) -> list[Path]:
+    active_config = AppConfig.load() if config is None else config
+    candidates = [
+        active_config.root_dir / "work",
+        active_config.root_dir.parent / "work",
+        Path.cwd() / "work",
+        Path.cwd().parent / "work",
+    ]
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists() and resolved.is_dir():
+            roots.append(resolved)
+    return roots
+
+
+def looks_like_ml_work_project(path: Path) -> bool:
+    if not path.is_dir() or path.name.startswith("."):
+        return False
+    direct_signals = [
+        path / "requirements.txt",
+        path / "pyproject.toml",
+        path / "train.py",
+        path / "model",
+        path / "models",
+    ]
+    if any(signal.exists() for signal in direct_signals):
+        return True
+    artifact_patterns = ("*.pkl", "*.joblib", "*.onnx", "*.pt", "*.pth", "*.keras", "*.h5", "*.safetensors")
+    return any(next(path.glob(pattern), None) is not None for pattern in artifact_patterns)
+
+
+def list_existing_work_projects(roots: list[Path] | None = None) -> list[Path]:
+    active_roots = work_project_roots() if roots is None else roots
+    projects: list[Path] = []
+    seen: set[Path] = set()
+    for root in active_roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for path in root.iterdir():
+            resolved = path.resolve()
+            if resolved in seen or not looks_like_ml_work_project(resolved):
+                continue
+            seen.add(resolved)
+            projects.append(resolved)
+    return sorted(projects, key=lambda path: path.name.lower())
+
+
+def resolve_existing_work_project(raw: str, roots: list[Path] | None = None) -> Path | None:
+    value = raw.strip()
+    if not value:
+        return None
+    prefixes = ("/work ", "work ", "/워크 ", "워크 ", "/model ", "model ", "/모델 ", "모델 ")
+    lowered = value.lower()
+    name = value
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            name = value[len(prefix):].strip()
+            break
+    if not name:
+        return None
+    for project in list_existing_work_projects(roots):
+        if name == project.name or name.lower() == project.name.lower():
+            return project
+    return None
+
+
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
     custom_sample = resolve_existing_sample_project(raw)
@@ -1125,6 +1196,12 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
         return (
             str(custom_sample),
             f"기존 샘플 프로젝트를 선택했습니다.\n- 위치: {custom_sample}\n- 초급자 Wizard가 이 경로로 계속 진행합니다.",
+        )
+    work_project = resolve_existing_work_project(raw)
+    if work_project:
+        return (
+            str(work_project),
+            f"work 디렉토리 모델 프로젝트를 선택했습니다.\n- 위치: {work_project}\n- 초급자 Wizard가 이 경로로 계속 진행합니다.",
         )
     if normalized in {"/sample matrix", "/samples test", "/샘플 매트릭스", "sample matrix", "샘플 매트릭스"}:
         sample_paths = create_all_model_samples(sample_projects_root())
@@ -1195,6 +1272,12 @@ def build_beginner_intro() -> str:
         rows.append("")
         rows.append(".aiu/sample_projects/에 있는 기존 샘플:")
         rows.extend(f"- /sample {path.name}  ({path})" for path in existing_samples)
+    work_projects = list_existing_work_projects()
+    if work_projects:
+        rows.append("")
+        rows.append("work/에 있는 모델 프로젝트:")
+        rows.extend(f"- /work {path.name}  ({path})" for path in work_projects)
+        rows.append("- 이름만 입력해도 선택할 수 있습니다. 예: " + work_projects[0].name)
     return "\n".join(rows)
 
 

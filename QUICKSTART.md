@@ -137,6 +137,9 @@ aiu tui
 여기서 `.\project`는 등록하려는 ML 모델 프로젝트 경로입니다.
 예를 들어 학습 코드, `requirements.txt`, MLflow artifact, 모델 파일이 들어 있는 폴더를 넘깁니다.
 초급자 Step 1에서 `/sample large10`을 입력하면 대형 모델 샘플 10개를 로컬에 생성해 테스트할 수 있습니다.
+직접 만든 모델은 `work\<프로젝트명>\`에 넣으면 초급자 Step 1에 표시됩니다.
+예: `work\my-model\requirements.txt`, `work\my-model\train.py`, `work\my-model\model\model.pkl`
+TUI input에는 `/work my-model` 또는 `my-model`을 입력합니다.
 
 JSON 출력:
 

@@ -33,9 +33,11 @@ from deep_agent.cli import (
     handle_advanced_input,
     handle_intermediate_request,
     list_existing_sample_projects,
+    list_existing_work_projects,
     parse_mode,
     parse_mode_command,
     resolve_existing_sample_project,
+    resolve_existing_work_project,
     resolve_beginner_project_input,
     sample_projects_root,
 )
@@ -496,6 +498,34 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual(resolved, sample.resolve())
             self.assertEqual(Path(path), sample.resolve())
             self.assertIn("기존 샘플 프로젝트를 선택했습니다", message)
+
+    def test_beginner_intro_lists_work_model_projects(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                work_model = Path(tmpdir) / "work" / "user-model"
+                work_model.mkdir(parents=True)
+                (work_model / "requirements.txt").write_text("scikit-learn==1.5.0\n")
+                (work_model / "train.py").write_text("print('train')\n")
+                (work_model / "model").mkdir()
+                (work_model / "model" / "model.pkl").write_text("artifact")
+
+                intro = build_beginner_intro()
+                work_projects = list_existing_work_projects()
+                resolved_by_command = resolve_existing_work_project("/work user-model")
+                resolved_by_name = resolve_existing_work_project("user-model")
+                path, message = resolve_beginner_project_input("user-model")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("work/에 있는 모델 프로젝트", intro)
+            self.assertIn("/work user-model", intro)
+            self.assertEqual([path.name for path in work_projects], ["user-model"])
+            self.assertEqual(resolved_by_command, work_model.resolve())
+            self.assertEqual(resolved_by_name, work_model.resolve())
+            self.assertEqual(Path(path), work_model.resolve())
+            self.assertIn("work 디렉토리 모델 프로젝트를 선택했습니다", message)
 
     def test_tensorflow_sample_alias_creates_fixable_project(self):
         with TemporaryDirectory() as tmpdir:

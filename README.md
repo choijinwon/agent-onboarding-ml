@@ -179,6 +179,10 @@ pip install ".[deepagents,tui]"
 초급자 Step 1에서 대형 모델 샘플 10개를 만들려면 `/sample large10`을 입력합니다.
 샘플은 `.aiu/sample_projects/` 아래에 생성되고 Git에는 포함되지 않습니다.
 
+사용자가 직접 만든 모델 프로젝트는 `work/<프로젝트명>/`에 넣으면 초급자 Step 1에서 자동으로 표시됩니다.
+예: `work/my-model/requirements.txt`, `work/my-model/train.py`, `work/my-model/model/model.pkl`
+TUI input에는 `/work my-model` 또는 `my-model`만 입력하면 됩니다.
+
 ## 환경 변수
 
 `.env.example`에는 현재 POC 실행에 필요한 Qwen endpoint, 모델 목록, Deep Agent 옵션, 등록 패키지, 에러 로그, 스킬 경로만 포함되어 있습니다.
