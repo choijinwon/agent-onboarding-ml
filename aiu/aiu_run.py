@@ -1094,6 +1094,15 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("MLflow 설정 검증", output)
         self.assertIn("무엇을 하시겠습니까?", output)
 
+    def test_tui_intermediate_mode_answers_greeting(self):
+        controller = BeginnerTuiController("")
+        controller.submit("2")
+
+        output = controller.submit("하이")
+
+        self.assertIn("안녕하세요", output)
+        self.assertIn("AI ML 온보딩 Agent", output)
+
     def test_tui_advanced_mode_handles_cli_style_input(self):
         controller = BeginnerTuiController("")
         controller.submit("3")
@@ -1365,6 +1374,16 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("QWEN_API_KEY", output)
             self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
             self.assertNotIn("import mlflow", train.read_text())
+
+    def test_tui_chatbot_mode_answers_greeting_without_deepagents_config(self):
+        controller = self.beginner_tui("")
+        controller.select_agent_mode("Chatbot")
+
+        output = controller.submit("하이")
+
+        self.assertIn("안녕하세요", output)
+        self.assertNotIn("QWEN_API_KEY", output)
+        self.assertIn("안녕하세요", controller.render_log())
 
     def test_tui_build_mode_text_points_to_chatbot_without_modifying_files(self):
         with TemporaryDirectory() as tmpdir:

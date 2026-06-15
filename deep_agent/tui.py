@@ -186,6 +186,26 @@ def is_fix_request(command: str) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
+def is_greeting(command: str) -> bool:
+    normalized = command.strip().lower()
+    return normalized in {
+        "hi",
+        "hello",
+        "hey",
+        "하이",
+        "안녕",
+        "안녕하세요",
+        "반가워",
+    }
+
+
+def greeting_response() -> str:
+    return (
+        "안녕하세요. AI ML 온보딩 Agent입니다.\n"
+        "프로젝트 분석, 오류 로그 점검, MLflow 설정 확인, 수정안 미리보기를 도와드릴 수 있습니다."
+    )
+
+
 def is_wizard_navigation(command: str, total: int) -> bool:
     if command in {"다음", "next", "n", "이전", "prev", "previous", "p"}:
         return True
@@ -479,6 +499,9 @@ class BeginnerTuiController:
         mode = parse_mode_command(command)
         if mode:
             return self.activate_launch_mode(mode)
+        if is_greeting(command):
+            self.latest_message = greeting_response()
+            return self.current_screen()
         self.latest_message = handle_intermediate_request(command)
         return self.current_screen()
 
@@ -493,6 +516,12 @@ class BeginnerTuiController:
         return self.current_screen()
 
     def handle_chat_message(self, command: str) -> str:
+        if is_greeting(command):
+            response = greeting_response()
+            self.latest_message = response
+            final_analysis = analyze_project(self.project_path)
+            self._save_chat_session(command, response, [], final_analysis)
+            return response
         result = self._invoke_deepagents(command, agent_mode="AutoFix")
         applied_changes: list[AppliedChange] = []
         final_analysis = analyze_project(self.project_path)
