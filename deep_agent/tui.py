@@ -327,10 +327,15 @@ class BeginnerTuiController:
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
     def render_log(self) -> str:
+        log_text = "\n\n".join(self.log_lines[-12:])
         if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
-            return self.current_screen()
+            screen = self.current_screen()
+            return f"{log_text}\n\n{screen}" if log_text else screen
         if self.selected_launch_mode == MODE_BEGINNER and self.latest_message:
-            return f"{self.latest_message}\n\n{self.current_screen()}"
+            parts = [part for part in [log_text, self.latest_message, self.current_screen()] if part]
+            return "\n\n".join(parts)
+        if log_text:
+            return f"{log_text}\n\n{self.current_screen()}"
         return self.current_screen()
 
     def activate_launch_mode(self, mode: str) -> str:
@@ -570,6 +575,7 @@ class BeginnerTuiController:
             response = greeting_response()
             self.latest_message = response
             final_analysis = analyze_project(self.project_path)
+            self._append_chat_log(command, response, [])
             self._save_chat_session(command, response, [], final_analysis)
             return response
         result = self._invoke_deepagents(command, agent_mode="AutoFix")
@@ -580,10 +586,12 @@ class BeginnerTuiController:
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
             self.latest_message = response
+            self._append_chat_log(command, response, applied_changes)
             self._save_chat_session(command, response, applied_changes, final_analysis)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
         self.latest_message = response
+        self._append_chat_log(command, response, applied_changes)
         self._save_chat_session(command, response, applied_changes, final_analysis)
         return response
 
@@ -631,6 +639,18 @@ class BeginnerTuiController:
         rows.append("")
         rows.append(f"최종 등록 상태: {final_analysis.registration_status}")
         return "\n".join(rows)
+
+    def _append_chat_log(
+        self,
+        user_message: str,
+        agent_response: str,
+        applied_changes: list[AppliedChange],
+    ) -> None:
+        rows = [f"나: {user_message}", f"Agent: {agent_response}"]
+        if applied_changes:
+            rows.append("수정사항:")
+            rows.extend(f"- {change.target}: {change.message}" for change in applied_changes)
+        self.log_lines.append("\n".join(rows))
 
     def _save_chat_session(
         self,
