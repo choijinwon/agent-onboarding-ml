@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import re
 import shlex
+import textwrap
 from threading import Thread
 from urllib.parse import unquote, urlparse
 
@@ -43,6 +44,7 @@ from deep_agent.qwen_chat import QwenChatConfig
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
+HELP_COMMANDS = {"/help", "help", "도움말", "/도움말", "?"}
 AGENT_MODES = ("Plan", "Build", "Chatbot")
 AGENT_MODE_DISPLAY = {
     "Plan": "PLAN",
@@ -78,6 +80,14 @@ class ModeSelector:
 
 
 class StatusBar:
+    pass
+
+
+class SendButton:
+    pass
+
+
+class FileButton:
     pass
 
 
@@ -126,6 +136,92 @@ def format_agent_mode_title(agent_mode: str) -> str:
     return f"{format_agent_mode_label(agent_mode)} MODE"
 
 
+def format_chat_card(
+    user_message: str,
+    agent_response: str,
+    applied_changes: list[AppliedChange] | None = None,
+) -> str:
+    changes = applied_changes or []
+    width = 76
+    divider = "  " + "-" * width
+    rows = [
+        divider,
+        f"  YOU    {user_message}",
+        "",
+        "  AGENT  response",
+        *indent_block(agent_response, "         "),
+    ]
+    if changes:
+        rows.extend(
+            [
+                "",
+                "  BUILD  changes",
+                *[f"         - {change.target}: {change.message}" for change in changes],
+            ]
+        )
+    rows.append(divider)
+    return "\n".join(rows)
+
+
+def indent_block(text: str, prefix: str) -> list[str]:
+    lines = str(text).splitlines() or [""]
+    return [f"{prefix}{line}" if line else prefix.rstrip() for line in lines]
+
+
+def format_tui_help_screen(
+    launch_mode: str | None = None,
+    agent_mode: str = "Plan",
+    project_path: str = "",
+    model: str = "qwen3.6",
+) -> str:
+    mode_label = MODE_LABELS.get(launch_mode or "", "모드 미선택")
+    project_text = project_path or "(프로젝트 경로 미선택)"
+    rows = [
+        "  ----------------------------------------------------------------------------",
+        "  HELP   AI ML Onboarding Console",
+        "",
+        f"  MODE   {mode_label} / {format_agent_mode_selector(agent_mode)}",
+        f"  MODEL  {model}",
+        f"  PATH   {project_text}",
+        "",
+        "  BASIC",
+        "         /help                  도움말 표시",
+        "         /exit                  종료",
+        "         Enter                  input 줄바꿈",
+        "         Ctrl+Enter             입력 제출",
+        "         /mode beginner         초급자 모드 전환",
+        "         /mode intermediate     중급자 모드 전환",
+        "         /mode advanced         고급자 모드 전환",
+        "",
+        "  AGENT",
+        "         plan                   읽기 전용 계획/검토",
+        "         build                  승인 후 수정/적용",
+        "         chat                   질문/응답/자동수정 대화",
+        "         /agent                 현재 Agent 모드 표시",
+        "",
+        "  PROJECT",
+        "         /path <경로>           프로젝트 경로 직접 입력",
+        "         /open [상위경로]       파일/폴더 열기",
+        "         /folder [상위경로]     폴더 목록에서 선택",
+        "         /file [상위경로]       파일 위치 기준으로 선택",
+        "         /sample tensorflow     TensorFlow 샘플 생성/선택",
+        "         /sample pytorch        PyTorch 샘플 생성/선택",
+        "         /sample large10        대형 모델 샘플 10개 생성",
+        "         /sample all            기본 샘플 생성",
+        "",
+        "  MODEL",
+        "         /model                 모델 목록 표시",
+        "         /model qwen3.6         Agent 모델 선택",
+        "",
+        "  WIZARD",
+        "         다음 / 이전            Step 이동",
+        "         1~10                   Step 번호 이동",
+        "         Step 6에서 1           승인 후 파일 생성/수정",
+        "  ----------------------------------------------------------------------------",
+    ]
+    return "\n".join(rows)
+
+
 def parse_agent_mode_command(command: str) -> str | None:
     parts = command.strip().split()
     if not parts:
@@ -164,7 +260,7 @@ def parse_model_command(command: str) -> str | None:
 def parse_folder_command(command: str) -> str | None:
     value = command.strip()
     lowered = value.lower()
-    for prefix in ("/folder", "/폴더", "/dir", "/디렉토리"):
+    for prefix in ("/folder", "/폴더", "/dir", "/디렉토리", "/open", "/열기", "/file", "/파일"):
         if lowered == prefix:
             return ""
         if lowered.startswith(prefix + " "):
@@ -183,16 +279,16 @@ def format_model_choices(models: list[str], current_model: str) -> str:
 
 def folder_selection_placeholder(folders: list[Path]) -> str:
     if not folders:
-        return "[Folder Select] 폴더 경로를 입력하세요"
-    return f"[Folder Select] Tab/화살표 선택, Enter 확정, 1-{len(folders)} 번호 가능"
+        return "[Open Folder] 폴더 경로를 입력하세요"
+    return f"[Open Folder] Tab/화살표 선택, Enter 확정, 1-{len(folders)} 번호 가능"
 
 
 def format_folder_choices(folders: list[Path], current_folder: Path | None = None) -> str:
-    lines = ["폴더를 선택하세요."]
+    lines = ["파일/폴더를 열 프로젝트 위치로 선택하세요."]
     for index, folder in enumerate(folders, start=1):
         marker = " (선택)" if current_folder is not None and folder == current_folder else ""
         lines.append(f"{index}. {folder}{marker}")
-    lines.append("번호를 입력하거나 /folder <기준경로>로 후보를 다시 불러올 수 있습니다.")
+    lines.append("번호를 입력하거나 /open <기준경로>로 후보를 다시 불러올 수 있습니다.")
     return "\n".join(lines)
 
 
@@ -372,6 +468,23 @@ def path_candidates_from_input(raw: str) -> list[str]:
         if candidate:
             candidates.append(candidate)
     return candidates or [value.strip()]
+
+
+def normalize_pasted_input(text: str) -> str:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
+    normalized = textwrap.dedent(normalized).strip("\n")
+    lines = [line.rstrip() for line in normalized.split("\n")]
+    compacted: list[str] = []
+    blank_seen = False
+    for line in lines:
+        if not line.strip():
+            if not blank_seen:
+                compacted.append("")
+            blank_seen = True
+            continue
+        compacted.append(line)
+        blank_seen = False
+    return "\n".join(compacted).strip()
 
 
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?[A-Za-z]:[\\/]")
@@ -591,7 +704,7 @@ class BeginnerTuiController:
 
     def should_show_thinking(self, raw: str) -> bool:
         command = raw.strip()
-        if not command or command in EXIT_COMMANDS or self.awaiting_model_selection:
+        if not command or command in EXIT_COMMANDS or command in HELP_COMMANDS or self.awaiting_model_selection:
             return False
         if self.selected_launch_mode is None:
             return False
@@ -617,7 +730,7 @@ class BeginnerTuiController:
 
     def set_thinking(self, raw: str) -> None:
         command = raw.strip()
-        self.latest_message = f"생각중...\n\n나: {command}"
+        self.latest_message = format_chat_card(command, "생각중...")
         self._append_or_replace_chat_log(command, "생각중...", [])
 
     @property
@@ -699,7 +812,7 @@ class BeginnerTuiController:
         self.folder_selection_index = 0
         self.awaiting_folder_selection = True
         if not self.folder_options:
-            message = "선택 가능한 폴더를 찾지 못했습니다. /folder <상위폴더경로> 형태로 다시 입력하세요."
+            message = "선택 가능한 폴더를 찾지 못했습니다. /open <상위폴더경로> 형태로 다시 입력하세요."
             self.latest_message = message
             return message
         message = format_folder_choices(self.folder_options, self.highlighted_folder)
@@ -732,6 +845,15 @@ class BeginnerTuiController:
 
     def submit(self, raw: str) -> str:
         command = raw.strip()
+        if command in HELP_COMMANDS:
+            message = format_tui_help_screen(
+                self.selected_launch_mode,
+                self.agent_mode,
+                self.project_path,
+                self.qwen_model,
+            )
+            self.latest_message = message
+            return message
         if self.selected_launch_mode is None:
             if command in EXIT_COMMANDS:
                 self.exited = True
@@ -817,6 +939,14 @@ class BeginnerTuiController:
         return self.handle_chat_message(command)
 
     def _submit_intermediate(self, command: str) -> str:
+        if command in HELP_COMMANDS:
+            self.latest_message = format_tui_help_screen(
+                self.selected_launch_mode,
+                self.agent_mode,
+                self.project_path,
+                self.qwen_model,
+            )
+            return self.current_screen()
         if command in EXIT_COMMANDS:
             self.exited = True
             return ""
@@ -840,6 +970,14 @@ class BeginnerTuiController:
         return self.current_screen()
 
     def _submit_advanced(self, command: str) -> str:
+        if command in HELP_COMMANDS:
+            self.latest_message = format_tui_help_screen(
+                self.selected_launch_mode,
+                self.agent_mode,
+                self.project_path,
+                self.qwen_model,
+            )
+            return self.current_screen()
         if command in EXIT_COMMANDS:
             self.exited = True
             return ""
@@ -953,7 +1091,7 @@ class BeginnerTuiController:
         agent_response: str,
         applied_changes: list[AppliedChange],
     ) -> None:
-        prefix = f"나: {user_message}\nAgent: "
+        prefix = f"  YOU    {user_message}\n"
         replacement = self._format_chat_log(user_message, agent_response, applied_changes)
         for index in range(len(self.log_lines) - 1, -1, -1):
             if self.log_lines[index].startswith(prefix):
@@ -972,11 +1110,7 @@ class BeginnerTuiController:
         agent_response: str,
         applied_changes: list[AppliedChange],
     ) -> str:
-        rows = [f"나: {user_message}", f"Agent: {agent_response}"]
-        if applied_changes:
-            rows.append("수정사항:")
-            rows.extend(f"- {change.target}: {change.message}" for change in applied_changes)
-        return "\n".join(rows)
+        return format_chat_card(user_message, agent_response, applied_changes)
 
     def _save_chat_session(
         self,
@@ -1107,13 +1241,13 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CommandInput, LogView, ModeSelector, StatusBar
+    global AIOnboardingTuiApp, CommandInput, FileButton, LogView, ModeSelector, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Vertical
-    from textual.widgets import Static, TextArea
+    from textual.containers import Horizontal, Vertical
+    from textual.widgets import Button, Static, TextArea
 
     class LogView(Static):
         pass
@@ -1143,7 +1277,7 @@ def run_tui(project_path: str = "") -> int:
 
         def on_paste(self, event: events.Paste) -> None:
             event.stop()
-            self.insert_text_at_cursor(event.text)
+            self.insert_text_at_cursor(normalize_pasted_input(event.text))
 
         def on_key(self, event) -> None:
             if event.key in {"ctrl+enter", "ctrl+j"}:
@@ -1151,6 +1285,12 @@ def run_tui(project_path: str = "") -> int:
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app._submit_command_input()
+                return
+            if event.key == "enter":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.insert_text_at_cursor("\n")
                 return
             if event.key == "tab":
                 event.stop()
@@ -1175,6 +1315,12 @@ def run_tui(project_path: str = "") -> int:
         pass
 
     class StatusBar(Static):
+        pass
+
+    class SendButton(Button):
+        pass
+
+    class FileButton(Button):
         pass
 
     class AIOnboardingTuiApp(App[None]):
@@ -1250,6 +1396,37 @@ def run_tui(project_path: str = "") -> int:
             color: #9a9a9a;
             background: #080808;
         }
+        #actions {
+            height: 3;
+            margin-top: 1;
+        }
+        #file {
+            width: 18;
+            height: 3;
+            margin-right: 1;
+            background: #2d333b;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #file.build {
+            background: #4a3720;
+        }
+        #file.chatbot {
+            background: #223a2b;
+        }
+        #send {
+            width: 1fr;
+            height: 3;
+            background: #1f6feb;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #send.build {
+            background: #b7791f;
+        }
+        #send.chatbot {
+            background: #238636;
+        }
         """
         BINDINGS = [
             Binding("tab", "toggle_agent", "agents", show=True, priority=True),
@@ -1269,6 +1446,9 @@ def run_tui(project_path: str = "") -> int:
                 yield LogView("", id="log")
                 yield ModeSelector("", id="mode-selector")
                 yield CommandInput(id="command")
+                with Horizontal(id="actions"):
+                    yield FileButton("FILE", id="file")
+                    yield SendButton("SEND  Ctrl+Enter", id="send")
                 yield StatusBar("", id="status")
 
         def on_mount(self) -> None:
@@ -1326,6 +1506,29 @@ def run_tui(project_path: str = "") -> int:
             command.value = ""
             self._submit_or_queue(value)
 
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "file":
+                event.stop()
+                self._open_folder_picker()
+                return
+            if event.button.id != "send":
+                return
+            event.stop()
+            self._submit_command_input()
+
+        def _open_folder_picker(self) -> None:
+            command = self.query_one(CommandInput)
+            base = command.value.strip()
+            command.value = ""
+            if self.controller.selected_launch_mode is None:
+                self.controller.latest_message = "먼저 모드를 선택하세요. 1=초급자, 2=중급자, 3=고급자"
+                self._refresh()
+                self._focus_command()
+                return
+            self.controller.start_folder_selection(base)
+            self._refresh(force_folder_value=True)
+            self._focus_command()
+
         def on_click(self) -> None:
             self._focus_command()
 
@@ -1343,7 +1546,7 @@ def run_tui(project_path: str = "") -> int:
                 return
             event.stop()
             self._focus_command()
-            command.insert_text_at_cursor(event.text.strip())
+            command.insert_text_at_cursor(normalize_pasted_input(event.text))
 
         def on_key(self, event) -> None:
             command = self.query_one(CommandInput)
@@ -1399,10 +1602,6 @@ def run_tui(project_path: str = "") -> int:
                 self.action_previous_agent()
                 return
             if self.focused is command:
-                return
-            if event.key == "enter":
-                event.stop()
-                self._submit_command_input()
                 return
             if event.key in {"ctrl+enter", "ctrl+j"}:
                 event.stop()
@@ -1483,6 +1682,12 @@ def run_tui(project_path: str = "") -> int:
                 command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
             command.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            send = self.query_one(SendButton)
+            send.set_class(self.controller.agent_mode == "Build", "build")
+            send.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            file_button = self.query_one(FileButton)
+            file_button.set_class(self.controller.agent_mode == "Build", "build")
+            file_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).update(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
@@ -1507,22 +1712,26 @@ __all__ = [
     "BeginnerTuiController",
     "available_models_from_config",
     "CommandInput",
+    "FileButton",
     "discover_selectable_folders",
     "folder_selection_placeholder",
     "format_folder_choices",
     "ModeSelector",
+    "SendButton",
     "LogView",
     "StatusBar",
     "format_agent_mode_selector",
     "format_model_choices",
     "format_tui_model_info",
     "format_tui_chatbot_screen",
+    "format_tui_help_screen",
     "is_fix_request",
     "is_greeting",
     "is_right_click_event",
     "is_wizard_navigation",
     "model_selection_placeholder",
     "normalize_input_path",
+    "normalize_pasted_input",
     "normalize_path_text",
     "path_candidates_from_input",
     "parse_agent_mode_command",
