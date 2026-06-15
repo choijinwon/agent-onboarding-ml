@@ -1705,6 +1705,8 @@ class WindowsSetupTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
         self.assertIn("TextArea", source)
+        self.assertIn('Binding("enter", "submit_input"', source)
+        self.assertIn("def action_submit_input", source)
         self.assertIn("async def _on_key", source)
         self.assertIn("await super()._on_key(event)", source)
         self.assertIn("def _handle_submit_keys", source)

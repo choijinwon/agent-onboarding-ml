@@ -1450,6 +1450,7 @@ def run_tui(project_path: str = "") -> int:
         }
         """
         BINDINGS = [
+            Binding("enter", "submit_input", "send", show=False, priority=True),
             Binding("tab", "toggle_agent", "agents", show=True, priority=True),
             Binding("shift+tab", "previous_agent", "prev agent", show=False, priority=True),
             Binding("ctrl+space", "insert_input_gap", "input gap", show=False, priority=True),
@@ -1521,6 +1522,9 @@ def run_tui(project_path: str = "") -> int:
             command = self.query_one(CommandInput)
             self.set_focus(command)
             command.insert_text_at_cursor("    ")
+
+        def action_submit_input(self) -> None:
+            self._submit_command_input()
 
         def _submit_command_input(self) -> None:
             command = self.query_one(CommandInput)
