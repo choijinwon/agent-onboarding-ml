@@ -29,6 +29,7 @@ from deep_agent.cli import (
     build_parser,
     create_heavy_model_sample,
     create_large_model_samples,
+    ensure_ai_studio_sample_runtime,
     format_beginner_tab,
     handle_advanced_input,
     handle_intermediate_request,
@@ -237,11 +238,12 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant.run_beginner_mode()
 
             self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertEqual(train.read_text(), "print('train')\n")
+            self.assertTrue((root / "run_model.py").exists())
             self.assertIn("선택 번호 > ", prompts)
             self.assertTrue(any("1번 적용을 승인했습니다" in output for output in outputs))
             step7_output = next(output for output in outputs if "Current: Tab 7/10" in output)
-            self.assertIn("적용 완료: 3개", step7_output)
+            self.assertIn("적용 완료: 2개", step7_output)
             self.assertIn("등록 상태: 등록 가능", step7_output)
 
     def test_beginner_console_step4_choice_one_moves_to_preview(self):
@@ -316,6 +318,7 @@ class BeginnerWizardTest(unittest.TestCase):
                 "    with mlflow.start_run():\n"
                 "        mlflow.log_metric('accuracy', 0.9)\n"
             )
+            ensure_ai_studio_sample_runtime(root)
             (root / "model").mkdir()
             (root / "model" / "model.pkl").write_text("sample")
 
@@ -343,7 +346,7 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("Step 4. 문제 목록 확인", output)
-            self.assertIn("필수 확인: 0개", output)
+            self.assertIn("필수 확인: 1개", output)
             self.assertIn("보완 권장:", output)
             self.assertIn("Agent 수정 가능:", output)
             self.assertIn("주요 문제:", output)
@@ -367,7 +370,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("dry-run 결과입니다", output)
             self.assertIn("MLflow 의존성 추가", output)
             self.assertIn("+ mlflow", output)
-            self.assertIn("MLflow 기록 코드 추가", output)
+            self.assertIn("AI Studio MLflow 등록 스캐폴드 생성", output)
             self.assertIn("적용하려면 다음 단계에서 1번을 선택합니다", output)
 
     def test_beginner_wizard_shows_step6_approval_choices(self):
@@ -421,13 +424,14 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("Step 6에서 1번 승인 후에만", output)
             self.assertIn("삭제 작업은 수행하지 않습니다.", output)
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
-            self.assertIn("train.py: MLflow 기록 코드 추가", output)
+            self.assertIn(".: AI Studio MLflow 등록 스캐폴드 생성", output)
 
     def test_beginner_wizard_shows_step9_local_serving(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "requirements.txt").write_text("mlflow==2.17.0\n")
             (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
             (root / "model.onnx").write_text("sample")
 
             output = build_beginner_wizard(str(root))
@@ -443,6 +447,7 @@ class BeginnerWizardTest(unittest.TestCase):
             root = Path(tmpdir)
             (root / "requirements.txt").write_text("mlflow==2.17.0\n")
             (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
             (root / "model.onnx").write_text("sample")
 
             steps = build_beginner_step_tabs(str(root))
@@ -559,18 +564,18 @@ class BeginnerWizardTest(unittest.TestCase):
             wizard = build_beginner_wizard(str(sample))
             self.assertIn("tensorflow-sample.keras", wizard)
             self.assertIn("MLflow 의존성 추가", wizard)
-            self.assertIn("MLflow 기록 코드 추가", wizard)
             self.assertIn("적용하기", wizard)
 
             dry_run = json.loads(handle_advanced_input(f"ml-agent fix {sample} --dry-run --json"))
-            self.assertEqual(len(dry_run["fix_previews"]), 3)
+            self.assertEqual(len(dry_run["fix_previews"]), 1)
             self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
 
             applied = json.loads(handle_advanced_input(f"ml-agent apply {sample} --json"))
             self.assertEqual(applied["command"], "apply")
-            self.assertEqual(len(applied["applied_changes"]), 3)
+            self.assertEqual(len(applied["applied_changes"]), 1)
             self.assertIn("mlflow", (sample / "requirements.txt").read_text().lower())
-            self.assertIn("import mlflow", (sample / "train.py").read_text())
+            self.assertNotIn("import mlflow", (sample / "train.py").read_text())
+            self.assertTrue((sample / "run_model.py").exists())
             self.assertTrue((sample / "config.json").exists())
             self.assertEqual(analyze_project(str(sample)).registration_status, "등록 가능")
 
@@ -697,7 +702,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("pytorch-model: 등록 가능", message)
             self.assertIn("sora-video-model: 등록 가능", message)
             self.assertIn("issues=0", message)
-            self.assertIn("issues=2", message)
+            self.assertIn("issues=1", message)
 
     def test_large10_sample_alias_creates_ten_large_model_projects(self):
         with TemporaryDirectory() as tmpdir:
@@ -752,7 +757,8 @@ class ProjectAnalysisTest(unittest.TestCase):
 
             self.assertEqual(analysis.registration_status, "보완 필요")
             self.assertFalse(analysis.has_mlflow_dependency)
-            self.assertIn("train.py", analysis.entrypoint_candidates)
+            self.assertNotIn("train.py", analysis.entrypoint_candidates)
+            self.assertFalse(analysis.entrypoint_candidates)
             self.assertTrue(any(issue.code == "MLFLOW_DEPENDENCY_MISSING" for issue in analysis.issue_details))
 
 
@@ -799,6 +805,7 @@ class AdvancedModeTest(unittest.TestCase):
                 "if __name__ == \"__main__\":\n"
                 "    mlflow.log_param('x', 1)\n"
             )
+            ensure_ai_studio_sample_runtime(root)
             (root / "model.onnx").write_text("sample")
 
             output = handle_advanced_input(f"ml-agent validate {root} --json")
@@ -837,11 +844,11 @@ class AdvancedModeTest(unittest.TestCase):
             payload = json.loads(output)
 
             self.assertEqual(payload["command"], "fix")
-            self.assertIn("preview_items=3", payload["details"])
-            self.assertEqual(len(payload["fix_previews"]), 3)
+            self.assertIn("preview_items=2", payload["details"])
+            self.assertEqual(len(payload["fix_previews"]), 2)
             self.assertEqual(payload["fix_previews"][0]["code"], "ADD_MLFLOW_DEPENDENCY")
             self.assertTrue(payload["fix_previews"][0]["requires_approval"])
-            self.assertEqual(payload["fix_previews"][2]["code"], "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD")
+            self.assertEqual(payload["fix_previews"][1]["code"], "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD")
 
     def test_fix_json_contains_step6_approval_options(self):
         with TemporaryDirectory() as tmpdir:
@@ -886,11 +893,10 @@ class AdvancedModeTest(unittest.TestCase):
             payload = json.loads(output)
 
             self.assertEqual(payload["command"], "apply")
-            self.assertIn("applied_changes=3", payload["details"])
-            self.assertEqual(len(payload["applied_changes"]), 3)
+            self.assertIn("applied_changes=2", payload["details"])
+            self.assertEqual(len(payload["applied_changes"]), 2)
             self.assertIn("mlflow", requirements.read_text())
-            self.assertIn("import mlflow", train.read_text())
-            self.assertIn("MLflow tracking template", train.read_text())
+            self.assertEqual(train.read_text(), "print('train')\n")
             self.assertTrue((root / "config.json").exists())
             self.assertTrue((root / "ai_studio.env").exists())
             self.assertTrue((root / "input_example.json").exists())
@@ -918,6 +924,8 @@ class AdvancedModeTest(unittest.TestCase):
             requirements_text = requirements.read_text(encoding="utf-8")
             self.assertEqual(config["mlflow_tracking_url"], "${MLFLOW_TRACKING_URL}")
             self.assertEqual(config["model"]["artifact_path"], "ai_studio")
+            self.assertEqual(config["execution"]["entrypoint"], "run_model.py")
+            self.assertIn("train.py", config["execution"]["blocked_entrypoints"])
             self.assertIn("mlflow.pyfunc.log_model", logging_source)
             self.assertIn('os.getenv("AI_STUDIO_CONFIG_PATH"', logging_source)
             self.assertIn("python_model=ModelWrapper()", logging_source)
@@ -946,6 +954,7 @@ class AdvancedModeTest(unittest.TestCase):
             root = Path(tmpdir)
             (root / "requirements.txt").write_text("mlflow\nscikit-learn\n")
             (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
             (root / "model.onnx").write_text("sample")
 
             output = handle_advanced_input(f"ml-agent serve {root} --dry-run --json")
@@ -964,6 +973,7 @@ class AdvancedModeTest(unittest.TestCase):
             root = Path(tmpdir)
             (root / "requirements.txt").write_text("mlflow\nscikit-learn\n")
             (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
             (root / "model.onnx").write_text("sample")
 
             output = handle_advanced_input(f"ml-agent report {root} --json")
@@ -1337,6 +1347,12 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertNotIn("insert_text_at_cursor(event.character)", source)
 
+    def test_tui_input_supports_ctrl_space_gap(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn('"ctrl+space"', source)
+        self.assertIn('insert_text_at_cursor("    ")', source)
+
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
         self.assertIn("Tab/화살표", model_selection_placeholder(["qwen3.6"]))
@@ -1588,7 +1604,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.agent_mode, "Build")
             self.assertIn("Current: Tab 7/10", output)
             self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertNotIn("import mlflow", train.read_text())
+            self.assertTrue((root / "run_model.py").exists())
 
     def test_tui_chat_without_deepagents_config_does_not_modify_files(self):
         with TemporaryDirectory() as tmpdir:
@@ -1706,7 +1723,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("자동 수정 결과", output)
             self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "AutoFix"))
             self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertNotIn("import mlflow", train.read_text())
+            self.assertTrue((root / "run_model.py").exists())
             self.assertEqual(controller.index, 6)
             self.assertIn("나: 코드 자동 수정해줘", controller.render_log())
             self.assertIn("수정사항:", controller.render_log())
@@ -1760,7 +1778,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 6)
             self.assertIn("Current: Tab 7/10", output)
             self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertNotIn("import mlflow", train.read_text())
+            self.assertTrue((root / "run_model.py").exists())
 
     def test_tui_beginner_step6_approval_one_applies_without_manual_build_switch(self):
         with TemporaryDirectory() as tmpdir:
@@ -1780,7 +1799,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 6)
             self.assertIn("Current: Tab 7/10", output)
             self.assertIn("mlflow", requirements.read_text().lower())
-            self.assertIn("import mlflow", train.read_text())
+            self.assertNotIn("import mlflow", train.read_text())
+            self.assertTrue((root / "run_model.py").exists())
 
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
         controller = self.beginner_tui("")

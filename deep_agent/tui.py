@@ -854,6 +854,12 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.app.action_previous_agent()
                 return
+            if event.key == "ctrl+space":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.insert_text_at_cursor("    ")
+                return
 
     class ModeSelector(Static):
         pass
@@ -938,6 +944,7 @@ def run_tui(project_path: str = "") -> int:
         BINDINGS = [
             Binding("tab", "toggle_agent", "agents", show=True, priority=True),
             Binding("shift+tab", "previous_agent", "prev agent", show=False, priority=True),
+            Binding("ctrl+space", "insert_input_gap", "input gap", show=False, priority=True),
             Binding("escape", "quit", "interrupt", show=True),
         ]
 
@@ -988,6 +995,11 @@ def run_tui(project_path: str = "") -> int:
             self._refresh()
             self._focus_command()
 
+        def action_insert_input_gap(self) -> None:
+            command = self.query_one(CommandInput)
+            self.set_focus(command)
+            command.insert_text_at_cursor("    ")
+
         def on_input_submitted(self, event: Input.Submitted) -> None:
             value = event.value
             command = self.query_one(CommandInput)
@@ -1021,6 +1033,13 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.controller.cycle_model_selection(1)
                 self._refresh(force_model_value=True)
+                self._focus_command()
+                return
+            if event.key == "ctrl+space":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                command.insert_text_at_cursor("    ")
                 self._focus_command()
                 return
             if event.key == "tab":

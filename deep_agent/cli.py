@@ -935,7 +935,7 @@ def render_rich_launch_screen() -> str:
         rich_card_line("2. 중급자 모드    Chat + Wizard", role="panel"),
         rich_card_line("3. 고급자 모드    CLI Command", role="panel"),
         rich_row(),
-        rich_row(".........  esc interrupt                    tab agents   ctrl+p commands", role="status"),
+        rich_row(".........  esc interrupt      ctrl+space gap   tab agents   ctrl+p commands", role="status"),
     ]
     return "\n".join(rows)
 
@@ -1381,6 +1381,8 @@ def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
     artifact.parent.mkdir(parents=True, exist_ok=True)
     (root / "requirements.txt").write_text("\n".join(spec.requirements) + "\n", encoding="utf-8")
     (root / "train.py").write_text(spec.train_body, encoding="utf-8")
+    if not spec.kind.endswith("_error"):
+        ensure_ai_studio_sample_runtime(root)
     (root / "README.md").write_text(
         f"# {spec.title} Wizard Sample\n\n"
         f"Sample kind: `{spec.kind}`\n\n"
@@ -1390,6 +1392,32 @@ def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
     )
     ensure_sparse_file(artifact, spec.artifact_size_bytes)
     return root
+
+
+def ensure_ai_studio_sample_runtime(root: Path) -> None:
+    config_path = root / "config.json"
+    if not config_path.exists():
+        config_path.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    env_path = root / "ai_studio.env"
+    if not env_path.exists():
+        env_path.write_text(ai_studio_env_source(), encoding="utf-8")
+    input_example_path = root / "input_example.json"
+    if not input_example_path.exists():
+        input_example_path.write_text(json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    custom_dir = root / "aiu_custom"
+    custom_dir.mkdir(exist_ok=True)
+    init_path = custom_dir / "__init__.py"
+    if not init_path.exists():
+        init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
+    wrapper_path = custom_dir / "model_wrapper.py"
+    if not wrapper_path.exists():
+        wrapper_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+    logging_path = root / "mlflow_ai_studio_logging.py"
+    if not logging_path.exists():
+        logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
+    run_model_path = root / "run_model.py"
+    if not run_model_path.exists():
+        run_model_path.write_text(run_model_source(), encoding="utf-8")
 
 
 def ensure_sparse_file(path: Path, size_bytes: int) -> None:
@@ -1509,7 +1537,7 @@ def render_rich_beginner_tab(
             rich_row(width=width),
             rich_input_panel_line("█", width=width),
             rich_input_panel_line("plan", "build", "chatbot", width=width),
-            rich_row(".........  esc interrupt                    ctrl+t variants   tab agents   ctrl+p commands", role="status", width=width),
+            rich_row(".........  esc interrupt      ctrl+space gap   tab agents   ctrl+p commands", role="status", width=width),
             rich_row(f"Current: Tab {index + 1}/{total} | {mode_line} | {title}", role="status", width=width),
         ]
     )
@@ -1589,7 +1617,7 @@ def render_tui_footer(index: int) -> str:
     mode_line = render_agent_switcher(index)
     cursor = "█" if rich_console_enabled() else ""
     input_line = "| " + cursor.ljust(width - 2) + " |"
-    shortcut_line = f"| {truncate_cell(command, 57).ljust(57)} esc interrupt   tab agents   ctrl+p commands |"
+    shortcut_line = f"| {truncate_cell(command, 48).ljust(48)} esc interrupt   ctrl+space gap   tab agents |"
     rows = [
         "+" + "-" * width + "+",
         input_line,
@@ -1762,13 +1790,13 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
                 "ENTRYPOINT_MISSING",
                 "blocker",
                 "학습 시작 파일 없음",
-                "train.py 또는 main.py",
+                "run_model.py",
                 "플랫폼 Job Template은 어떤 파일을 실행해야 하는지 알아야 합니다.",
-                "train.py 또는 main.py처럼 실행 진입점을 확인할 수 있는 파일을 준비하세요.",
+                "AI Studio 실행 진입점은 run_model.py로 준비하세요. train.py는 직접 실행 후보에서 제외됩니다.",
                 False,
             )
         )
-        next_actions.append("train.py 또는 main.py처럼 실행 진입점을 확인할 수 있는 파일을 준비하세요.")
+        next_actions.append("AI Studio 실행 진입점은 run_model.py로 준비하세요. train.py는 직접 실행 후보에서 제외됩니다.")
     if not mlflow_usage_files:
         issues.append("학습 코드에서 MLflow 사용 흔적을 찾지 못했습니다.")
         issue_details.append(
@@ -1973,7 +2001,7 @@ def build_registration_checks(
             code="entrypoint",
             label="학습 시작 파일",
             status="pass" if entrypoint_candidates else "block",
-            detail=format_count(entrypoint_candidates) if entrypoint_candidates else "train.py 또는 main.py 후보 없음",
+            detail=format_count(entrypoint_candidates) if entrypoint_candidates else "run_model.py 후보 없음",
         ),
         RegistrationCheck(
             code="model_artifact",
@@ -2038,7 +2066,7 @@ def build_local_serving_plan(
             "serving_entrypoint",
             "서빙 entrypoint",
             "pass" if entrypoint_candidates else "warn",
-            format_count(entrypoint_candidates) if entrypoint_candidates else "train.py 또는 main.py 확인 필요",
+            format_count(entrypoint_candidates) if entrypoint_candidates else "run_model.py 확인 필요",
         )
     )
     checks.append(
@@ -2112,7 +2140,8 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
                 preview_lines=["+ mlflow"],
             )
         )
-    if "MLFLOW_CODE_MISSING" in issue_codes:
+    scaffold_missing = ai_studio_scaffold_missing(analysis.path)
+    if "MLFLOW_CODE_MISSING" in issue_codes and not scaffold_missing:
         target = analysis.entrypoint_candidates[0] if analysis.entrypoint_candidates else "train.py"
         previews.append(
             FixPreview(
@@ -2128,7 +2157,7 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
                 ],
             )
         )
-    if ai_studio_scaffold_missing(analysis.path):
+    if scaffold_missing:
         previews.append(
             FixPreview(
                 code="CREATE_AI_STUDIO_MLFLOW_SCAFFOLD",
@@ -2411,6 +2440,10 @@ def default_ai_studio_config() -> dict[str, object]:
             "code_path": ["aiu_custom"],
             "requirements": "requirements.txt",
         },
+        "execution": {
+            "entrypoint": "run_model.py",
+            "blocked_entrypoints": ["train.py"],
+        },
         "training": {
             "epochs": 10,
             "learning_rate": 0.001,
@@ -2657,22 +2690,10 @@ def list_project_files(root: Path, suffixes: set[str], limit: int) -> list[Path]
 
 
 def find_entrypoint_candidates(root: Path, python_files: list[Path]) -> list[str]:
-    preferred = [
-        root / "train.py",
-        root / "main.py",
-        root / "src" / "train.py",
-        root / "src" / "main.py",
-    ]
-    candidates = [relative_path(path, root) for path in preferred if path.exists()]
-    for path in python_files:
-        if len(candidates) >= 8:
-            break
-        if relative_path(path, root) in candidates:
-            continue
-        text = safe_read_text(path)
-        if "argparse" in text or 'if __name__ == "__main__"' in text or "if __name__ == '__main__'" in text:
-            candidates.append(relative_path(path, root))
-    return candidates
+    run_model = root / "run_model.py"
+    if run_model.exists():
+        return ["run_model.py"]
+    return []
 
 
 def file_mentions(path: Path, token: str) -> bool:
