@@ -102,11 +102,15 @@ def format_agent_mode_selector(agent_mode: str) -> str:
 
 def parse_agent_mode_command(command: str) -> str | None:
     parts = command.strip().split()
-    if not parts or parts[0] not in {"/agent", "/에이전트"}:
+    if not parts:
         return None
+    if parts[0] in {"/agent", "/에이전트"}:
+        if len(parts) == 1:
+            return ""
+        return AGENT_MODE_ALIASES.get(parts[1].strip().lower().removesuffix("모드"))
     if len(parts) == 1:
-        return ""
-    return AGENT_MODE_ALIASES.get(parts[1].strip().lower())
+        return AGENT_MODE_ALIASES.get(parts[0].strip().lower().removesuffix("모드"))
+    return None
 
 
 def model_selection_placeholder(models: list[str]) -> str:
@@ -352,12 +356,14 @@ class BeginnerTuiController:
         command = raw.strip()
         if not command or command in EXIT_COMMANDS or self.awaiting_model_selection:
             return False
-        if self.selected_launch_mode is None or self.selected_launch_mode == MODE_ADVANCED:
+        if self.selected_launch_mode is None:
+            return False
+        if self.selected_launch_mode == MODE_ADVANCED and self.agent_mode != "Chatbot":
             return False
         if parse_mode_command(command) or parse_agent_mode_command(command) is not None or parse_model_command(command) is not None:
             return False
-        if self.selected_launch_mode == MODE_INTERMEDIATE:
-            return True
+        if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
+            return self.agent_mode == "Chatbot"
         if self.selected_launch_mode != MODE_BEGINNER or self.agent_mode != "Chatbot":
             return False
         path_value, is_path_command = strip_path_command(command)
@@ -523,6 +529,16 @@ class BeginnerTuiController:
         mode = parse_mode_command(command)
         if mode:
             return self.activate_launch_mode(mode)
+        agent_mode = parse_agent_mode_command(command)
+        if agent_mode is not None:
+            if not agent_mode:
+                self.latest_message = format_agent_mode_selector(self.agent_mode)
+                return self.current_screen()
+            self.select_agent_mode(agent_mode)
+            return self.current_screen()
+        if self.agent_mode == "Chatbot":
+            response = self.handle_chat_message(command)
+            return self.current_screen() if response else response
         if is_greeting(command):
             self.latest_message = greeting_response()
             return self.current_screen()
@@ -536,6 +552,16 @@ class BeginnerTuiController:
         mode = parse_mode_command(command)
         if mode:
             return self.activate_launch_mode(mode)
+        agent_mode = parse_agent_mode_command(command)
+        if agent_mode is not None:
+            if not agent_mode:
+                self.latest_message = format_agent_mode_selector(self.agent_mode)
+                return self.current_screen()
+            self.select_agent_mode(agent_mode)
+            return self.current_screen()
+        if self.agent_mode == "Chatbot":
+            response = self.handle_chat_message(command)
+            return self.current_screen() if response else response
         self.latest_message = handle_advanced_input(command)
         return self.current_screen()
 

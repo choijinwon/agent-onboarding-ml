@@ -1091,8 +1091,44 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("MLflow 설정만 확인해줘")
 
-        self.assertIn("MLflow 설정 검증", output)
+        self.assertIn("DeepAgents runtime", output)
         self.assertIn("무엇을 하시겠습니까?", output)
+
+    def test_tui_intermediate_chatbot_routes_through_runtime(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("중급자 Chatbot 응답", True)
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            fake = FakeRuntime()
+            controller = BeginnerTuiController("", deepagents_runtime=fake)
+            controller.submit("2")
+            controller.project_path = str(root)
+
+            output = controller.submit("프로젝트 분석해줘")
+
+            self.assertIn("중급자 Chatbot 응답", output)
+            self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
+
+    def test_tui_direct_agent_mode_words_switch_modes(self):
+        controller = self.beginner_tui("")
+
+        controller.submit("chatbot")
+        self.assertEqual(controller.agent_mode, "Chatbot")
+
+        controller.submit("build")
+        self.assertEqual(controller.agent_mode, "Build")
+
+        controller.submit("plan")
+        self.assertEqual(controller.agent_mode, "Plan")
 
     def test_tui_intermediate_mode_answers_greeting(self):
         controller = BeginnerTuiController("")
@@ -1128,6 +1164,8 @@ class WindowsSetupTest(unittest.TestCase):
         advanced = BeginnerTuiController("")
         advanced.submit("3")
         self.assertFalse(advanced.should_show_thinking("analyze ."))
+        advanced.submit("chatbot")
+        self.assertTrue(advanced.should_show_thinking("하이"))
 
     def test_tui_advanced_mode_handles_cli_style_input(self):
         controller = BeginnerTuiController("")
@@ -1138,6 +1176,16 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("analyze:", output)
         self.assertIn("exit_code:", output)
         self.assertIn("사용 가능한 명령어", output)
+
+    def test_tui_advanced_chatbot_mode_handles_chat_input(self):
+        controller = BeginnerTuiController("")
+        controller.submit("3")
+        controller.submit("chatbot")
+
+        output = controller.submit("하이")
+
+        self.assertIn("안녕하세요", output)
+        self.assertNotIn("unknown command", output.lower())
 
     def test_tui_command_placeholder_shows_active_agent_mode(self):
         self.assertEqual(command_placeholder_for_mode("Plan"), "")
@@ -1151,6 +1199,10 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(parse_agent_mode_command("/agent plan"), "Plan")
         self.assertEqual(parse_agent_mode_command("/agent build"), "Build")
         self.assertEqual(parse_agent_mode_command("/agent chat"), "Chatbot")
+        self.assertEqual(parse_agent_mode_command("plan"), "Plan")
+        self.assertEqual(parse_agent_mode_command("build"), "Build")
+        self.assertEqual(parse_agent_mode_command("chatbot"), "Chatbot")
+        self.assertEqual(parse_agent_mode_command("쳇봇모드"), "Chatbot")
         self.assertEqual(parse_agent_mode_command("/에이전트 챗봇"), "Chatbot")
         self.assertEqual(parse_agent_mode_command("/agent"), "")
         self.assertIsNone(parse_agent_mode_command("agent chat"))
