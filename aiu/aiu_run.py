@@ -1293,6 +1293,11 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertNotIn("/path", command_placeholder_for_mode("Plan", "qwen3.6"))
         self.assertNotIn("/model", command_placeholder_for_mode("Build", "gamma"))
 
+    def test_tui_input_does_not_manually_insert_printable_characters(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("insert_text_at_cursor(event.character)", source)
+
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
         self.assertIn("Tab/화살표", model_selection_placeholder(["qwen3.6"]))

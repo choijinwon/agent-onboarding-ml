@@ -820,11 +820,13 @@ def run_tui(project_path: str = "") -> int:
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app.action_toggle_agent()
+                return
             if event.key == "shift+tab":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.app.action_previous_agent()
+                return
 
     class ModeSelector(Static):
         pass
@@ -1014,10 +1016,6 @@ def run_tui(project_path: str = "") -> int:
                 command.value = ""
                 self._submit_or_queue(value)
                 return
-            if event.character:
-                event.stop()
-                self._focus_command()
-                command.insert_text_at_cursor(event.character)
 
         def _submit_or_queue(self, value: str) -> None:
             if self.controller.should_show_thinking(value):
