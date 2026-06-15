@@ -34,6 +34,7 @@ from deep_agent.cli import (
     format_model_parameters,
     handle_advanced_input,
     handle_intermediate_request,
+    list_existing_work_projects,
     copy_text_to_clipboard,
     parse_mode,
     parse_mode_command,
@@ -594,6 +595,17 @@ def folder_has_project_signals(path: Path) -> bool:
 def discover_selectable_folders(base: str = "", limit: int = 30) -> list[Path]:
     config = AppConfig.load()
     roots: list[Path] = []
+    folders: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_folder(candidate: Path) -> bool:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            return False
+        seen.add(resolved)
+        folders.append(resolved)
+        return len(folders) >= limit
+
     if base.strip():
         selected = normalize_input_path(base)
         if selected is not None:
@@ -605,17 +617,19 @@ def discover_selectable_folders(base: str = "", limit: int = 30) -> list[Path]:
                 if path.exists():
                     roots.append(path.parent if path.is_file() else path)
     else:
+        for project in list_existing_work_projects():
+            if add_folder(project):
+                return folders
         roots.extend(
             [
-                Path.cwd(),
                 Path.cwd() / "work",
                 Path.cwd().parent / "work",
                 config.root_dir / "work",
+                config.root_dir.parent / "work",
+                Path.cwd(),
                 config.root_dir / ".aiu" / "sample_projects",
             ]
         )
-    folders: list[Path] = []
-    seen: set[Path] = set()
     for root in roots:
         if not root.exists() or not root.is_dir():
             continue
@@ -625,12 +639,7 @@ def discover_selectable_folders(base: str = "", limit: int = 30) -> list[Path]:
         except OSError:
             continue
         for candidate in candidates:
-            resolved = candidate.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            folders.append(resolved)
-            if len(folders) >= limit:
+            if add_folder(candidate):
                 return folders
     return folders
 

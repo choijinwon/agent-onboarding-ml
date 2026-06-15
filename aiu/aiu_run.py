@@ -2111,6 +2111,23 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.project_path, str(second.resolve()))
             self.assertIn("Current: Tab 1/10", output)
 
+    def test_tui_file_button_discovers_work_folder_samples_first(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                work_sample = Path(tmpdir) / "work" / "sora-work-model"
+                work_sample.mkdir(parents=True)
+                (work_sample / "requirements.txt").write_text("mlflow\n")
+                (work_sample / "run_model.py").write_text("print('run')\n")
+
+                folders = discover_selectable_folders()
+            finally:
+                os.chdir(cwd)
+
+            self.assertGreaterEqual(len(folders), 1)
+            self.assertEqual(folders[0], work_sample.resolve())
+
     def test_tui_controller_reports_missing_path_for_path_command(self):
         controller = self.beginner_tui("")
 
