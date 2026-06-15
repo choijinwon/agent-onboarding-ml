@@ -2136,10 +2136,12 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
                 target=".",
                 action="AI Studio 환경설정, config.json, input example, MLflow model logging 템플릿을 생성합니다.",
                 preview_lines=[
+                    "+ ai_studio.env",
                     "+ config.json",
                     "+ input_example.json",
                     "+ aiu_custom/model_wrapper.py",
                     "+ mlflow_ai_studio_logging.py",
+                    "+ run_model.py",
                     "+ requirements.txt: mlflow, cloudpickle, pandas, numpy 확인",
                     "+ mlflow.pyfunc.log_model(... artifact_path='ai_studio' ...)",
                 ],
@@ -2225,9 +2227,11 @@ def ai_studio_scaffold_missing(project_path: str) -> bool:
         return False
     required_paths = [
         root / "config.json",
+        root / "ai_studio.env",
         root / "input_example.json",
         root / "aiu_custom" / "model_wrapper.py",
         root / "mlflow_ai_studio_logging.py",
+        root / "run_model.py",
     ]
     return any(not path.exists() for path in required_paths)
 
@@ -2321,6 +2325,11 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
         config_path.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         created.append("config.json")
 
+    env_path = root / "ai_studio.env"
+    if not env_path.exists():
+        env_path.write_text(ai_studio_env_source(), encoding="utf-8")
+        created.append("ai_studio.env")
+
     input_example_path = root / "input_example.json"
     if not input_example_path.exists():
         input_example_path.write_text(json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -2342,6 +2351,11 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     if not logging_path.exists():
         logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
         created.append("mlflow_ai_studio_logging.py")
+
+    run_model_path = root / "run_model.py"
+    if not run_model_path.exists():
+        run_model_path.write_text(run_model_source(), encoding="utf-8")
+        created.append("run_model.py")
 
     requirements_path = root / "requirements.txt"
     changed_requirements = ensure_requirement_lines(requirements_path, AI_STUDIO_REQUIREMENTS)
@@ -2404,6 +2418,17 @@ def default_ai_studio_config() -> dict[str, object]:
             "optimizer": "SGD",
         },
     }
+
+
+def ai_studio_env_source() -> str:
+    return """# AI Studio MLflow environment.
+# Fill these values before running: python run_model.py --env-file ai_studio.env
+MLFLOW_TRACKING_URL=
+MLFLOW_TRACKING_USERNAME=
+MLFLOW_TRACKING_PASSWORD=
+MLFLOW_EXPERIMENT_NAME=ai-studio-onboarding
+MLFLOW_REGISTER_MODEL_NAME=ai-studio-model
+"""
 
 
 def default_input_example() -> dict[str, object]:
@@ -2493,7 +2518,7 @@ def build_input_example(config: dict):
 
 
 def main() -> None:
-    config_path = Path("config.json")
+    config_path = Path(os.getenv("AI_STUDIO_CONFIG_PATH", "config.json"))
     config = load_config(str(config_path))
 
     tracking_url = resolve_env(config["mlflow_tracking_url"])
@@ -2563,6 +2588,49 @@ def main() -> None:
             pip_requirements=config["model"]["requirements"],
             input_example=input_example,
         )
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def run_model_source() -> str:
+    return '''"""Run AI Studio MLflow model logging with an environment file."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+
+from mlflow_ai_studio_logging import main as run_mlflow_logging
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"AI Studio environment file not found: {path}")
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ[key] = value
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run AI Studio MLflow logging.")
+    parser.add_argument("--env-file", default="ai_studio.env", help="AI Studio environment file path")
+    parser.add_argument("--config", default="config.json", help="AI Studio config file path")
+    args = parser.parse_args()
+
+    load_env_file(Path(args.env_file))
+    if args.config != "config.json":
+        os.environ["AI_STUDIO_CONFIG_PATH"] = args.config
+    run_mlflow_logging()
 
 
 if __name__ == "__main__":
