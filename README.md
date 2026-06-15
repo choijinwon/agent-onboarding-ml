@@ -183,6 +183,10 @@ pip install ".[deepagents,tui]"
 예: `work/my-model/requirements.txt`, `work/my-model/train.py`, `work/my-model/model/model.pkl`
 TUI input에는 `/work my-model` 또는 `my-model`만 입력하면 됩니다.
 
+AI Studio 등록용 MLflow 스캐폴드는 승인 후 적용 시 자동 생성됩니다.
+생성 항목은 `config.json`, `input_example.json`, `aiu_custom/model_wrapper.py`, `mlflow_ai_studio_logging.py`이며 `requirements.txt`에는 `mlflow`, `cloudpickle`, `pandas`, `numpy`를 확인해 추가합니다.
+`config.json`에는 `mlflow_tracking_url`, `mlflow_tracking_username`, `mlflow_tracking_password`, `mlflow_experiment_name`, `mlflow_register_model_name`과 데이터/모델 저장 경로가 들어갑니다.
+
 ## 환경 변수
 
 `.env.example`에는 현재 POC 실행에 필요한 Qwen endpoint, 모델 목록, Deep Agent 옵션, 등록 패키지, 에러 로그, 스킬 경로만 포함되어 있습니다.

@@ -239,7 +239,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("선택 번호 > ", prompts)
             self.assertTrue(any("1번 적용을 승인했습니다" in output for output in outputs))
             step7_output = next(output for output in outputs if "Current: Tab 7/10" in output)
-            self.assertIn("적용 완료: 2개", step7_output)
+            self.assertIn("적용 완료: 3개", step7_output)
             self.assertIn("등록 상태: 등록 가능", step7_output)
 
     def test_beginner_console_step4_choice_one_moves_to_preview(self):
@@ -394,6 +394,11 @@ class BeginnerWizardTest(unittest.TestCase):
                 "    mlflow.log_param('x', 1)\n"
             )
             (root / "model.onnx").write_text("sample")
+            (root / "config.json").write_text("{}\n")
+            (root / "input_example.json").write_text("{}\n")
+            (root / "mlflow_ai_studio_logging.py").write_text("import mlflow\n")
+            (root / "aiu_custom").mkdir()
+            (root / "aiu_custom" / "model_wrapper.py").write_text("class ModelWrapper: pass\n")
 
             output = build_beginner_wizard(str(root))
 
@@ -554,14 +559,15 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("적용하기", wizard)
 
             dry_run = json.loads(handle_advanced_input(f"ml-agent fix {sample} --dry-run --json"))
-            self.assertEqual(len(dry_run["fix_previews"]), 2)
+            self.assertEqual(len(dry_run["fix_previews"]), 3)
             self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
 
             applied = json.loads(handle_advanced_input(f"ml-agent apply {sample} --json"))
             self.assertEqual(applied["command"], "apply")
-            self.assertEqual(len(applied["applied_changes"]), 2)
+            self.assertEqual(len(applied["applied_changes"]), 3)
             self.assertIn("mlflow", (sample / "requirements.txt").read_text().lower())
             self.assertIn("import mlflow", (sample / "train.py").read_text())
+            self.assertTrue((sample / "config.json").exists())
             self.assertEqual(analyze_project(str(sample)).registration_status, "등록 가능")
 
     def test_pytorch_korean_alias_creates_registerable_project(self):
@@ -827,10 +833,11 @@ class AdvancedModeTest(unittest.TestCase):
             payload = json.loads(output)
 
             self.assertEqual(payload["command"], "fix")
-            self.assertIn("preview_items=2", payload["details"])
-            self.assertEqual(len(payload["fix_previews"]), 2)
+            self.assertIn("preview_items=3", payload["details"])
+            self.assertEqual(len(payload["fix_previews"]), 3)
             self.assertEqual(payload["fix_previews"][0]["code"], "ADD_MLFLOW_DEPENDENCY")
             self.assertTrue(payload["fix_previews"][0]["requires_approval"])
+            self.assertEqual(payload["fix_previews"][2]["code"], "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD")
 
     def test_fix_json_contains_step6_approval_options(self):
         with TemporaryDirectory() as tmpdir:
@@ -875,12 +882,40 @@ class AdvancedModeTest(unittest.TestCase):
             payload = json.loads(output)
 
             self.assertEqual(payload["command"], "apply")
-            self.assertIn("applied_changes=2", payload["details"])
-            self.assertEqual(len(payload["applied_changes"]), 2)
+            self.assertIn("applied_changes=3", payload["details"])
+            self.assertEqual(len(payload["applied_changes"]), 3)
             self.assertIn("mlflow", requirements.read_text())
             self.assertIn("import mlflow", train.read_text())
             self.assertIn("MLflow tracking template", train.read_text())
+            self.assertTrue((root / "config.json").exists())
+            self.assertTrue((root / "input_example.json").exists())
+            self.assertTrue((root / "aiu_custom" / "model_wrapper.py").exists())
+            self.assertTrue((root / "mlflow_ai_studio_logging.py").exists())
             self.assertEqual(untouched.read_text(), "hello\n")
+
+    def test_apply_creates_ai_studio_mlflow_scaffold(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("scikit-learn==1.5.2\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.pkl").write_text("sample")
+
+            output = handle_advanced_input(f"ml-agent apply {root} --json")
+            payload = json.loads(output)
+
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            logging_source = (root / "mlflow_ai_studio_logging.py").read_text(encoding="utf-8")
+            wrapper_source = (root / "aiu_custom" / "model_wrapper.py").read_text(encoding="utf-8")
+            requirements_text = requirements.read_text(encoding="utf-8")
+            self.assertEqual(config["mlflow_tracking_url"], "${MLFLOW_TRACKING_URL}")
+            self.assertEqual(config["model"]["artifact_path"], "ai_studio")
+            self.assertIn("mlflow.pyfunc.log_model", logging_source)
+            self.assertIn("python_model=ModelWrapper()", logging_source)
+            self.assertIn("registered_model_name=registered_model_name", logging_source)
+            self.assertIn("class ModelWrapper", wrapper_source)
+            self.assertIn("cloudpickle", requirements_text)
+            self.assertTrue(any(change["code"] == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD" for change in payload["applied_changes"]))
 
     def test_apply_creates_requirements_when_missing(self):
         with TemporaryDirectory() as tmpdir:

@@ -140,6 +140,8 @@ aiu tui
 직접 만든 모델은 `work\<프로젝트명>\`에 넣으면 초급자 Step 1에 표시됩니다.
 예: `work\my-model\requirements.txt`, `work\my-model\train.py`, `work\my-model\model\model.pkl`
 TUI input에는 `/work my-model` 또는 `my-model`을 입력합니다.
+승인 후 적용하면 AI Studio 등록용 `config.json`, `input_example.json`, `aiu_custom\model_wrapper.py`, `mlflow_ai_studio_logging.py`도 함께 생성됩니다.
+MLflow 환경값은 `.env`의 `MLFLOW_TRACKING_URL`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `MLFLOW_EXPERIMENT_NAME`, `MLFLOW_REGISTER_MODEL_NAME`을 사용합니다.
 
 JSON 출력:
 

@@ -2128,6 +2128,23 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
                 ],
             )
         )
+    if ai_studio_scaffold_missing(analysis.path):
+        previews.append(
+            FixPreview(
+                code="CREATE_AI_STUDIO_MLFLOW_SCAFFOLD",
+                title="AI Studio MLflow 등록 스캐폴드 생성",
+                target=".",
+                action="AI Studio 환경설정, config.json, input example, MLflow model logging 템플릿을 생성합니다.",
+                preview_lines=[
+                    "+ config.json",
+                    "+ input_example.json",
+                    "+ aiu_custom/model_wrapper.py",
+                    "+ mlflow_ai_studio_logging.py",
+                    "+ requirements.txt: mlflow, cloudpickle, pandas, numpy 확인",
+                    "+ mlflow.pyfunc.log_model(... artifact_path='ai_studio' ...)",
+                ],
+            )
+        )
     return previews
 
 
@@ -2188,6 +2205,8 @@ def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[Ap
             changes.append(apply_add_mlflow_dependency(target))
         elif preview.code == "ADD_MLFLOW_TRACKING_SNIPPET":
             changes.append(apply_add_mlflow_tracking_snippet(target))
+        elif preview.code == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD":
+            changes.append(apply_create_ai_studio_mlflow_scaffold(root))
         else:
             changes.append(
                 AppliedChange(
@@ -2198,6 +2217,19 @@ def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[Ap
                 )
             )
     return changes
+
+
+def ai_studio_scaffold_missing(project_path: str) -> bool:
+    root = Path(project_path or ".")
+    if not root.exists() or not root.is_dir():
+        return False
+    required_paths = [
+        root / "config.json",
+        root / "input_example.json",
+        root / "aiu_custom" / "model_wrapper.py",
+        root / "mlflow_ai_studio_logging.py",
+    ]
+    return any(not path.exists() for path in required_paths)
 
 
 def safe_project_path(root: Path, relative: str) -> Path | None:
@@ -2275,6 +2307,267 @@ def apply_add_mlflow_tracking_snippet(target: Path) -> AppliedChange:
         status="applied",
         message="학습 코드에 MLflow 기록 템플릿을 추가했습니다.",
     )
+
+
+AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy"]
+
+
+def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
+    created: list[str] = []
+    updated: list[str] = []
+
+    config_path = root / "config.json"
+    if not config_path.exists():
+        config_path.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        created.append("config.json")
+
+    input_example_path = root / "input_example.json"
+    if not input_example_path.exists():
+        input_example_path.write_text(json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        created.append("input_example.json")
+
+    custom_dir = root / "aiu_custom"
+    custom_dir.mkdir(exist_ok=True)
+    init_path = custom_dir / "__init__.py"
+    if not init_path.exists():
+        init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
+        created.append("aiu_custom/__init__.py")
+
+    wrapper_path = custom_dir / "model_wrapper.py"
+    if not wrapper_path.exists():
+        wrapper_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+        created.append("aiu_custom/model_wrapper.py")
+
+    logging_path = root / "mlflow_ai_studio_logging.py"
+    if not logging_path.exists():
+        logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
+        created.append("mlflow_ai_studio_logging.py")
+
+    requirements_path = root / "requirements.txt"
+    changed_requirements = ensure_requirement_lines(requirements_path, AI_STUDIO_REQUIREMENTS)
+    if changed_requirements:
+        updated.append("requirements.txt")
+
+    if not created and not updated:
+        return AppliedChange(
+            code="CREATE_AI_STUDIO_MLFLOW_SCAFFOLD",
+            target=str(root),
+            status="skipped",
+            message="AI Studio MLflow 스캐폴드가 이미 있어 변경하지 않았습니다.",
+        )
+    parts = []
+    if created:
+        parts.append("생성: " + ", ".join(created))
+    if updated:
+        parts.append("수정: " + ", ".join(updated))
+    return AppliedChange(
+        code="CREATE_AI_STUDIO_MLFLOW_SCAFFOLD",
+        target=str(root),
+        status="applied",
+        message="AI Studio MLflow 등록 스캐폴드를 적용했습니다. " + " / ".join(parts),
+    )
+
+
+def ensure_requirement_lines(path: Path, requirements: list[str]) -> bool:
+    content = safe_read_text(path) if path.exists() else ""
+    existing = {line.strip().split("==", 1)[0].split(">=", 1)[0].lower() for line in content.splitlines() if line.strip()}
+    missing = [requirement for requirement in requirements if requirement.lower() not in existing]
+    if not missing:
+        return False
+    separator = "" if not content or content.endswith("\n") else "\n"
+    path.write_text(f"{content}{separator}" + "\n".join(missing) + "\n", encoding="utf-8")
+    return True
+
+
+def default_ai_studio_config() -> dict[str, object]:
+    return {
+        "mlflow_tracking_url": "${MLFLOW_TRACKING_URL}",
+        "mlflow_tracking_username": "${MLFLOW_TRACKING_USERNAME}",
+        "mlflow_tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
+        "mlflow_experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
+        "mlflow_register_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+        "data": {
+            "train_path": "data/train",
+            "test_path": "data/test",
+            "input_example_path": "input_example.json",
+        },
+        "model": {
+            "save_path": "saved_model",
+            "artifact_path": "ai_studio",
+            "code_path": ["aiu_custom"],
+            "requirements": "requirements.txt",
+        },
+        "training": {
+            "epochs": 10,
+            "learning_rate": 0.001,
+            "batch_size": 64,
+            "optimizer": "SGD",
+        },
+    }
+
+
+def default_input_example() -> dict[str, object]:
+    return {
+        "columns": ["feature_1", "feature_2", "feature_3"],
+        "data": [[0.1, 0.2, 0.3]],
+    }
+
+
+def ai_studio_model_wrapper_source() -> str:
+    return '''"""AI Studio MLflow pyfunc model wrapper."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import mlflow.pyfunc
+import pandas as pd
+
+
+class ModelWrapper(mlflow.pyfunc.PythonModel):
+    """Replace predict() with the real inference logic for your model."""
+
+    def load_context(self, context):
+        self.model_path = Path(context.artifacts["model"])
+        self.config_path = Path(context.artifacts["config"])
+
+    def predict(self, context, model_input):
+        if isinstance(model_input, pd.DataFrame):
+            return model_input.to_dict(orient="records")
+        return model_input
+'''
+
+
+def ai_studio_logging_source() -> str:
+    return '''"""AI Studio MLflow logging template.
+
+Fill the training and inference functions with project-specific logic before production use.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import mlflow
+import pandas as pd
+
+from aiu_custom import ModelWrapper
+
+
+def load_config(path: str = "config.json") -> dict:
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def resolve_env(value: str) -> str:
+    if value.startswith("${") and value.endswith("}"):
+        return os.getenv(value[2:-1], "")
+    return value
+
+
+def prepare_data(config: dict):
+    train_path = config["data"]["train_path"]
+    test_path = config["data"]["test_path"]
+    return {"train_path": train_path, "test_path": test_path}
+
+
+def build_model(config: dict):
+    return {"model_type": "replace-with-real-model"}
+
+
+def train_model(model, data, config: dict):
+    save_path = Path(config["model"]["save_path"])
+    save_path.mkdir(parents=True, exist_ok=True)
+    (save_path / "model.txt").write_text("replace with trained model artifact\\n", encoding="utf-8")
+    return save_path
+
+
+def build_input_example(config: dict):
+    input_example_path = Path(config["data"]["input_example_path"])
+    if input_example_path.exists():
+        payload = json.loads(input_example_path.read_text(encoding="utf-8"))
+        return pd.DataFrame(payload["data"], columns=payload["columns"])
+    return pd.DataFrame([[0.1, 0.2, 0.3]], columns=["feature_1", "feature_2", "feature_3"])
+
+
+def main() -> None:
+    config_path = Path("config.json")
+    config = load_config(str(config_path))
+
+    tracking_url = resolve_env(config["mlflow_tracking_url"])
+    if tracking_url:
+        mlflow.set_tracking_uri(tracking_url)
+    username = resolve_env(config["mlflow_tracking_username"])
+    password = resolve_env(config["mlflow_tracking_password"])
+    if username:
+        os.environ["MLFLOW_TRACKING_USERNAME"] = username
+    if password:
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = password
+
+    experiment_name = resolve_env(config["mlflow_experiment_name"]) or "ai-studio-onboarding"
+    registered_model_name = resolve_env(config["mlflow_register_model_name"]) or "ai-studio-model"
+    mlflow.set_experiment(experiment_name)
+
+    epochs = config["training"]["epochs"]
+    learning_rate = config["training"]["learning_rate"]
+    batch_size = config["training"]["batch_size"]
+    optimizer = config["training"].get("optimizer", "SGD")
+    loss_fn = type("LossFunction", (), {})()
+    metric_fn = type("MetricFunction", (), {})()
+
+    data = prepare_data(config)
+    model = build_model(config)
+    model_path = train_model(model, data, config)
+    input_example = build_input_example(config)
+
+    training_metadata_path = Path("training_metadata.json")
+    training_metadata_path.write_text(
+        json.dumps(
+            {
+                "train_data": data["train_path"],
+                "test_data": data["test_path"],
+                "saved_model": str(model_path),
+                "input_example": config["data"]["input_example_path"],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\\n",
+        encoding="utf-8",
+    )
+
+    with mlflow.start_run():
+        params = {
+            "epochs": epochs,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            "loss_function": loss_fn.__class__.__name__,
+            "metric_function": metric_fn.__class__.__name__,
+            "optimizer": optimizer,
+        }
+        mlflow.log_params(params)
+        mlflow.log_artifact(str(training_metadata_path))
+        mlflow.log_text(json.dumps({"model": str(model)}, ensure_ascii=False, indent=2), "model_summary.json")
+
+        mlflow.pyfunc.log_model(
+            python_model=ModelWrapper(),
+            artifact_path=config["model"]["artifact_path"],
+            code_path=config["model"]["code_path"],
+            artifacts={
+                "model": str(model_path),
+                "config": str(config_path),
+            },
+            registered_model_name=registered_model_name,
+            pip_requirements=config["model"]["requirements"],
+            input_example=input_example,
+        )
+
+
+if __name__ == "__main__":
+    main()
+'''
 
 
 def find_requirements_files(root: Path) -> list[Path]:
