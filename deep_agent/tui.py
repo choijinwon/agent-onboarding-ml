@@ -347,6 +347,29 @@ class BeginnerTuiController:
         self.latest_message = "지원하지 않는 모드입니다. 1, 2, 3 중 하나를 선택하세요."
         return self.current_screen()
 
+    def should_show_thinking(self, raw: str) -> bool:
+        command = raw.strip()
+        if not command or command in EXIT_COMMANDS or self.awaiting_model_selection:
+            return False
+        if self.selected_launch_mode is None or self.selected_launch_mode == MODE_ADVANCED:
+            return False
+        if parse_mode_command(command) or parse_agent_mode_command(command) is not None or parse_model_command(command) is not None:
+            return False
+        if self.selected_launch_mode == MODE_INTERMEDIATE:
+            return True
+        if self.selected_launch_mode != MODE_BEGINNER or self.agent_mode != "Chatbot":
+            return False
+        path_value, is_path_command = strip_path_command(command)
+        if is_path_command or command.startswith("/sample ") or command.startswith("/샘플 "):
+            return False
+        if is_wizard_navigation(command, self.total):
+            return False
+        return True
+
+    def set_thinking(self, raw: str) -> None:
+        command = raw.strip()
+        self.latest_message = f"생각중...\n\n입력: {command}"
+
     @property
     def qwen_model(self) -> str:
         return self.qwen_config.model if self.qwen_config else "qwen3.6"
@@ -855,12 +878,7 @@ def run_tui(project_path: str = "") -> int:
             value = event.value
             command = self.query_one(CommandInput)
             command.value = ""
-            self.controller.submit(value)
-            if self.controller.exited:
-                self.exit()
-                return
-            self._refresh()
-            self._focus_command()
+            self._submit_or_queue(value)
 
         def on_click(self) -> None:
             self._focus_command()
@@ -909,17 +927,29 @@ def run_tui(project_path: str = "") -> int:
                 event.stop()
                 value = command.value
                 command.value = ""
-                self.controller.submit(value)
-                if self.controller.exited:
-                    self.exit()
-                    return
-                self._refresh()
-                self._focus_command()
+                self._submit_or_queue(value)
                 return
             if event.character:
                 event.stop()
                 self._focus_command()
                 command.insert_text_at_cursor(event.character)
+
+        def _submit_or_queue(self, value: str) -> None:
+            if self.controller.should_show_thinking(value):
+                self.controller.set_thinking(value)
+                self._refresh()
+                self._focus_command()
+                self.call_later(self._submit_value, value)
+                return
+            self._submit_value(value)
+
+        def _submit_value(self, value: str) -> None:
+            self.controller.submit(value)
+            if self.controller.exited:
+                self.exit()
+                return
+            self._refresh()
+            self._focus_command()
 
         def _refresh(self, force_model_value: bool = False) -> None:
             command = self.query_one(CommandInput)
@@ -962,6 +992,7 @@ __all__ = [
     "format_agent_mode_selector",
     "format_model_choices",
     "is_fix_request",
+    "is_greeting",
     "is_wizard_navigation",
     "model_selection_placeholder",
     "normalize_input_path",

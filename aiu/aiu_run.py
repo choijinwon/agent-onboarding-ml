@@ -1103,6 +1103,32 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("안녕하세요", output)
         self.assertIn("AI ML 온보딩 Agent", output)
 
+    def test_tui_chatbot_input_sets_thinking_before_submit(self):
+        controller = BeginnerTuiController("")
+        controller.submit("2")
+
+        self.assertTrue(controller.should_show_thinking("하이"))
+        controller.set_thinking("하이")
+
+        self.assertIn("생각중", controller.render_log())
+        self.assertIn("입력: 하이", controller.render_log())
+
+    def test_tui_thinking_is_only_for_chatbot_text(self):
+        controller = BeginnerTuiController("")
+        self.assertFalse(controller.should_show_thinking("하이"))
+
+        controller.submit("1")
+        self.assertFalse(controller.should_show_thinking("/path /tmp/project"))
+        self.assertFalse(controller.should_show_thinking("/model"))
+        self.assertFalse(controller.should_show_thinking("다음"))
+
+        controller.select_agent_mode("Chatbot")
+        self.assertTrue(controller.should_show_thinking("프로젝트 분석해줘"))
+
+        advanced = BeginnerTuiController("")
+        advanced.submit("3")
+        self.assertFalse(advanced.should_show_thinking("analyze ."))
+
     def test_tui_advanced_mode_handles_cli_style_input(self):
         controller = BeginnerTuiController("")
         controller.submit("3")
