@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from deep_agent.app_config import AppConfig
+from deep_agent.app_config import AppConfig, ensure_read_write_directory
 
 
 SENSITIVE_KEYS = ("API_KEY", "TOKEN", "PASSWORD", "SECRET", "BASE_URL")
@@ -42,7 +42,7 @@ def chat_session_path(config: AppConfig, now: datetime | None = None) -> Path:
 
 def append_chat_session_event(config: AppConfig, event: dict[str, Any], now: datetime | None = None) -> Path:
     path = chat_session_path(config, now=now)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_read_write_directory(path.parent)
     timestamp = now or datetime.now(timezone.utc)
     payload = {
         "timestamp": timestamp.isoformat(),

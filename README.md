@@ -64,6 +64,8 @@ copy .env.example .env
 .\ml-agent.cmd init
 ```
 
+`init`은 `.aiu/`, `deep_agent/wiki/`, `deep_agent/skills/` 같은 관리 폴더를 만들고 Windows에서는 현재 사용자에게 읽기/쓰기 권한을 부여합니다.
+
 Python 확인:
 
 ```powershell
@@ -120,6 +122,7 @@ Windows 10/11:
 .\ml-agent.cmd fix .\project --dry-run
 .\ml-agent.cmd apply .\project
 .\ml-agent.cmd serve .\project --dry-run
+.\ml-agent.cmd register .\project --dry-run
 .\ml-agent.cmd report .\project
 .\ml-agent.cmd chat
 .\ml-agent.cmd tui
@@ -127,6 +130,8 @@ aiu tui
 .\ml-agent.cmd profile
 .\ml-agent.cmd config
 .\ml-agent.cmd init
+aiu sample list
+aiu sample create --kind tensorflow
 .\ml-agent.cmd prompts
 .\ml-agent.cmd errors list
 .\ml-agent.cmd errors analyze error-YYYYMMDDTHHMMSSZ
@@ -178,6 +183,7 @@ pip install ".[deepagents,tui]"
 
 초급자 Step 1에서 대형 모델 샘플 10개를 만들려면 `/sample large10`을 입력합니다.
 샘플은 `.aiu/sample_projects/` 아래에 생성되고 Git에는 포함되지 않습니다.
+CLI에서는 `aiu sample list`, `aiu sample create --kind tensorflow`, `aiu sample create --kind large10`으로 같은 샘플을 만들 수 있습니다.
 
 사용자가 직접 만든 모델 프로젝트는 `work/<프로젝트명>/`에 넣으면 초급자 Step 1에서 자동으로 표시됩니다.
 예: `work/my-model/requirements.txt`, `work/my-model/train.py`, `work/my-model/model/model.pkl`
@@ -186,7 +192,8 @@ TUI input에는 `/work my-model` 또는 `my-model`만 입력하면 됩니다.
 AI Studio 등록용 MLflow 스캐폴드는 승인 후 적용 시 자동 생성됩니다.
 생성 항목은 `ai_studio.env`, `config.json`, `input_example.json`, `aiu_custom/model_wrapper.py`, `mlflow_ai_studio_logging.py`, `run_model.py`이며 `requirements.txt`에는 `mlflow`, `cloudpickle`, `pandas`, `numpy`를 확인해 추가합니다.
 `config.json`에는 `mlflow_tracking_url`, `mlflow_tracking_username`, `mlflow_tracking_password`, `mlflow_experiment_name`, `mlflow_register_model_name`과 데이터/모델 저장 경로가 들어갑니다.
-AI Studio 값은 `ai_studio.env`에 입력한 뒤 `python run_model.py --env-file ai_studio.env`로 실행합니다.
+AI Studio 값은 `ai_studio.env`에 입력한 뒤 `python run_model.py --env-file ai_studio.env --register`로 실행합니다.
+`MLFLOW_TRACKING_URL`이 비어 있으면 로컬 `file:./mlruns` 저장소로 등록 테스트를 진행합니다.
 
 ## 환경 변수
 

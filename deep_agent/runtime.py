@@ -42,6 +42,7 @@ class DeepAgentsRuntime:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.app_config = config or AppConfig.load()
         self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
+        self._agent_cache: dict[tuple[str, str, str, str], Any] = {}
 
     def is_configured(self) -> bool:
         return self.qwen_config.is_configured()
@@ -68,6 +69,15 @@ class DeepAgentsRuntime:
             )
 
     def _create_agent(self, *, project_path: str, agent_mode: str):
+        cache_key = (
+            str(Path(project_path).expanduser()) if project_path else "",
+            agent_mode,
+            self.qwen_config.model,
+            self.qwen_config.base_url.rstrip("/"),
+        )
+        if cache_key in self._agent_cache:
+            return self._agent_cache[cache_key]
+
         _ensure_local_deepagents_on_path()
         from deepagents import create_deep_agent  # type: ignore
         from langchain_openai import ChatOpenAI  # type: ignore
@@ -78,12 +88,15 @@ class DeepAgentsRuntime:
             base_url=self.qwen_config.base_url.rstrip("/"),
             temperature=0.2,
         )
-        return create_deep_agent(
+        tools = [] if agent_mode == "Chat" else [analyze_ml_project, preview_ml_fixes, apply_ml_fixes]
+        agent = create_deep_agent(
             model=model,
-            tools=[analyze_ml_project, preview_ml_fixes, apply_ml_fixes],
+            tools=tools,
             system_prompt=build_deepagents_system_prompt(project_path, agent_mode),
             name="ai-ml-onboarding-deepagent",
         )
+        self._agent_cache[cache_key] = agent
+        return agent
 
 
 def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
@@ -95,6 +108,11 @@ def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
         )
     elif agent_mode == "Build":
         apply_policy = "Build mode: if the user asks to fix, modify, patch, or apply changes, you may call apply_ml_fixes."
+    elif agent_mode == "Chat":
+        apply_policy = (
+            "Chat mode: answer directly and concisely. Do not modify files. "
+            "Do not run project analysis unless the user explicitly asks for analysis, fixes, validation, or registration readiness."
+        )
     else:
         apply_policy = "Plan mode: do not modify files. Use analyze_ml_project and preview_ml_fixes only."
     return (
