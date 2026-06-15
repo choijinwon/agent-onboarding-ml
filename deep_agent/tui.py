@@ -133,12 +133,38 @@ def parse_model_command(command: str) -> str | None:
     return parts[1].strip()
 
 
+def parse_folder_command(command: str) -> str | None:
+    value = command.strip()
+    lowered = value.lower()
+    for prefix in ("/folder", "/폴더", "/dir", "/디렉토리"):
+        if lowered == prefix:
+            return ""
+        if lowered.startswith(prefix + " "):
+            return value[len(prefix) :].strip()
+    return None
+
+
 def format_model_choices(models: list[str], current_model: str) -> str:
     lines = ["모델을 선택하세요."]
     for index, model in enumerate(models, start=1):
         marker = " (현재)" if model == current_model else ""
         lines.append(f"{index}. {model}{marker}")
     lines.append("번호를 입력하거나 /model <모델명>으로 선택할 수 있습니다.")
+    return "\n".join(lines)
+
+
+def folder_selection_placeholder(folders: list[Path]) -> str:
+    if not folders:
+        return "[Folder Select] 폴더 경로를 입력하세요"
+    return f"[Folder Select] Tab/화살표 선택, Enter 확정, 1-{len(folders)} 번호 가능"
+
+
+def format_folder_choices(folders: list[Path], current_folder: Path | None = None) -> str:
+    lines = ["폴더를 선택하세요."]
+    for index, folder in enumerate(folders, start=1):
+        marker = " (선택)" if current_folder is not None and folder == current_folder else ""
+        lines.append(f"{index}. {folder}{marker}")
+    lines.append("번호를 입력하거나 /folder <기준경로>로 후보를 다시 불러올 수 있습니다.")
     return "\n".join(lines)
 
 
@@ -296,6 +322,65 @@ def normalize_input_path(raw: str) -> Path | None:
     return None
 
 
+def folder_has_project_signals(path: Path) -> bool:
+    signals = [
+        path / "requirements.txt",
+        path / "pyproject.toml",
+        path / "run_model.py",
+        path / "train.py",
+        path / "model",
+        path / "models",
+    ]
+    if any(signal.exists() for signal in signals):
+        return True
+    artifact_patterns = ("*.pkl", "*.joblib", "*.onnx", "*.pt", "*.pth", "*.keras", "*.h5", "*.safetensors")
+    return any(next(path.glob(pattern), None) is not None for pattern in artifact_patterns)
+
+
+def discover_selectable_folders(base: str = "", limit: int = 30) -> list[Path]:
+    config = AppConfig.load()
+    roots: list[Path] = []
+    if base.strip():
+        selected = normalize_input_path(base)
+        if selected is not None:
+            roots.append(selected)
+        else:
+            normalized = normalize_path_text(base)
+            if normalized:
+                path = Path(normalized).resolve()
+                if path.exists():
+                    roots.append(path.parent if path.is_file() else path)
+    else:
+        roots.extend(
+            [
+                Path.cwd(),
+                Path.cwd() / "work",
+                Path.cwd().parent / "work",
+                config.root_dir / "work",
+                config.root_dir / ".aiu" / "sample_projects",
+            ]
+        )
+    folders: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        candidates = [root] if folder_has_project_signals(root) else []
+        try:
+            candidates.extend(path for path in root.iterdir() if path.is_dir() and not path.name.startswith("."))
+        except OSError:
+            continue
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            folders.append(resolved)
+            if len(folders) >= limit:
+                return folders
+    return folders
+
+
 @dataclass
 class BeginnerTuiController:
     project_input: str = ""
@@ -309,6 +394,9 @@ class BeginnerTuiController:
     deepagents_runtime: DeepAgentsRuntime | None = None
     awaiting_model_selection: bool = False
     model_selection_index: int = 0
+    awaiting_folder_selection: bool = False
+    folder_selection_index: int = 0
+    folder_options: list[Path] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.project_path = ""
@@ -392,7 +480,12 @@ class BeginnerTuiController:
             return False
         if self.selected_launch_mode == MODE_ADVANCED and self.agent_mode != "Chatbot":
             return False
-        if parse_mode_command(command) or parse_agent_mode_command(command) is not None or parse_model_command(command) is not None:
+        if (
+            parse_mode_command(command)
+            or parse_agent_mode_command(command) is not None
+            or parse_model_command(command) is not None
+            or parse_folder_command(command) is not None
+        ):
             return False
         if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
             return self.agent_mode == "Chatbot"
@@ -477,6 +570,49 @@ class BeginnerTuiController:
         self.latest_message = message
         return message
 
+    @property
+    def highlighted_folder(self) -> Path | None:
+        if not self.folder_options:
+            return None
+        self.folder_selection_index %= len(self.folder_options)
+        return self.folder_options[self.folder_selection_index]
+
+    def start_folder_selection(self, base: str = "") -> str:
+        self.folder_options = discover_selectable_folders(base)
+        self.folder_selection_index = 0
+        self.awaiting_folder_selection = True
+        if not self.folder_options:
+            message = "선택 가능한 폴더를 찾지 못했습니다. /folder <상위폴더경로> 형태로 다시 입력하세요."
+            self.latest_message = message
+            return message
+        message = format_folder_choices(self.folder_options, self.highlighted_folder)
+        self.latest_message = message
+        return message
+
+    def cycle_folder_selection(self, delta: int = 1) -> str:
+        self.awaiting_folder_selection = True
+        if self.folder_options:
+            self.folder_selection_index = (self.folder_selection_index + delta) % len(self.folder_options)
+        highlighted = self.highlighted_folder
+        return str(highlighted) if highlighted else ""
+
+    def select_folder(self, value: str) -> str:
+        candidate = value.strip()
+        selected: Path | None = None
+        if not candidate:
+            selected = self.highlighted_folder
+        elif candidate.isdigit() and 1 <= int(candidate) <= len(self.folder_options):
+            selected = self.folder_options[int(candidate) - 1]
+        else:
+            selected = normalize_input_path(candidate)
+        if selected is None:
+            message = "폴더를 선택하지 못했습니다. 번호를 입력하거나 폴더 경로를 입력하세요."
+            self.latest_message = message
+            return message
+        self.awaiting_folder_selection = False
+        self.folder_options = []
+        return self.select_project_path(selected)
+
     def submit(self, raw: str) -> str:
         command = raw.strip()
         if self.selected_launch_mode is None:
@@ -494,6 +630,8 @@ class BeginnerTuiController:
         if self.selected_launch_mode == MODE_ADVANCED:
             return self._submit_advanced(command)
 
+        if not command and self.awaiting_folder_selection:
+            return self.select_folder("")
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command:
@@ -524,6 +662,12 @@ class BeginnerTuiController:
             return self.select_model(model)
         if self.awaiting_model_selection:
             return self.select_model(command)
+
+        folder_base = parse_folder_command(command)
+        if folder_base is not None:
+            return self.start_folder_selection(folder_base)
+        if self.awaiting_folder_selection:
+            return self.select_folder(command)
 
         path_value, is_path_command = strip_path_command(command)
         if is_path_command and not path_value:
@@ -976,6 +1120,11 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh(force_model_value=True)
                 self._focus_command()
                 return
+            if self.controller.awaiting_folder_selection:
+                self.controller.cycle_folder_selection(1)
+                self._refresh(force_folder_value=True)
+                self._focus_command()
+                return
             self.controller.toggle_agent()
             self._refresh()
             self._focus_command()
@@ -989,6 +1138,11 @@ def run_tui(project_path: str = "") -> int:
             if self.controller.awaiting_model_selection:
                 self.controller.cycle_model_selection(-1)
                 self._refresh(force_model_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_folder_selection:
+                self.controller.cycle_folder_selection(-1)
+                self._refresh(force_folder_value=True)
                 self._focus_command()
                 return
             self.controller.previous_agent()
@@ -1033,6 +1187,22 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.controller.cycle_model_selection(1)
                 self._refresh(force_model_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_folder_selection and event.key in {"up", "left", "shift+tab"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_folder_selection(-1)
+                self._refresh(force_folder_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_folder_selection and event.key in {"down", "right"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_folder_selection(1)
+                self._refresh(force_folder_value=True)
                 self._focus_command()
                 return
             if event.key == "ctrl+space":
@@ -1104,12 +1274,18 @@ def run_tui(project_path: str = "") -> int:
             self._refresh()
             self._focus_command()
 
-        def _refresh(self, force_model_value: bool = False) -> None:
+        def _refresh(self, force_model_value: bool = False, force_folder_value: bool = False) -> None:
             command = self.query_one(CommandInput)
             if self.controller.awaiting_model_selection:
                 command.placeholder = model_selection_placeholder(self.controller.available_models)
                 if force_model_value or not command.value:
                     command.value = self.controller.highlighted_model
+                    command.cursor_position = len(command.value)
+            elif self.controller.awaiting_folder_selection:
+                command.placeholder = folder_selection_placeholder(self.controller.folder_options)
+                highlighted = self.controller.highlighted_folder
+                if highlighted is not None and (force_folder_value or not command.value):
+                    command.value = str(highlighted)
                     command.cursor_position = len(command.value)
             else:
                 command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
@@ -1139,6 +1315,9 @@ __all__ = [
     "BeginnerTuiController",
     "available_models_from_config",
     "CommandInput",
+    "discover_selectable_folders",
+    "folder_selection_placeholder",
+    "format_folder_choices",
     "ModeSelector",
     "LogView",
     "StatusBar",
@@ -1152,6 +1331,7 @@ __all__ = [
     "normalize_path_text",
     "path_candidates_from_input",
     "parse_agent_mode_command",
+    "parse_folder_command",
     "parse_model_command",
     "strip_path_command",
     "missing_textual_message",

@@ -45,7 +45,10 @@ from deep_agent.cli import (
 from deep_agent.tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
+    discover_selectable_folders,
+    folder_selection_placeholder,
     format_agent_mode_selector,
+    format_folder_choices,
     format_model_choices,
     is_fix_request,
     missing_textual_message,
@@ -53,6 +56,7 @@ from deep_agent.tui import (
     normalize_input_path,
     normalize_path_text,
     parse_agent_mode_command,
+    parse_folder_command,
     parse_model_command,
     path_candidates_from_input,
     strip_path_command,
@@ -1358,17 +1362,36 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("Tab/화살표", model_selection_placeholder(["qwen3.6"]))
         self.assertIn("모델명", model_selection_placeholder([]))
 
+    def test_tui_folder_selection_placeholder_shows_number_range(self):
+        self.assertIn("1-2", folder_selection_placeholder([Path("/tmp/a"), Path("/tmp/b")]))
+        self.assertIn("Tab/화살표", folder_selection_placeholder([Path("/tmp/a")]))
+        self.assertIn("폴더 경로", folder_selection_placeholder([]))
+
     def test_tui_parse_model_commands(self):
         self.assertEqual(parse_model_command("/model qwen3.5"), "qwen3.5")
         self.assertEqual(parse_model_command("/모델 gamma"), "gamma")
         self.assertEqual(parse_model_command("/model"), "")
         self.assertIsNone(parse_model_command("모델 gamma"))
 
+    def test_tui_parse_folder_commands(self):
+        self.assertEqual(parse_folder_command("/folder"), "")
+        self.assertEqual(parse_folder_command("/폴더 /tmp/models"), "/tmp/models")
+        self.assertEqual(parse_folder_command("/dir ./work"), "./work")
+        self.assertIsNone(parse_folder_command("folder ./work"))
+
     def test_tui_formats_model_choices_with_current_marker(self):
         output = format_model_choices(["qwen3.6", "gamma"], "gamma")
 
         self.assertIn("1. qwen3.6", output)
         self.assertIn("2. gamma (현재)", output)
+        self.assertIn("번호를 입력", output)
+
+    def test_tui_formats_folder_choices_with_current_marker(self):
+        folders = [Path("/tmp/model-a"), Path("/tmp/model-b")]
+        output = format_folder_choices(folders, folders[1])
+
+        self.assertIn("1. /tmp/model-a", output)
+        self.assertIn("2. /tmp/model-b (선택)", output)
         self.assertIn("번호를 입력", output)
 
     def test_tui_controller_lists_and_selects_model_from_input_box(self):
@@ -1534,6 +1557,33 @@ class WindowsSetupTest(unittest.TestCase):
             output = controller.submit(f"/path {root}")
 
             self.assertEqual(controller.project_path, str(root.resolve()))
+            self.assertIn("Current: Tab 1/10", output)
+
+    def test_tui_controller_selects_folder_from_input_box(self):
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            first = base / "first-model"
+            second = base / "second-model"
+            first.mkdir()
+            second.mkdir()
+            (first / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (second / "requirements.txt").write_text("mlflow\n")
+            (second / "run_model.py").write_text("print('run')\n")
+
+            folders = discover_selectable_folders(str(base))
+            self.assertEqual([folder.name for folder in folders], ["first-model", "second-model"])
+
+            controller = self.beginner_tui("")
+            output = controller.submit(f"/folder {base}")
+
+            self.assertTrue(controller.awaiting_folder_selection)
+            self.assertIn("폴더를 선택하세요", output)
+            self.assertIn("second-model", output)
+
+            output = controller.submit("2")
+
+            self.assertFalse(controller.awaiting_folder_selection)
+            self.assertEqual(controller.project_path, str(second.resolve()))
             self.assertIn("Current: Tab 1/10", output)
 
     def test_tui_controller_reports_missing_path_for_path_command(self):
