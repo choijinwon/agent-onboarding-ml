@@ -95,10 +95,7 @@ def command_placeholder_for_mode(agent_mode: str, model: str = "qwen3.6") -> str
 
 
 def format_agent_mode_selector(agent_mode: str) -> str:
-    parts = []
-    for mode in AGENT_MODES:
-        parts.append(f"{mode}" if mode == agent_mode else mode.lower())
-    return " ".join(parts)
+    return "plan build chatbot"
 
 
 def parse_agent_mode_command(command: str) -> str | None:

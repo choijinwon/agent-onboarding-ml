@@ -146,7 +146,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("AI ML Onboarding Console", first_tab)
         self.assertIn("STEPS 1-10", first_tab)
         self.assertIn("CURRENT STEP", first_tab)
-        self.assertIn("Plan*  Build", first_tab)
+        self.assertIn("plan  build  chatbot", first_tab)
         self.assertIn("Active agent: Plan read-only", first_tab)
         self.assertIn("esc interrupt", first_tab)
         self.assertIn("> Step 01. 프로젝트 선택", first_tab)
@@ -154,7 +154,7 @@ class BeginnerWizardTest(unittest.TestCase):
         self.assertIn("Enter=다음", first_tab)
 
         apply_tab = format_beginner_tab(6, len(steps), steps[6])
-        self.assertIn("Plan  Build*", apply_tab)
+        self.assertIn("plan  build  chatbot", apply_tab)
         self.assertIn("Active agent: Build approval", apply_tab)
 
     def test_launch_screen_uses_terminal_console_layout(self):
@@ -174,7 +174,9 @@ class BeginnerWizardTest(unittest.TestCase):
             output = format_beginner_tab(0, len(steps), steps[0])
 
             self.assertIn("\033[", output)
-            self.assertIn("DeepAgents", output)
+            self.assertIn("plan", output)
+            self.assertIn("build", output)
+            self.assertIn("chatbot", output)
             self.assertIn("ctrl+p commands", output)
             self.assertNotIn("+====", output)
             self.assertNotIn("\033[48;2;", output)
@@ -1269,9 +1271,9 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(command_placeholder_for_mode("Chatbot"), "")
 
     def test_tui_agent_mode_selector_and_command_parser(self):
-        self.assertEqual(format_agent_mode_selector("Plan"), "Plan build chatbot")
-        self.assertEqual(format_agent_mode_selector("Build"), "plan Build chatbot")
-        self.assertEqual(format_agent_mode_selector("Chatbot"), "plan build Chatbot")
+        self.assertEqual(format_agent_mode_selector("Plan"), "plan build chatbot")
+        self.assertEqual(format_agent_mode_selector("Build"), "plan build chatbot")
+        self.assertEqual(format_agent_mode_selector("Chatbot"), "plan build chatbot")
         self.assertEqual(parse_agent_mode_command("/agent plan"), "Plan")
         self.assertEqual(parse_agent_mode_command("/agent build"), "Build")
         self.assertEqual(parse_agent_mode_command("/agent chat"), "Chatbot")
@@ -1522,7 +1524,7 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertEqual(output, "")
         self.assertEqual(controller.agent_mode, "Chatbot")
-        self.assertEqual(controller.submit("/agent"), "plan build Chatbot")
+        self.assertEqual(controller.submit("/agent"), "plan build chatbot")
 
     def test_tui_controller_plan_mode_does_not_apply_files(self):
         with TemporaryDirectory() as tmpdir:

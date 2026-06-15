@@ -1481,7 +1481,7 @@ def render_rich_beginner_tab(
     agent = tui_agent_label(index)
     request_line = (content.splitlines() or [""])[0].removeprefix("- ").strip()
     log_lines = build_terminal_log_lines(content.splitlines() or [""])
-    mode_line = "Plan  Build" if index >= 6 else "Plan  Build"
+    mode_line = "plan build chatbot"
     active_mode = "Build" if index >= 6 else "Plan"
     inactive_mode = "Plan" if index >= 6 else "Build"
     rows = [
@@ -1508,7 +1508,7 @@ def render_rich_beginner_tab(
             rich_row(f"□  {active_mode} · qwen3.6 · AI ML Onboarding", role="normal", indent=6, width=width),
             rich_row(width=width),
             rich_input_panel_line("█", width=width),
-            rich_input_panel_line(active_mode, inactive_mode, "DeepAgents", width=width),
+            rich_input_panel_line("plan", "build", "chatbot", width=width),
             rich_row(".........  esc interrupt                    ctrl+t variants   tab agents   ctrl+p commands", role="status", width=width),
             rich_row(f"Current: Tab {index + 1}/{total} | {mode_line} | {title}", role="status", width=width),
         ]
@@ -1610,8 +1610,8 @@ def tui_agent_label(index: int) -> str:
 
 def render_agent_switcher(index: int) -> str:
     if index >= 6:
-        return "Plan  Build*  AI ML Onboarding"
-    return "Plan*  Build  AI ML Onboarding"
+        return "plan  build  chatbot"
+    return "plan  build  chatbot"
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
