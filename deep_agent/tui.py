@@ -5,6 +5,7 @@ from importlib.util import find_spec
 from pathlib import Path
 import os
 import shlex
+from threading import Thread
 from urllib.parse import unquote, urlparse
 
 from deep_agent.app_config import AppConfig
@@ -841,6 +842,7 @@ def run_tui(project_path: str = "") -> int:
         def __init__(self, initial_project_path: str = "") -> None:
             super().__init__()
             self.controller = BeginnerTuiController(initial_project_path)
+            self._chatbot_busy = False
 
         def compose(self) -> ComposeResult:
             with Vertical(id="shell"):
@@ -855,6 +857,11 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def action_toggle_agent(self) -> None:
+            if self.controller.selected_launch_mode is None:
+                self.controller.latest_message = "먼저 모드를 선택하세요. 1=초급자, 2=중급자, 3=고급자"
+                self._refresh()
+                self._focus_command()
+                return
             if self.controller.awaiting_model_selection:
                 self.controller.cycle_model_selection(1)
                 self._refresh(force_model_value=True)
@@ -865,6 +872,11 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def action_previous_agent(self) -> None:
+            if self.controller.selected_launch_mode is None:
+                self.controller.latest_message = "먼저 모드를 선택하세요. 1=초급자, 2=중급자, 3=고급자"
+                self._refresh()
+                self._focus_command()
+                return
             if self.controller.awaiting_model_selection:
                 self.controller.cycle_model_selection(-1)
                 self._refresh(force_model_value=True)
@@ -936,12 +948,36 @@ def run_tui(project_path: str = "") -> int:
 
         def _submit_or_queue(self, value: str) -> None:
             if self.controller.should_show_thinking(value):
+                if self._chatbot_busy:
+                    self.controller.latest_message = "이전 Chatbot 요청을 처리 중입니다. 잠시만 기다려 주세요."
+                    self._refresh()
+                    self._focus_command()
+                    return
+                self._chatbot_busy = True
                 self.controller.set_thinking(value)
                 self._refresh()
                 self._focus_command()
-                self.call_later(self._submit_value, value)
+                self.set_timer(0.05, lambda: self._start_submit_worker(value), name="chatbot-submit")
                 return
             self._submit_value(value)
+
+        def _start_submit_worker(self, value: str) -> None:
+            Thread(target=self._submit_value_in_thread, args=(value,), daemon=True).start()
+
+        def _submit_value_in_thread(self, value: str) -> None:
+            try:
+                self.controller.submit(value)
+            except Exception as exc:  # pragma: no cover - UI safety boundary
+                self.controller.latest_message = f"Chatbot 응답 처리 중 오류가 발생했습니다: {exc}"
+            self.call_from_thread(self._finish_submit)
+
+        def _finish_submit(self) -> None:
+            self._chatbot_busy = False
+            if self.controller.exited:
+                self.exit()
+                return
+            self._refresh()
+            self._focus_command()
 
         def _submit_value(self, value: str) -> None:
             self.controller.submit(value)
