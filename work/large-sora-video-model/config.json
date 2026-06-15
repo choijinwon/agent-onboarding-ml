@@ -1,0 +1,33 @@
+{
+  "mlflow_tracking_url": "${MLFLOW_TRACKING_URL}",
+  "mlflow_tracking_username": "${MLFLOW_TRACKING_USERNAME}",
+  "mlflow_tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
+  "mlflow_experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
+  "mlflow_register_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+  "data": {
+    "train_path": "data/train",
+    "test_path": "data/test",
+    "input_example_path": "input_example.json"
+  },
+  "model": {
+    "source_path": "",
+    "save_path": "saved_model",
+    "artifact_path": "ai_studio",
+    "code_path": [
+      "aiu_custom"
+    ],
+    "requirements": "requirements.txt"
+  },
+  "execution": {
+    "entrypoint": "run_model.py",
+    "blocked_entrypoints": [
+      "train.py"
+    ]
+  },
+  "training": {
+    "epochs": 10,
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "optimizer": "SGD"
+  }
+}
