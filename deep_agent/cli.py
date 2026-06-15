@@ -3155,6 +3155,8 @@ def format_beginner_apply_step(
                 f"  - 등록 상태: {analysis.registration_status}",
                 f"  - 남은 문제: {len(analysis.issue_details)}개",
                 "- 삭제 작업은 수행하지 않았습니다.",
+                "- AI Studio 환경값을 입력하려면 이 단계에서 1번을 선택하세요.",
+                "  - 저장 대상: ai_studio.env",
             ]
         )
         return "\n".join(rows)

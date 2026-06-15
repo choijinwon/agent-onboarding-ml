@@ -463,6 +463,40 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
             self.assertIn(".: AI Studio MLflow 등록 스캐폴드 생성", output)
 
+    def test_beginner_wizard_step7_saves_ai_studio_env_values(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = BeginnerTuiController(str(root))
+            controller.activate_launch_mode(MODE_BEGINNER)
+            for _ in range(5):
+                controller.submit("다음")
+            controller.submit("1")
+
+            self.assertEqual(controller.index, 6)
+            output = controller.submit("1")
+            self.assertIn("AI Studio 환경설정 입력", output)
+            self.assertTrue(controller.awaiting_ai_studio_env)
+
+            controller.submit("http://mlflow.local:5000")
+            controller.submit("ai-user")
+            controller.submit("ai-pass")
+            controller.submit("sora-exp")
+            output = controller.submit("sora-model")
+
+            self.assertFalse(controller.awaiting_ai_studio_env)
+            self.assertIn("AI Studio 환경설정이 저장되었습니다", output)
+            env_source = (root / "ai_studio.env").read_text(encoding="utf-8")
+            self.assertIn("MLFLOW_TRACKING_URL=http://mlflow.local:5000", env_source)
+            self.assertIn("MLFLOW_TRACKING_USERNAME=ai-user", env_source)
+            self.assertIn("MLFLOW_TRACKING_PASSWORD=ai-pass", env_source)
+            self.assertIn("MLFLOW_EXPERIMENT_NAME=sora-exp", env_source)
+            self.assertIn("MLFLOW_REGISTER_MODEL_NAME=sora-model", env_source)
+
     def test_beginner_wizard_shows_step9_local_serving(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -657,6 +691,94 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual(analysis.registration_status, "등록 가능")
             self.assertIn("sora-video-sample.onnx", output)
             self.assertIn("64.0 MiB", output)
+
+    def test_root_sora_runner_creates_executable_sample(self):
+        with TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "sora-root-model"
+            script = Path(__file__).resolve().parents[1] / "run_sora_model.py"
+
+            result = subprocess.run(
+                [sys.executable, str(script), "--target", str(target), "--create-only"],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Sora model sample ready", result.stdout)
+            self.assertTrue((target / "model" / "sora-video-sample.onnx").exists())
+            self.assertTrue((target / "run_model.py").exists())
+            self.assertTrue((target / "ai_studio.env").exists())
+            self.assertTrue((target / "config.json").exists())
+            self.assertEqual(analyze_project(str(target)).registration_status, "등록 가능")
+
+    def test_root_run_model_prepares_sora_artifact_for_ai_studio(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            model_dir = root / "sora_model" / "model"
+            model_dir.mkdir(parents=True)
+            model_path = model_dir / "sora-video-sample.onnx"
+            model_path.write_bytes(b"sora")
+            script = Path(__file__).resolve().parents[1] / "run_model.py"
+
+            result = subprocess.run(
+                [sys.executable, str(script), "--model", str(model_path), "--prepare-only"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("[1/6] AI Studio process files check", result.stdout)
+            self.assertIn("[4/6] Resolve and prepare local model", result.stdout)
+            self.assertIn("local model prepared", result.stdout)
+            self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
+            self.assertTrue((root / "ai_studio.env").exists())
+            self.assertTrue((root / "config.json").exists())
+            self.assertTrue((root / "input_example.json").exists())
+            self.assertTrue((root / "requirements.txt").exists())
+            self.assertTrue((root / "aiu_custom" / "model_wrapper.py").exists())
+            self.assertTrue((root / "mlflow_ai_studio_logging.py").exists())
+            source = script.read_text(encoding="utf-8")
+            self.assertIn("AI Studio", source)
+            self.assertIn("MLFLOW_TRACKING_URL", source)
+            self.assertIn("Windows 10/11", source)
+
+    def test_root_run_model_setup_env_screen_saves_mlflow_values(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            script = Path(__file__).resolve().parents[1] / "run_model.py"
+            user_input = "\n".join(
+                [
+                    "http://mlflow.local:5000",
+                    "ai-user",
+                    "ai-pass",
+                    "sora-exp",
+                    "sora-model",
+                ]
+            ) + "\n"
+
+            result = subprocess.run(
+                [sys.executable, str(script), "--setup-env"],
+                cwd=root,
+                input=user_input,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("AI Studio MLflow 환경설정", result.stdout)
+            env_source = (root / "ai_studio.env").read_text(encoding="utf-8")
+            self.assertIn("MLFLOW_TRACKING_URL=http://mlflow.local:5000", env_source)
+            self.assertIn("MLFLOW_TRACKING_USERNAME=ai-user", env_source)
+            self.assertIn("MLFLOW_TRACKING_PASSWORD=ai-pass", env_source)
+            self.assertIn("MLFLOW_EXPERIMENT_NAME=sora-exp", env_source)
+            self.assertIn("MLFLOW_REGISTER_MODEL_NAME=sora-model", env_source)
+            source = script.read_text(encoding="utf-8")
+            self.assertIn('os.environ["MLFLOW_TRACKING_URI"] = tracking_url', source)
 
     def test_sora_error_alias_creates_broken_video_project(self):
         with TemporaryDirectory() as tmpdir:

@@ -65,6 +65,13 @@ AGENT_MODE_ALIASES = {
     "쳇봇": "Chatbot",
     "대화": "Chatbot",
 }
+AI_STUDIO_ENV_FIELDS = [
+    ("MLFLOW_TRACKING_URL", "MLflow Tracking URL"),
+    ("MLFLOW_TRACKING_USERNAME", "MLflow username"),
+    ("MLFLOW_TRACKING_PASSWORD", "MLflow password"),
+    ("MLFLOW_EXPERIMENT_NAME", "MLflow experiment name"),
+    ("MLFLOW_REGISTER_MODEL_NAME", "MLflow registered model name"),
+]
 
 
 class LogView:
@@ -488,6 +495,32 @@ def normalize_pasted_input(text: str) -> str:
     return "\n".join(compacted).strip()
 
 
+def read_ai_studio_env(path: Path) -> dict[str, str]:
+    values = {key: "" for key, _ in AI_STUDIO_ENV_FIELDS}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in values:
+            values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def write_ai_studio_env(path: Path, values: dict[str, str]) -> None:
+    rows = [
+        "# AI Studio MLflow environment.",
+        "# Saved from beginner Wizard Step 7.",
+        "# MLFLOW_TRACKING_URL is mapped to MLFLOW_TRACKING_URI by run_model.py.",
+    ]
+    for key, _ in AI_STUDIO_ENV_FIELDS:
+        rows.append(f"{key}={values.get(key, '')}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?[A-Za-z]:[\\/]")
 WINDOWS_ENV_RE = re.compile(r"%([^%]+)%")
 POWERSHELL_ENV_RE = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
@@ -618,6 +651,9 @@ class BeginnerTuiController:
     awaiting_folder_selection: bool = False
     folder_selection_index: int = 0
     folder_options: list[Path] = field(default_factory=list)
+    awaiting_ai_studio_env: bool = False
+    ai_studio_env_index: int = 0
+    ai_studio_env_values: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.project_path = ""
@@ -705,7 +741,13 @@ class BeginnerTuiController:
 
     def should_show_thinking(self, raw: str) -> bool:
         command = raw.strip()
-        if not command or command in EXIT_COMMANDS or command in HELP_COMMANDS or self.awaiting_model_selection:
+        if (
+            not command
+            or command in EXIT_COMMANDS
+            or command in HELP_COMMANDS
+            or self.awaiting_model_selection
+            or self.awaiting_ai_studio_env
+        ):
             return False
         if self.selected_launch_mode is None:
             return False
@@ -844,6 +886,55 @@ class BeginnerTuiController:
         self.folder_options = []
         return self.select_project_path(selected)
 
+    @property
+    def ai_studio_env_path(self) -> Path:
+        return Path(self.project_path) / "ai_studio.env"
+
+    def start_ai_studio_env_setup(self) -> str:
+        if not self.project_path:
+            message = "먼저 Step 1에서 프로젝트 경로를 선택하세요."
+            self.latest_message = message
+            return message
+        self.awaiting_ai_studio_env = True
+        self.ai_studio_env_index = 0
+        self.ai_studio_env_values = read_ai_studio_env(self.ai_studio_env_path)
+        message = self._format_ai_studio_env_prompt()
+        self.latest_message = message
+        return message
+
+    def continue_ai_studio_env_setup(self, value: str) -> str:
+        key, _ = AI_STUDIO_ENV_FIELDS[self.ai_studio_env_index]
+        entered = value.strip()
+        if entered:
+            self.ai_studio_env_values[key] = entered
+        self.ai_studio_env_index += 1
+        if self.ai_studio_env_index >= len(AI_STUDIO_ENV_FIELDS):
+            write_ai_studio_env(self.ai_studio_env_path, self.ai_studio_env_values)
+            self.awaiting_ai_studio_env = False
+            message = (
+                "AI Studio 환경설정이 저장되었습니다.\n"
+                f"- 저장 대상: {self.ai_studio_env_path}\n"
+                "- MLFLOW_TRACKING_URL은 run_model.py 실행 시 MLFLOW_TRACKING_URI로 자동 매핑됩니다.\n"
+                "- 다음 단계: python run_model.py --env-file ai_studio.env --register"
+            )
+            self.latest_message = message
+            return message
+        message = self._format_ai_studio_env_prompt()
+        self.latest_message = message
+        return message
+
+    def _format_ai_studio_env_prompt(self) -> str:
+        key, label = AI_STUDIO_ENV_FIELDS[self.ai_studio_env_index]
+        current = self.ai_studio_env_values.get(key, "")
+        current_label = f"현재값: {current}" if current else "현재값: (비어 있음)"
+        return (
+            "AI Studio 환경설정 입력\n"
+            f"- {self.ai_studio_env_index + 1}/{len(AI_STUDIO_ENV_FIELDS)} {label}\n"
+            f"- 키: {key}\n"
+            f"- {current_label}\n"
+            "- 값을 입력하고 Enter를 누르세요. 빈 값은 현재값을 유지합니다."
+        )
+
     def submit(self, raw: str) -> str:
         command = raw.strip()
         if command in HELP_COMMANDS:
@@ -870,6 +961,8 @@ class BeginnerTuiController:
         if self.selected_launch_mode == MODE_ADVANCED:
             return self._submit_advanced(command)
 
+        if self.awaiting_ai_studio_env:
+            return self.continue_ai_studio_env_setup(raw)
         if not command and self.awaiting_folder_selection:
             return self.select_folder("")
         if not command and self.awaiting_model_selection:
@@ -933,6 +1026,8 @@ class BeginnerTuiController:
             return self._handle_issue_choice(command)
         if self.index == 5 and command in {"1", "2", "3"}:
             return self._handle_approval_choice(command)
+        if self.index == 6 and command in {"1", "/env", "/환경", "환경설정", "ai studio", "aistudio"}:
+            return self.start_ai_studio_env_setup()
         if is_wizard_navigation(command, self.total):
             return self._handle_navigation(command)
         if self.agent_mode != "Chatbot":
