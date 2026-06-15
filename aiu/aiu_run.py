@@ -54,13 +54,16 @@ from deep_agent.tui import (
     folder_selection_placeholder,
     format_agent_mode_selector,
     format_folder_choices,
+    format_chat_card,
     format_model_choices,
     format_tui_chatbot_screen,
+    format_tui_help_screen,
     format_tui_model_info,
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
     normalize_input_path,
+    normalize_pasted_input,
     normalize_path_text,
     parse_agent_mode_command,
     parse_folder_command,
@@ -1319,6 +1322,45 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("2. 중급자 모드", output)
         self.assertIn("3. 고급자 모드", output)
 
+    def test_tui_help_screen_lists_core_commands(self):
+        output = format_tui_help_screen(MODE_BEGINNER, "Chatbot", "/tmp/project", "qwen3.6")
+
+        self.assertIn("HELP   AI ML Onboarding Console", output)
+        self.assertIn("/help", output)
+        self.assertIn("Enter", output)
+        self.assertIn("Shift+Enter", output)
+        self.assertIn("Ctrl+Enter", output)
+        self.assertIn("/sample large10", output)
+        self.assertIn("/open", output)
+        self.assertIn("/folder", output)
+        self.assertIn("/file", output)
+        self.assertIn("/model qwen3.6", output)
+        self.assertIn("PLAN | BUILD | [CHAT]", output)
+
+    def test_tui_help_command_works_before_launch_mode_selection(self):
+        controller = BeginnerTuiController("")
+
+        output = controller.submit("/help")
+
+        self.assertIn("HELP   AI ML Onboarding Console", output)
+        self.assertIn("모드 미선택", output)
+        self.assertIn("/mode beginner", output)
+        self.assertFalse(controller.should_show_thinking("/help"))
+
+    def test_tui_help_command_works_in_chat_mode_without_runtime_call(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                raise AssertionError("help must not call runtime")
+
+        controller = self.beginner_tui("", deepagents_runtime=FakeRuntime())
+        controller.select_agent_mode("Chatbot")
+
+        output = controller.submit("/help")
+
+        self.assertIn("HELP   AI ML Onboarding Console", output)
+        self.assertIn("chat", output)
+        self.assertIn("/sample tensorflow", output)
+
     def test_tui_does_not_accept_project_path_before_launch_mode(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1439,8 +1481,17 @@ class WindowsSetupTest(unittest.TestCase):
         controller.set_thinking("하이")
 
         self.assertIn("생각중", controller.render_log())
-        self.assertIn("나: 하이", controller.render_log())
-        self.assertIn("Agent: 생각중", controller.render_log())
+        self.assertIn("YOU    하이", controller.render_log())
+        self.assertIn("AGENT  response", controller.render_log())
+
+    def test_chat_card_uses_clean_rich_sections(self):
+        rendered = format_chat_card("모델 검증해줘", "검증 결과입니다.", [])
+
+        self.assertIn("YOU    모델 검증해줘", rendered)
+        self.assertIn("AGENT  response", rendered)
+        self.assertIn("         검증 결과입니다.", rendered)
+        self.assertIn("----------------------------------------------------------------------------", rendered)
+        self.assertNotIn("+----------------", rendered)
 
     def test_tui_chatbot_response_replaces_thinking_log_entry(self):
         class FakeRuntime:
@@ -1465,8 +1516,9 @@ class WindowsSetupTest(unittest.TestCase):
                 os.chdir(cwd)
 
             rendered = controller.render_log()
-            self.assertIn("나: 분석해줘", rendered)
-            self.assertIn("Agent: 완료 응답", rendered)
+            self.assertIn("YOU    분석해줘", rendered)
+            self.assertIn("AGENT  response", rendered)
+            self.assertIn("완료 응답", rendered)
             self.assertNotIn("Agent: 생각중", rendered)
 
     def test_tui_chatbot_error_is_visible_in_log(self):
@@ -1477,8 +1529,9 @@ class WindowsSetupTest(unittest.TestCase):
         controller._append_chat_error("분석해줘", RuntimeError("boom"))
 
         rendered = controller.render_log()
-        self.assertIn("나: 분석해줘", rendered)
-        self.assertIn("Agent: Chatbot 응답 처리 중 오류가 발생했습니다: boom", rendered)
+        self.assertIn("YOU    분석해줘", rendered)
+        self.assertIn("AGENT  response", rendered)
+        self.assertIn("Chatbot 응답 처리 중 오류가 발생했습니다: boom", rendered)
 
     def test_tui_thinking_is_only_for_chatbot_text(self):
         controller = BeginnerTuiController("")
@@ -1652,9 +1705,37 @@ class WindowsSetupTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
         self.assertIn("TextArea", source)
+        self.assertIn('Binding("enter", "submit_input"', source)
+        self.assertIn("def action_submit_input", source)
+        self.assertIn("async def _on_key", source)
+        self.assertIn("await super()._on_key(event)", source)
+        self.assertIn("def _handle_submit_keys", source)
         self.assertIn('event.key in {"ctrl+enter", "ctrl+j"}', source)
+        self.assertIn('event.key == "shift+enter"', source)
+        self.assertIn('event.key == "enter"', source)
+        self.assertIn('insert_text_at_cursor("\\n")', source)
+        self.assertIn("normalize_pasted_input(event.text)", source)
         self.assertIn("self.app._submit_command_input()", source)
+        self.assertIn("SendButton", source)
+        self.assertIn('SendButton("SEND  Enter", id="send")', source)
+        self.assertIn("FileButton", source)
+        self.assertIn('FileButton("FILE", id="file")', source)
+        self.assertIn('Vertical(id="input-area")', source)
+        self.assertIn("#input-area", source)
+        self.assertIn("dock: bottom", source)
+        self.assertIn("def on_button_pressed", source)
+        self.assertIn('event.button.id == "file"', source)
+        self.assertIn("self._open_folder_picker()", source)
+        self.assertIn("self.controller.start_folder_selection(base)", source)
+        self.assertIn('event.button.id != "send"', source)
         self.assertNotIn("Input.Submitted", source)
+
+    def test_tui_paste_normalization_keeps_multiline_but_cleans_indent(self):
+        raw = "\n        첫 줄\n            둘째 줄\n\n\n        셋째 줄   \n"
+
+        output = normalize_pasted_input(raw)
+
+        self.assertEqual(output, "첫 줄\n    둘째 줄\n\n셋째 줄")
 
     def test_tui_right_click_copies_current_screen(self):
         class Event:
@@ -1682,6 +1763,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("1-2", folder_selection_placeholder([Path("/tmp/a"), Path("/tmp/b")]))
         self.assertIn("Tab/화살표", folder_selection_placeholder([Path("/tmp/a")]))
         self.assertIn("폴더 경로", folder_selection_placeholder([]))
+        self.assertIn("Open Folder", folder_selection_placeholder([Path("/tmp/a")]))
 
     def test_tui_parse_model_commands(self):
         self.assertEqual(parse_model_command("/model qwen3.5"), "qwen3.5")
@@ -1693,6 +1775,11 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(parse_folder_command("/folder"), "")
         self.assertEqual(parse_folder_command("/폴더 /tmp/models"), "/tmp/models")
         self.assertEqual(parse_folder_command("/dir ./work"), "./work")
+        self.assertEqual(parse_folder_command("/open"), "")
+        self.assertEqual(parse_folder_command("/open ./work"), "./work")
+        self.assertEqual(parse_folder_command("/file /tmp/models"), "/tmp/models")
+        self.assertEqual(parse_folder_command("/파일 /tmp/models"), "/tmp/models")
+        self.assertEqual(parse_folder_command("/열기 /tmp/models"), "/tmp/models")
         self.assertIsNone(parse_folder_command("folder ./work"))
 
     def test_tui_formats_model_choices_with_current_marker(self):
@@ -1890,10 +1977,10 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual([folder.name for folder in folders], ["first-model", "second-model"])
 
             controller = self.beginner_tui("")
-            output = controller.submit(f"/folder {base}")
+            output = controller.submit(f"/open {base}")
 
             self.assertTrue(controller.awaiting_folder_selection)
-            self.assertIn("폴더를 선택하세요", output)
+            self.assertIn("파일/폴더를 열 프로젝트 위치로 선택하세요", output)
             self.assertIn("second-model", output)
 
             output = controller.submit("2")
@@ -2060,8 +2147,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("DeepAgents 응답", output)
             self.assertIn("최종 등록 상태", output)
             self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
-            self.assertIn("나: 프로젝트 분석해줘", controller.render_log())
-            self.assertIn("Agent:", controller.render_log())
+            self.assertIn("YOU    프로젝트 분석해줘", controller.render_log())
+            self.assertIn("AGENT  response", controller.render_log())
             self.assertIn("DeepAgents 응답", controller.render_log())
             session_files = list((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
             self.assertEqual(len(session_files), 1)
@@ -2144,8 +2231,8 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
             self.assertEqual(controller.index, 6)
-            self.assertIn("나: 코드 자동 수정해줘", controller.render_log())
-            self.assertIn("수정사항:", controller.render_log())
+            self.assertIn("YOU    코드 자동 수정해줘", controller.render_log())
+            self.assertIn("BUILD  changes", controller.render_log())
             session_file = next((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
             session_payload = json.loads(session_file.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(session_payload["selected_model"], "qwen3.6")
