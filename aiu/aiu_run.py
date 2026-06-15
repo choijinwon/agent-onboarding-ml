@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -40,6 +42,7 @@ from deep_agent.cli import (
     resolve_existing_sample_project,
     resolve_existing_work_project,
     resolve_beginner_project_input,
+    run_model_source,
     sample_projects_root,
 )
 from deep_agent.tui import (
@@ -922,24 +925,58 @@ class AdvancedModeTest(unittest.TestCase):
 
             config = json.loads((root / "config.json").read_text(encoding="utf-8"))
             logging_source = (root / "mlflow_ai_studio_logging.py").read_text(encoding="utf-8")
-            run_model_source = (root / "run_model.py").read_text(encoding="utf-8")
+            generated_run_model = (root / "run_model.py").read_text(encoding="utf-8")
             env_source = (root / "ai_studio.env").read_text(encoding="utf-8")
             wrapper_source = (root / "aiu_custom" / "model_wrapper.py").read_text(encoding="utf-8")
             requirements_text = requirements.read_text(encoding="utf-8")
             self.assertEqual(config["mlflow_tracking_url"], "${MLFLOW_TRACKING_URL}")
+            self.assertEqual(config["model"]["source_path"], "")
             self.assertEqual(config["model"]["artifact_path"], "ai_studio")
             self.assertEqual(config["execution"]["entrypoint"], "run_model.py")
             self.assertIn("train.py", config["execution"]["blocked_entrypoints"])
+            self.assertIn("AI_STUDIO_LOCAL_MODEL_PATH", logging_source)
             self.assertIn("mlflow.pyfunc.log_model", logging_source)
             self.assertIn('os.getenv("AI_STUDIO_CONFIG_PATH"', logging_source)
             self.assertIn("python_model=ModelWrapper()", logging_source)
             self.assertIn("registered_model_name=registered_model_name", logging_source)
-            self.assertIn("load_env_file", run_model_source)
-            self.assertIn("run_mlflow_logging()", run_model_source)
+            self.assertIn("prepare_local_model", generated_run_model)
+            self.assertIn("local model prepared", generated_run_model)
+            self.assertIn("run_mlflow_logging()", generated_run_model)
             self.assertIn("MLFLOW_TRACKING_URL=", env_source)
             self.assertIn("class ModelWrapper", wrapper_source)
             self.assertIn("cloudpickle", requirements_text)
             self.assertTrue(any(change["code"] == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD" for change in payload["applied_changes"]))
+
+            result = subprocess.run(
+                [sys.executable, "run_model.py", "--prepare-only"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "saved_model" / "local_model.pkl").exists())
+            self.assertIn("local model prepared", result.stdout)
+
+    def test_run_model_source_prepares_explicit_local_model_without_mlflow(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "run_model.py").write_text(run_model_source(), encoding="utf-8")
+            (root / "config.json").write_text(json.dumps({"model": {"save_path": "saved_model"}}), encoding="utf-8")
+            source = root / "my_model.onnx"
+            source.write_text("model", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, "run_model.py", "--model", str(source), "--prepare-only"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
+            self.assertEqual((root / "saved_model" / "local_model.onnx").read_text(encoding="utf-8"), "model")
 
     def test_apply_creates_requirements_when_missing(self):
         with TemporaryDirectory() as tmpdir:
@@ -1165,7 +1202,8 @@ class WindowsSetupTest(unittest.TestCase):
 
             self.assertEqual(controller.selected_launch_mode, MODE_INTERMEDIATE)
             self.assertEqual(controller.agent_mode, "Chatbot")
-            self.assertIn("무엇을 하시겠습니까?", output)
+            self.assertIn("Chatbot Mode", output)
+            self.assertIn("실행 모드: 중급자 모드", output)
 
     def test_tui_launch_mode_selects_advanced_aliases(self):
         for value in ["3", "고급자", "advanced"]:
@@ -1184,7 +1222,7 @@ class WindowsSetupTest(unittest.TestCase):
         output = controller.submit("MLflow 설정만 확인해줘")
 
         self.assertIn("DeepAgents runtime", output)
-        self.assertIn("무엇을 하시겠습니까?", output)
+        self.assertIn("Chatbot Mode", output)
 
     def test_tui_intermediate_chatbot_routes_through_runtime(self):
         class FakeRuntime:
@@ -1632,7 +1670,8 @@ class WindowsSetupTest(unittest.TestCase):
 
         output = controller.submit("/agent chat")
 
-        self.assertEqual(output, "")
+        self.assertIn("Chatbot Mode", output)
+        self.assertIn("실행 모드: 초급자 모드", output)
         self.assertEqual(controller.agent_mode, "Chatbot")
         self.assertEqual(controller.submit("/agent"), "plan build chatbot")
 

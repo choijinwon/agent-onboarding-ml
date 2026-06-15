@@ -2380,11 +2380,17 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     if not logging_path.exists():
         logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
         created.append("mlflow_ai_studio_logging.py")
+    elif is_managed_ai_studio_logging(logging_path) and "AI_STUDIO_LOCAL_MODEL_PATH" not in safe_read_text(logging_path):
+        logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
+        updated.append("mlflow_ai_studio_logging.py")
 
     run_model_path = root / "run_model.py"
     if not run_model_path.exists():
         run_model_path.write_text(run_model_source(), encoding="utf-8")
         created.append("run_model.py")
+    elif is_managed_run_model(run_model_path) and "prepare_local_model" not in safe_read_text(run_model_path):
+        run_model_path.write_text(run_model_source(), encoding="utf-8")
+        updated.append("run_model.py")
 
     requirements_path = root / "requirements.txt"
     changed_requirements = ensure_requirement_lines(requirements_path, AI_STUDIO_REQUIREMENTS)
@@ -2422,6 +2428,16 @@ def ensure_requirement_lines(path: Path, requirements: list[str]) -> bool:
     return True
 
 
+def is_managed_run_model(path: Path) -> bool:
+    content = safe_read_text(path)
+    return "Run AI Studio MLflow model logging with an environment file." in content
+
+
+def is_managed_ai_studio_logging(path: Path) -> bool:
+    content = safe_read_text(path)
+    return "AI Studio MLflow logging template." in content
+
+
 def default_ai_studio_config() -> dict[str, object]:
     return {
         "mlflow_tracking_url": "${MLFLOW_TRACKING_URL}",
@@ -2435,6 +2451,7 @@ def default_ai_studio_config() -> dict[str, object]:
             "input_example_path": "input_example.json",
         },
         "model": {
+            "source_path": "",
             "save_path": "saved_model",
             "artifact_path": "ai_studio",
             "code_path": ["aiu_custom"],
@@ -2536,6 +2553,9 @@ def build_model(config: dict):
 
 
 def train_model(model, data, config: dict):
+    local_model_path = os.getenv("AI_STUDIO_LOCAL_MODEL_PATH", "")
+    if local_model_path:
+        return Path(local_model_path)
     save_path = Path(config["model"]["save_path"])
     save_path.mkdir(parents=True, exist_ok=True)
     (save_path / "model.txt").write_text("replace with trained model artifact\\n", encoding="utf-8")
@@ -2629,20 +2649,39 @@ if __name__ == "__main__":
 
 
 def run_model_source() -> str:
-    return '''"""Run AI Studio MLflow model logging with an environment file."""
+    return '''"""Prepare a local model artifact, then run AI Studio MLflow logging.
+
+Usage:
+  python run_model.py
+  python run_model.py --model ./model/my-model.onnx
+  python run_model.py --env-file ai_studio.env --config config.json
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 from pathlib import Path
 
-from mlflow_ai_studio_logging import main as run_mlflow_logging
+
+MODEL_SUFFIXES = {
+    ".pkl",
+    ".joblib",
+    ".onnx",
+    ".pt",
+    ".pth",
+    ".keras",
+    ".h5",
+    ".safetensors",
+}
+IGNORED_DIRS = {".aiu", ".git", ".venv", "__pycache__", "registration_packages", "saved_model"}
 
 
 def load_env_file(path: Path) -> None:
     if not path.exists():
-        raise FileNotFoundError(f"AI Studio environment file not found: {path}")
+        return
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -2654,15 +2693,78 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def load_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
+    candidates: list[Path] = []
+    if explicit_model:
+        candidates.append(Path(explicit_model))
+    config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
+    source_path = str(config_model.get("source_path") or "").strip()
+    if source_path:
+        candidates.append(Path(source_path))
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.exists():
+            return resolved
+
+    root = Path.cwd()
+    model_files: list[Path] = []
+    for path in root.rglob("*"):
+        if any(part in IGNORED_DIRS for part in path.relative_to(root).parts):
+            continue
+        if path.is_file() and path.suffix.lower() in MODEL_SUFFIXES:
+            model_files.append(path)
+    if model_files:
+        return sorted(model_files, key=lambda item: item.stat().st_size, reverse=True)[0].resolve()
+    raise FileNotFoundError(
+        "로컬 모델 파일을 찾지 못했습니다. --model <경로>를 지정하거나 config.json의 model.source_path를 설정하세요."
+    )
+
+
+def prepare_local_model(source: Path, config: dict) -> Path:
+    config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
+    save_root = Path(str(config_model.get("save_path") or "saved_model"))
+    save_root.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        target = save_root / "local_model"
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target)
+        return target.resolve()
+
+    suffix = source.suffix or ".bin"
+    target = save_root / f"local_model{suffix}"
+    shutil.copy2(source, target)
+    return target.resolve()
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run AI Studio MLflow logging.")
+    parser = argparse.ArgumentParser(description="Prepare local model and run AI Studio MLflow logging.")
     parser.add_argument("--env-file", default="ai_studio.env", help="AI Studio environment file path")
     parser.add_argument("--config", default="config.json", help="AI Studio config file path")
+    parser.add_argument("--model", default="", help="Existing local model file or directory path")
+    parser.add_argument("--prepare-only", action="store_true", help="Only create saved_model/local_model and skip MLflow logging")
     args = parser.parse_args()
 
     load_env_file(Path(args.env_file))
-    if args.config != "config.json":
-        os.environ["AI_STUDIO_CONFIG_PATH"] = args.config
+    config_path = Path(args.config)
+    config = load_config(config_path)
+    os.environ["AI_STUDIO_CONFIG_PATH"] = str(config_path)
+
+    source_model = resolve_model_source(config, args.model)
+    local_model = prepare_local_model(source_model, config)
+    os.environ["AI_STUDIO_LOCAL_MODEL_PATH"] = str(local_model)
+    print(f"local model prepared: {local_model}")
+
+    if args.prepare_only:
+        return
+    from mlflow_ai_studio_logging import main as run_mlflow_logging
+
     run_mlflow_logging()
 
 

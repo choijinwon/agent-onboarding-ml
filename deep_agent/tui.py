@@ -48,6 +48,7 @@ AGENT_MODE_ALIASES = {
     "빌드": "Build",
     "수정": "Build",
     "chat": "Chatbot",
+    "chbot": "Chatbot",
     "chatbot": "Chatbot",
     "챗봇": "Chatbot",
     "쳇봇": "Chatbot",
@@ -198,6 +199,31 @@ def format_tui_advanced_screen(message: str = "") -> str:
     if message:
         return f"{message}\n\n{ADVANCED_INTRO}"
     return ADVANCED_INTRO
+
+
+def format_tui_chatbot_screen(project_path: str, model: str, launch_mode: str | None = None) -> str:
+    mode_label = MODE_LABELS.get(launch_mode or "", "TUI")
+    project_text = project_path or "(프로젝트 경로 미선택)"
+    return "\n".join(
+        [
+            "Chatbot Mode",
+            "",
+            f"- 실행 모드: {mode_label}",
+            f"- 프로젝트: {project_text}",
+            f"- 모델: {model}",
+            "- 처리 방식: DeepAgents runtime + AutoFix 정책",
+            "",
+            "input 창에 자연어로 입력하세요.",
+            "- 이 프로젝트 분석해줘",
+            "- 오류 로그 보고 고쳐줘",
+            "- 등록 가능하게 수정해줘",
+            "",
+            "명령:",
+            "- /folder : 폴더 선택",
+            "- /model : 모델 선택",
+            "- plan 또는 build : 모드 전환",
+        ]
+    )
 
 
 def is_fix_request(command: str) -> bool:
@@ -435,6 +461,8 @@ class BeginnerTuiController:
     def current_screen(self) -> str:
         if self.selected_launch_mode is None:
             return format_tui_launch_mode_screen(self.latest_message)
+        if self.agent_mode == "Chatbot":
+            return format_tui_chatbot_screen(self.project_path, self.qwen_model, self.selected_launch_mode)
         if self.selected_launch_mode == MODE_INTERMEDIATE:
             return format_tui_intermediate_screen(self.latest_message)
         if self.selected_launch_mode == MODE_ADVANCED:
@@ -443,6 +471,13 @@ class BeginnerTuiController:
 
     def render_log(self) -> str:
         log_text = "\n\n".join(self.log_lines[-12:])
+        if self.agent_mode == "Chatbot" and self.selected_launch_mode is not None:
+            screen = self.current_screen()
+            if log_text:
+                return f"{log_text}\n\n{screen}"
+            if self.latest_message and self.latest_message != screen:
+                return f"{self.latest_message}\n\n{screen}"
+            return screen
         if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
             screen = self.current_screen()
             return f"{log_text}\n\n{screen}" if log_text else screen
@@ -532,7 +567,7 @@ class BeginnerTuiController:
             self.latest_message = message
             return message
         self.agent_mode = mode
-        message = ""
+        message = self.current_screen() if mode == "Chatbot" else ""
         self.latest_message = message
         return message
 
@@ -715,7 +750,7 @@ class BeginnerTuiController:
             return self.current_screen()
         if self.agent_mode == "Chatbot":
             response = self.handle_chat_message(command)
-            return self.current_screen() if response else response
+            return self.render_log() if response else response
         if is_greeting(command):
             self.latest_message = greeting_response()
             return self.current_screen()
@@ -738,7 +773,7 @@ class BeginnerTuiController:
             return self.current_screen()
         if self.agent_mode == "Chatbot":
             response = self.handle_chat_message(command)
-            return self.current_screen() if response else response
+            return self.render_log() if response else response
         self.latest_message = handle_advanced_input(command)
         return self.current_screen()
 
@@ -1323,6 +1358,7 @@ __all__ = [
     "StatusBar",
     "format_agent_mode_selector",
     "format_model_choices",
+    "format_tui_chatbot_screen",
     "is_fix_request",
     "is_greeting",
     "is_wizard_navigation",
