@@ -187,7 +187,8 @@ def format_tui_help_screen(
         "  BASIC",
         "         /help                  도움말 표시",
         "         /exit                  종료",
-        "         Enter                  input 줄바꿈",
+        "         Enter                  입력 제출",
+        "         Shift+Enter            input 줄바꿈",
         "         Ctrl+Enter             입력 제출",
         "         /mode beginner         초급자 모드 전환",
         "         /mode intermediate     중급자 모드 전환",
@@ -1286,11 +1287,17 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.app._submit_command_input()
                 return
-            if event.key == "enter":
+            if event.key == "shift+enter":
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.insert_text_at_cursor("\n")
+                return
+            if event.key == "enter":
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.app._submit_command_input()
                 return
             if event.key == "tab":
                 event.stop()
@@ -1349,8 +1356,13 @@ def run_tui(project_path: str = "") -> int:
             color: #e8e8e8;
             text-style: bold;
         }
+        #input-area {
+            dock: bottom;
+            height: 7;
+            background: #080808;
+        }
         #command {
-            height: 6;
+            height: 4;
             padding: 0 1;
             background: #202020;
             color: #ffffff;
@@ -1398,7 +1410,7 @@ def run_tui(project_path: str = "") -> int:
         }
         #actions {
             height: 3;
-            margin-top: 1;
+            margin-top: 0;
         }
         #file {
             width: 18;
@@ -1445,10 +1457,11 @@ def run_tui(project_path: str = "") -> int:
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
                 yield LogView("", id="log")
                 yield ModeSelector("", id="mode-selector")
-                yield CommandInput(id="command")
-                with Horizontal(id="actions"):
-                    yield FileButton("FILE", id="file")
-                    yield SendButton("SEND  Ctrl+Enter", id="send")
+                with Vertical(id="input-area"):
+                    yield CommandInput(id="command")
+                    with Horizontal(id="actions"):
+                        yield FileButton("FILE", id="file")
+                        yield SendButton("SEND  Enter", id="send")
                 yield StatusBar("", id="status")
 
         def on_mount(self) -> None:
