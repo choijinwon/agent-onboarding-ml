@@ -748,8 +748,7 @@ class BeginnerTuiController:
 
     def _handle_approval_choice(self, command: str) -> str:
         if command == "1":
-            if self.agent_mode != "Build":
-                return self.current_screen()
+            self.agent_mode = "Build"
             analysis = analyze_project(self.project_path)
             previews = build_fix_previews(analysis)
             if not previews:
@@ -777,7 +776,7 @@ class BeginnerTuiController:
 
     def _handle_navigation(self, command: str) -> str:
         if command in {"다음", "next", "n"}:
-            self.index = min(len(self.steps) - 1, self.index + 1)
+            self.index = 0 if self.index >= len(self.steps) - 1 else self.index + 1
             return self.current_screen()
         if command in {"이전", "prev", "previous", "p"}:
             self.index = max(0, self.index - 1)

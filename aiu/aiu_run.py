@@ -1531,7 +1531,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(controller.agent_mode, "Chatbot")
         self.assertEqual(controller.submit("/agent"), "plan build chatbot")
 
-    def test_tui_controller_plan_mode_does_not_apply_files(self):
+    def test_tui_controller_step6_approval_applies_files(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             requirements = root / "requirements.txt"
@@ -1546,9 +1546,10 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 5)
             output = controller.submit("1")
 
-            self.assertNotIn("Build 모드에서만", output)
-            self.assertEqual(requirements.read_text(), "tensorflow==2.17.0\n")
-            self.assertNotIn("import mlflow", train.read_text())
+            self.assertEqual(controller.agent_mode, "Build")
+            self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
 
     def test_tui_chat_without_deepagents_config_does_not_modify_files(self):
         with TemporaryDirectory() as tmpdir:
@@ -1721,6 +1722,36 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Current: Tab 7/10", output)
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertIn("import mlflow", train.read_text())
+
+    def test_tui_beginner_step6_approval_one_applies_without_manual_build_switch(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            for _ in range(5):
+                controller.submit("다음")
+
+            output = controller.submit("1")
+
+            self.assertEqual(controller.agent_mode, "Build")
+            self.assertEqual(controller.index, 6)
+            self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertIn("import mlflow", train.read_text())
+
+    def test_tui_beginner_next_on_step10_returns_to_step1(self):
+        controller = self.beginner_tui("")
+        controller.submit("10")
+
+        output = controller.submit("다음")
+
+        self.assertEqual(controller.index, 0)
+        self.assertIn("Current: Tab 1/10", output)
+        self.assertIn("Step 1. 프로젝트 선택", output)
 
     def test_windows_command_wrapper_exists(self):
         wrapper = Path(__file__).resolve().parents[1] / "ml-agent.cmd"
