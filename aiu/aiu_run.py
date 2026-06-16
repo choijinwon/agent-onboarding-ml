@@ -1958,6 +1958,27 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("선택 항목: run_model.py 생성", fake.calls[-1][0])
         self.assertIn("Agent 응답 선택", controller.render_log())
 
+    def test_tui_agent_response_choice_prepare_clears_selection_before_worker(self):
+        controller = self.beginner_tui("")
+        controller.select_agent_mode("Chatbot")
+        controller._capture_agent_response_choices("1. MLflow 설정 점검\n2. run_model.py 생성")
+
+        prompt, display = controller.prepare_agent_response_choice_submission("2")
+
+        self.assertFalse(controller.awaiting_agent_response_choice)
+        self.assertEqual(controller.agent_response_choices, [])
+        self.assertEqual(display, "선택: run_model.py 생성")
+        self.assertIn("선택 항목: run_model.py 생성", prompt)
+
+    def test_tui_submit_queue_uses_agent_choice_prepare_before_chat_worker(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("prepare_agent_response_choice_submission(value)", source)
+        self.assertIn("display_value = value", source)
+        self.assertIn("submit_value = value", source)
+        self.assertIn("self.controller.set_thinking(display_value)", source)
+        self.assertIn("self._start_submit_worker(submit_value, request_id)", source)
+
     def test_tui_chatbot_direct_message_clears_agent_response_choice(self):
         class FakeRuntime:
             def __init__(self):
@@ -1969,11 +1990,17 @@ class WindowsSetupTest(unittest.TestCase):
                     return DeepAgentsRunResult("1. A안\n2. B안", True)
                 return DeepAgentsRunResult("다시 요청 처리", True)
 
-        controller = self.beginner_tui("", deepagents_runtime=FakeRuntime())
-        controller.select_agent_mode("Chatbot")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = self.beginner_tui("", deepagents_runtime=FakeRuntime())
+                controller.select_agent_mode("Chatbot")
 
-        controller.submit("선택지 줘")
-        output = controller.submit("원하는 항목이 없어서 다른 방식으로 해줘")
+                controller.submit("선택지 줘")
+                output = controller.submit("원하는 항목이 없어서 다른 방식으로 해줘")
+            finally:
+                os.chdir(cwd)
 
         self.assertIn("다시 요청 처리", output)
         self.assertFalse(controller.awaiting_agent_response_choice)

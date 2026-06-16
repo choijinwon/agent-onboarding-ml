@@ -1066,10 +1066,14 @@ class BeginnerTuiController:
             self.log_lines.append(message)
 
     def select_agent_response_choice(self, value: str) -> str:
+        prepared = self.prepare_agent_response_choice_submission(value)
+        return self.handle_chat_message(prepared[0])
+
+    def prepare_agent_response_choice_submission(self, value: str) -> tuple[str, str]:
         candidate = value.strip()
         if not self.agent_response_choices:
             self.awaiting_agent_response_choice = False
-            return self.handle_chat_message(candidate)
+            return candidate, candidate
         if not candidate:
             choice = self.highlighted_agent_response_choice
         elif candidate.isdigit() and 1 <= int(candidate) <= len(self.agent_response_choices):
@@ -1077,7 +1081,7 @@ class BeginnerTuiController:
         else:
             self.awaiting_agent_response_choice = False
             self.agent_response_choices = []
-            return self.handle_chat_message(candidate)
+            return candidate, candidate
         self.awaiting_agent_response_choice = False
         self.agent_response_choices = []
         followup = (
@@ -1085,7 +1089,7 @@ class BeginnerTuiController:
             f"선택 항목: {choice}\n\n"
             f"이전 Agent 응답:\n{self.last_agent_response}"
         )
-        return self.handle_chat_message(followup)
+        return followup, f"선택: {choice}"
 
     @property
     def ai_studio_env_path(self) -> Path:
@@ -1858,6 +1862,11 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh(force_sample_value=True)
                 self._focus_command()
                 return
+            if self.controller.awaiting_agent_response_choice:
+                self.controller.cycle_agent_response_choice(1)
+                self._refresh(force_agent_choice_value=True)
+                self._focus_command()
+                return
             self.controller.toggle_agent()
             self._refresh()
             self._focus_command()
@@ -1881,6 +1890,11 @@ def run_tui(project_path: str = "") -> int:
             if self.controller.awaiting_sample_selection:
                 self.controller.cycle_sample_selection(-1)
                 self._refresh(force_sample_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_agent_response_choice:
+                self.controller.cycle_agent_response_choice(-1)
+                self._refresh(force_agent_choice_value=True)
                 self._focus_command()
                 return
             self.controller.previous_agent()
@@ -2090,7 +2104,11 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def _submit_or_queue(self, value: str) -> None:
-            if self.controller.should_show_thinking(value):
+            display_value = value
+            submit_value = value
+            if self.controller.awaiting_agent_response_choice:
+                submit_value, display_value = self.controller.prepare_agent_response_choice_submission(value)
+            if self.controller.should_show_thinking(submit_value):
                 if self._chatbot_busy:
                     self.controller.latest_message = (
                         "이전 CHAT 요청을 정리하는 중입니다. 잠시 후 다시 입력하거나 Esc로 종료하세요."
@@ -2102,13 +2120,17 @@ def run_tui(project_path: str = "") -> int:
                 self._chatbot_request_id += 1
                 request_id = self._chatbot_request_id
                 self._active_chatbot_request_id = request_id
-                self._active_chatbot_value = value.strip()
-                self.controller.set_thinking(value)
+                self._active_chatbot_value = display_value.strip()
+                self.controller.set_thinking(display_value)
                 self._refresh()
                 self._focus_command()
-                self.set_timer(0.05, lambda: self._start_submit_worker(value, request_id), name="chatbot-submit")
+                self.set_timer(
+                    0.05,
+                    lambda: self._start_submit_worker(submit_value, request_id),
+                    name="chatbot-submit",
+                )
                 return
-            self._submit_value(value)
+            self._submit_value(submit_value)
 
         def _start_submit_worker(self, value: str, request_id: int) -> None:
             if request_id in self._cancelled_chatbot_requests:
