@@ -127,6 +127,14 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertEqual(extract_deepagents_content({"messages": [Message()]}), "마지막 응답")
         self.assertEqual(extract_deepagents_content({"output": "출력"}), "출력")
 
+    def test_chat_runtime_does_not_reuse_cached_agent_and_sets_timeout(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn('use_cache = agent_mode != "Chat"', source)
+        self.assertIn('if use_cache and cache_key in self._agent_cache:', source)
+        self.assertIn('if use_cache:', source)
+        self.assertIn('timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT")', source)
+
 
 class ModeParsingTest(unittest.TestCase):
     def test_parse_numeric_modes(self):
@@ -1655,6 +1663,15 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("AGENT  response", rendered)
         self.assertIn("Chatbot 응답 처리 중 오류가 발생했습니다: boom", rendered)
 
+    def test_tui_chatbot_worker_always_releases_busy_state(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("def _submit_value_in_thread", source)
+        self.assertIn("except BaseException as exc", source)
+        self.assertIn("finally:", source)
+        self.assertIn("self.call_from_thread(lambda: self._finish_submit(request_id, value))", source)
+        self.assertIn("self._chatbot_busy = False", source)
+
     def test_tui_thinking_is_only_for_chatbot_text(self):
         controller = BeginnerTuiController("")
         self.assertFalse(controller.should_show_thinking("하이"))
@@ -1827,6 +1844,12 @@ class WindowsSetupTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
         self.assertIn("TextArea", source)
+        self.assertIn("RichLog", source)
+        self.assertIn("class LogView(RichLog)", source)
+        self.assertIn("def replace_text", source)
+        self.assertIn("self.scroll_end(animate=False)", source)
+        self.assertIn("overflow-y: auto", source)
+        self.assertIn("LogView(id=\"log\", wrap=True", source)
         self.assertIn('Binding("enter", "submit_input"', source)
         self.assertIn("def action_submit_input", source)
         self.assertIn("async def _on_key", source)
@@ -1842,6 +1865,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('SendButton("SEND  Enter", id="send")', source)
         self.assertIn("FileButton", source)
         self.assertIn('FileButton("FILE", id="file")', source)
+        self.assertIn("CancelButton", source)
+        self.assertIn('CancelButton("CANCEL", id="cancel"', source)
         self.assertIn('Vertical(id="input-area")', source)
         self.assertIn("#input-area", source)
         self.assertIn("dock: bottom", source)
@@ -1849,8 +1874,20 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('event.button.id == "file"', source)
         self.assertIn("self._open_folder_picker()", source)
         self.assertIn("self.controller.start_folder_selection(base)", source)
+        self.assertIn('event.button.id == "cancel"', source)
+        self.assertIn("self._cancel_chatbot_request()", source)
         self.assertIn('event.button.id != "send"', source)
         self.assertNotIn("Input.Submitted", source)
+
+    def test_tui_chatbot_cancel_button_ignores_late_response(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("self._cancelled_chatbot_requests", source)
+        self.assertIn("self._active_chatbot_request_id", source)
+        self.assertIn("def _cancel_chatbot_request", source)
+        self.assertIn("늦게 도착한 응답은 표시하지 않습니다", source)
+        self.assertIn("request_id in self._cancelled_chatbot_requests", source)
+        self.assertIn("cancel.disabled = not self._chatbot_busy", source)
 
     def test_tui_paste_normalization_keeps_multiline_but_cleans_indent(self):
         raw = "\n        첫 줄\n            둘째 줄\n\n\n        셋째 줄   \n"
@@ -1858,6 +1895,19 @@ class WindowsSetupTest(unittest.TestCase):
         output = normalize_pasted_input(raw)
 
         self.assertEqual(output, "첫 줄\n    둘째 줄\n\n셋째 줄")
+
+    def test_tui_paste_normalization_preserves_korean_and_removes_terminal_markers(self):
+        raw = "\x1b[200~\u1112\u1161\u11ab\u1100\u1173\u11af \x1b[31m테스트\x1b[0m\x1b[201~"
+
+        output = normalize_pasted_input(raw)
+
+        self.assertEqual(output, "한글 테스트")
+
+    def test_tui_paste_prevents_textual_default_duplicate_insert(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(source.count('if hasattr(event, "prevent_default"):'), 2)
+        self.assertIn("event.prevent_default()", source)
 
     def test_tui_right_click_copies_current_screen(self):
         class Event:
@@ -2048,6 +2098,44 @@ class WindowsSetupTest(unittest.TestCase):
                 os.environ.pop("AIU_TEST_HOME", None)
             else:
                 os.environ["AIU_TEST_HOME"] = old_value
+
+    def test_tui_resolves_windows_absolute_path_with_drive_mapping(self):
+        old_value = os.environ.get("AIU_WINDOWS_DRIVE_C")
+        with TemporaryDirectory() as tmpdir:
+            drive_root = Path(tmpdir)
+            project = drive_root / "Users" / "choi" / "AI ML" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ["AIU_WINDOWS_DRIVE_C"] = str(drive_root)
+            try:
+                self.assertEqual(normalize_input_path(r"C:\Users\choi\AI ML\model"), project.resolve())
+                self.assertEqual(normalize_input_path("file:///C:/Users/choi/AI%20ML/model"), project.resolve())
+            finally:
+                if old_value is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
+
+    def test_analyze_project_accepts_windows_absolute_path_with_drive_mapping(self):
+        old_value = os.environ.get("AIU_WINDOWS_DRIVE_C")
+        with TemporaryDirectory() as tmpdir:
+            drive_root = Path(tmpdir)
+            project = drive_root / "work" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            (project / "train.py").write_text("import mlflow\n")
+            os.environ["AIU_WINDOWS_DRIVE_C"] = str(drive_root)
+            try:
+                analysis = analyze_project(r"C:\work\model")
+            finally:
+                if old_value is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
+
+        self.assertTrue(analysis.exists)
+        self.assertTrue(analysis.is_directory)
+        self.assertEqual(Path(analysis.path), project.resolve())
 
     def test_tui_normalizes_file_path_to_parent_project(self):
         with TemporaryDirectory() as tmpdir:

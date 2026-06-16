@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from deep_agent.app_config import AppConfig, ensure_read_write_directory, ensure_runtime_layout, format_config_summary
+from deep_agent.path_utils import resolve_filesystem_path
 from deep_agent.profile import build_ml_platform_profile, format_profile
 from deep_agent.libs import deepagents_libs_as_dict, format_deepagents_libs
 from deep_agent.stores.error_log_store import (
@@ -1648,7 +1649,7 @@ def render_agent_switcher(index: int) -> str:
 
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
-    target = Path(project_path or ".")
+    target = resolve_filesystem_path(project_path or ".")
     display_path = str(target)
     scan = scan_project(target)
 

@@ -3,14 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from importlib.util import find_spec
 from pathlib import Path
-import os
 import re
-import shlex
 import textwrap
 from threading import Thread
-from urllib.parse import unquote, urlparse
+import unicodedata
 
 from deep_agent.app_config import AppConfig
+from deep_agent.path_utils import (
+    existing_filesystem_path,
+    expand_cross_platform_vars,
+    is_windows_style_path,
+    normalize_path_text,
+)
 from deep_agent.stores.chat_session_store import append_chat_session_event
 from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki
 
@@ -73,6 +77,8 @@ AI_STUDIO_ENV_FIELDS = [
     ("MLFLOW_EXPERIMENT_NAME", "MLflow experiment name"),
     ("MLFLOW_REGISTER_MODEL_NAME", "MLflow registered model name"),
 ]
+PASTE_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
+PASTE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class LogView:
@@ -96,6 +102,10 @@ class SendButton:
 
 
 class FileButton:
+    pass
+
+
+class CancelButton:
     pass
 
 
@@ -480,7 +490,10 @@ def path_candidates_from_input(raw: str) -> list[str]:
 
 
 def normalize_pasted_input(text: str) -> str:
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
+    normalized = unicodedata.normalize("NFC", text)
+    normalized = PASTE_ESCAPE_RE.sub("", normalized)
+    normalized = PASTE_CONTROL_RE.sub("", normalized)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
     normalized = textwrap.dedent(normalized).strip("\n")
     lines = [line.rstrip() for line in normalized.split("\n")]
     compacted: list[str] = []
@@ -493,7 +506,7 @@ def normalize_pasted_input(text: str) -> str:
             continue
         compacted.append(line)
         blank_seen = False
-    return "\n".join(compacted).strip()
+    return unicodedata.normalize("NFC", "\n".join(compacted).strip())
 
 
 def read_ai_studio_env(path: Path) -> dict[str, str]:
@@ -522,53 +535,11 @@ def write_ai_studio_env(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
-WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?[A-Za-z]:[\\/]")
-WINDOWS_ENV_RE = re.compile(r"%([^%]+)%")
-POWERSHELL_ENV_RE = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
-
-
-def is_windows_style_path(value: str) -> bool:
-    return bool(WINDOWS_DRIVE_PATH_RE.match(value)) or value.startswith(("\\\\", "//"))
-
-
-def expand_cross_platform_vars(value: str) -> str:
-    def replace_percent(match: re.Match[str]) -> str:
-        return os.environ.get(match.group(1), match.group(0))
-
-    def replace_powershell(match: re.Match[str]) -> str:
-        return os.environ.get(match.group(1), match.group(0))
-
-    expanded = WINDOWS_ENV_RE.sub(replace_percent, value)
-    expanded = POWERSHELL_ENV_RE.sub(replace_powershell, expanded)
-    return os.path.expandvars(os.path.expanduser(expanded))
-
-
-def normalize_path_text(value: str) -> str:
-    normalized = value.strip().strip('"').strip("'")
-    if normalized.startswith("file://"):
-        parsed = urlparse(normalized)
-        normalized = unquote(parsed.path or normalized.removeprefix("file://"))
-    else:
-        normalized = unquote(normalized)
-    if WINDOWS_DRIVE_PATH_RE.match(normalized):
-        normalized = normalized.lstrip("/")
-    normalized = expand_cross_platform_vars(normalized)
-    if not is_windows_style_path(normalized):
-        try:
-            parts = shlex.split(normalized)
-        except ValueError:
-            parts = []
-        if len(parts) == 1:
-            normalized = parts[0]
-    return normalized
-
-
 def normalize_input_path(raw: str) -> Path | None:
     for candidate in path_candidates_from_input(raw):
-        value = normalize_path_text(candidate)
-        if not value:
+        path = existing_filesystem_path(candidate)
+        if path is None:
             continue
-        path = Path(value).resolve()
         if path.exists():
             if path.is_file():
                 return path.parent
@@ -611,11 +582,9 @@ def discover_selectable_folders(base: str = "", limit: int = 30) -> list[Path]:
         if selected is not None:
             roots.append(selected)
         else:
-            normalized = normalize_path_text(base)
-            if normalized:
-                path = Path(normalized).resolve()
-                if path.exists():
-                    roots.append(path.parent if path.is_file() else path)
+            path = existing_filesystem_path(base)
+            if path is not None:
+                roots.append(path.parent if path.is_file() else path)
     else:
         for project in list_existing_work_projects():
             if add_folder(project):
@@ -1346,16 +1315,19 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CommandInput, FileButton, LogView, ModeSelector, SendButton, StatusBar
+    global AIOnboardingTuiApp, CancelButton, CommandInput, FileButton, LogView, ModeSelector, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical
-    from textual.widgets import Button, Static, TextArea
+    from textual.widgets import Button, RichLog, Static, TextArea
 
-    class LogView(Static):
-        pass
+    class LogView(RichLog):
+        def replace_text(self, text: str) -> None:
+            self.clear()
+            self.write(text)
+            self.scroll_end(animate=False)
 
     class CommandInput(TextArea):
         @property
@@ -1382,6 +1354,8 @@ def run_tui(project_path: str = "") -> int:
 
         def on_paste(self, event: events.Paste) -> None:
             event.stop()
+            if hasattr(event, "prevent_default"):
+                event.prevent_default()
             self.insert_text_at_cursor(normalize_pasted_input(event.text))
 
         def _handle_submit_keys(self, event) -> bool:
@@ -1443,6 +1417,9 @@ def run_tui(project_path: str = "") -> int:
     class FileButton(Button):
         pass
 
+    class CancelButton(Button):
+        pass
+
     class AIOnboardingTuiApp(App[None]):
         AUTO_FOCUS = "#command"
         CSS = """
@@ -1468,6 +1445,7 @@ def run_tui(project_path: str = "") -> int:
             background: #080808;
             color: #e8e8e8;
             text-style: bold;
+            overflow-y: auto;
         }
         #input-area {
             dock: bottom;
@@ -1539,6 +1517,18 @@ def run_tui(project_path: str = "") -> int:
         #file.chatbot {
             background: #223a2b;
         }
+        #cancel {
+            width: 18;
+            height: 3;
+            margin-right: 1;
+            background: #5f1d1d;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #cancel:disabled {
+            background: #2a2a2a;
+            color: #777777;
+        }
         #send {
             width: 1fr;
             height: 3;
@@ -1565,16 +1555,21 @@ def run_tui(project_path: str = "") -> int:
             super().__init__()
             self.controller = BeginnerTuiController(initial_project_path)
             self._chatbot_busy = False
+            self._chatbot_request_id = 0
+            self._active_chatbot_request_id: int | None = None
+            self._active_chatbot_value = ""
+            self._cancelled_chatbot_requests: set[int] = set()
 
         def compose(self) -> ComposeResult:
             with Vertical(id="shell"):
                 yield Static("AI ML Onboarding Console | ML Platform registration workflow ...", id="title")
-                yield LogView("", id="log")
+                yield LogView(id="log", wrap=True, markup=False, auto_scroll=True)
                 yield ModeSelector("", id="mode-selector")
                 with Vertical(id="input-area"):
                     yield CommandInput(id="command")
                     with Horizontal(id="actions"):
                         yield FileButton("FILE", id="file")
+                        yield CancelButton("CANCEL", id="cancel", disabled=True)
                         yield SendButton("SEND  Enter", id="send")
                 yield StatusBar("", id="status")
 
@@ -1641,10 +1636,30 @@ def run_tui(project_path: str = "") -> int:
                 event.stop()
                 self._open_folder_picker()
                 return
+            if event.button.id == "cancel":
+                event.stop()
+                self._cancel_chatbot_request()
+                return
             if event.button.id != "send":
                 return
             event.stop()
             self._submit_command_input()
+
+        def _cancel_chatbot_request(self) -> None:
+            request_id = self._active_chatbot_request_id
+            if not self._chatbot_busy or request_id is None:
+                self.controller.latest_message = "취소할 CHAT 요청이 없습니다."
+                self._refresh()
+                self._focus_command()
+                return
+            self._cancelled_chatbot_requests.add(request_id)
+            self._chatbot_busy = False
+            message = "CHAT 요청을 취소했습니다. 늦게 도착한 응답은 표시하지 않습니다."
+            self.controller.latest_message = message
+            if self._active_chatbot_value:
+                self.controller._append_or_replace_chat_log(self._active_chatbot_value, message, [])
+            self._refresh()
+            self._focus_command()
 
         def _open_folder_picker(self) -> None:
             command = self.query_one(CommandInput)
@@ -1675,6 +1690,8 @@ def run_tui(project_path: str = "") -> int:
             if self.focused is command:
                 return
             event.stop()
+            if hasattr(event, "prevent_default"):
+                event.prevent_default()
             self._focus_command()
             command.insert_text_at_cursor(normalize_pasted_input(event.text))
 
@@ -1757,30 +1774,65 @@ def run_tui(project_path: str = "") -> int:
         def _submit_or_queue(self, value: str) -> None:
             if self.controller.should_show_thinking(value):
                 if self._chatbot_busy:
-                    self.controller.latest_message = "이전 Chatbot 요청을 처리 중입니다. 잠시만 기다려 주세요."
+                    self.controller.latest_message = (
+                        "이전 CHAT 요청을 정리하는 중입니다. 잠시 후 다시 입력하거나 Esc로 종료하세요."
+                    )
                     self._refresh()
                     self._focus_command()
                     return
                 self._chatbot_busy = True
+                self._chatbot_request_id += 1
+                request_id = self._chatbot_request_id
+                self._active_chatbot_request_id = request_id
+                self._active_chatbot_value = value.strip()
                 self.controller.set_thinking(value)
                 self._refresh()
                 self._focus_command()
-                self.set_timer(0.05, lambda: self._start_submit_worker(value), name="chatbot-submit")
+                self.set_timer(0.05, lambda: self._start_submit_worker(value, request_id), name="chatbot-submit")
                 return
             self._submit_value(value)
 
-        def _start_submit_worker(self, value: str) -> None:
-            Thread(target=self._submit_value_in_thread, args=(value,), daemon=True).start()
-
-        def _submit_value_in_thread(self, value: str) -> None:
+        def _start_submit_worker(self, value: str, request_id: int) -> None:
+            if request_id in self._cancelled_chatbot_requests:
+                self._finish_submit(request_id, value)
+                return
             try:
-                self.controller.submit(value)
+                Thread(target=self._submit_value_in_thread, args=(value, request_id), daemon=True).start()
             except Exception as exc:  # pragma: no cover - UI safety boundary
                 self.controller._append_chat_error(value, exc)
-            self.call_from_thread(self._finish_submit)
+                self._finish_submit(request_id, value)
 
-        def _finish_submit(self) -> None:
+        def _submit_value_in_thread(self, value: str, request_id: int) -> None:
+            try:
+                if request_id not in self._cancelled_chatbot_requests:
+                    self.controller.submit(value)
+            except BaseException as exc:  # pragma: no cover - UI safety boundary
+                if request_id not in self._cancelled_chatbot_requests:
+                    self.controller._append_chat_error(value, exc)
+            finally:
+                try:
+                    self.call_from_thread(lambda: self._finish_submit(request_id, value))
+                except RuntimeError:
+                    if self._active_chatbot_request_id == request_id:
+                        self._chatbot_busy = False
+
+        def _finish_submit(self, request_id: int | None = None, value: str = "") -> None:
+            if request_id is not None and request_id in self._cancelled_chatbot_requests:
+                self._cancelled_chatbot_requests.discard(request_id)
+                self.controller.latest_message = "CHAT 요청을 취소했습니다."
+                if value.strip():
+                    self.controller._append_or_replace_chat_log(value.strip(), "CHAT 요청을 취소했습니다.", [])
+                if self._active_chatbot_request_id == request_id:
+                    self._active_chatbot_request_id = None
+                    self._active_chatbot_value = ""
+                self._refresh()
+                self._focus_command()
+                return
+            if request_id is not None and self._active_chatbot_request_id not in {None, request_id}:
+                return
             self._chatbot_busy = False
+            self._active_chatbot_request_id = None
+            self._active_chatbot_value = ""
             if self.controller.exited:
                 self.exit()
                 return
@@ -1815,10 +1867,12 @@ def run_tui(project_path: str = "") -> int:
             send = self.query_one(SendButton)
             send.set_class(self.controller.agent_mode == "Build", "build")
             send.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            cancel = self.query_one(CancelButton)
+            cancel.disabled = not self._chatbot_busy
             file_button = self.query_one(FileButton)
             file_button.set_class(self.controller.agent_mode == "Build", "build")
             file_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
-            self.query_one(LogView).update(self.controller.render_log())
+            self.query_one(LogView).replace_text(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
                 selector.update("beginner intermediate advanced")
@@ -1842,6 +1896,7 @@ __all__ = [
     "BeginnerTuiController",
     "available_models_from_config",
     "CommandInput",
+    "CancelButton",
     "FileButton",
     "discover_selectable_folders",
     "folder_selection_placeholder",

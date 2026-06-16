@@ -69,13 +69,14 @@ class DeepAgentsRuntime:
             )
 
     def _create_agent(self, *, project_path: str, agent_mode: str):
+        use_cache = agent_mode != "Chat"
         cache_key = (
             str(Path(project_path).expanduser()) if project_path else "",
             agent_mode,
             self.qwen_config.model,
             self.qwen_config.base_url.rstrip("/"),
         )
-        if cache_key in self._agent_cache:
+        if use_cache and cache_key in self._agent_cache:
             return self._agent_cache[cache_key]
 
         _ensure_local_deepagents_on_path()
@@ -87,6 +88,7 @@ class DeepAgentsRuntime:
             api_key=self.qwen_config.api_key,
             base_url=self.qwen_config.base_url.rstrip("/"),
             temperature=0.2,
+            timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT"),
         )
         tools = [] if agent_mode == "Chat" else [analyze_ml_project, preview_ml_fixes, apply_ml_fixes]
         agent = create_deep_agent(
@@ -95,7 +97,8 @@ class DeepAgentsRuntime:
             system_prompt=build_deepagents_system_prompt(project_path, agent_mode),
             name="ai-ml-onboarding-deepagent",
         )
-        self._agent_cache[cache_key] = agent
+        if use_cache:
+            self._agent_cache[cache_key] = agent
         return agent
 
 
