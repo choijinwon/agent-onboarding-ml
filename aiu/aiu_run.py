@@ -1509,9 +1509,11 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
             self.assertTrue((root / "mlruns").exists())
+            self.assertTrue((root / "mlflow_models" / "manifest.json").exists())
             self.assertIn("dry-run register command", result.stdout)
             self.assertIn("file:./mlruns", result.stdout)
             self.assertIn("local mlruns directory", result.stdout)
+            self.assertIn("mlflow upload bundle", result.stdout)
 
     def test_run_model_source_maps_empty_tracking_url_to_root_mlruns(self):
         with TemporaryDirectory() as tmpdir:
@@ -1532,7 +1534,12 @@ class AdvancedModeTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "mlruns").is_dir())
+            self.assertTrue((root / "mlflow_models" / "model_artifacts" / "local_model.onnx").exists())
+            manifest = json.loads((root / "mlflow_models" / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["tracking_uri"], "file:./mlruns")
+            self.assertEqual(Path(manifest["local_mlruns_dir"]), (root / "mlruns").resolve())
             self.assertIn("mlflow tracking default: file:./mlruns", result.stdout)
+            self.assertIn("mlflow upload bundle", result.stdout)
 
     def test_run_model_source_prepares_explicit_local_model_without_mlflow(self):
         with TemporaryDirectory() as tmpdir:
@@ -1874,6 +1881,8 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(report["summary"]["issue_count"], 0)
             self.assertEqual(report["summary"]["mlflow"], "ok")
             self.assertEqual(report["summary"]["local_serving"], "준비 가능")
+            self.assertEqual(report["summary"]["local_mlruns_dir"], str(root.resolve() / "mlruns"))
+            self.assertEqual(report["summary"]["mlflow_model_upload_dir"], str(root.resolve() / "mlflow_models"))
             self.assertEqual(report["summary"]["health_endpoint"], "http://127.0.0.1:8000/health")
 
     def test_profile_command_outputs_deep_agent_profile(self):

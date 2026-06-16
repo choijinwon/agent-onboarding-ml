@@ -3478,6 +3478,7 @@ MODEL_SUFFIXES = {
 }
 IGNORED_DIRS = {".aiu", ".git", ".venv", "__pycache__", "registration_packages", "saved_model"}
 LOCAL_MLFLOW_TRACKING_URI = "file:./mlruns"
+MLFLOW_MODEL_UPLOAD_DIR = "mlflow_models"
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
 
@@ -3544,6 +3545,40 @@ def ensure_local_mlflow_store() -> Path:
     elif not tracking_uri:
         os.environ["MLFLOW_TRACKING_URI"] = LOCAL_MLFLOW_TRACKING_URI
     return mlruns
+
+
+def collect_mlflow_upload_bundle(local_model: Path, config_path: Path, local_mlflow_store: Path) -> Path:
+    bundle_root = ensure_read_write_directory(project_root() / MLFLOW_MODEL_UPLOAD_DIR)
+    artifact_dir = ensure_read_write_directory(bundle_root / "model_artifacts")
+    support_dir = ensure_read_write_directory(bundle_root / "support_files")
+    copied_files: list[str] = []
+
+    if local_model.exists():
+        target = artifact_dir / local_model.name
+        if local_model.is_dir():
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(local_model, target)
+        else:
+            shutil.copy2(local_model, target)
+        copied_files.append(str(target))
+
+    for support_file in [config_path, Path("input_example.json"), Path("requirements.txt"), Path("ai_studio.env")]:
+        if support_file.exists() and support_file.is_file():
+            target = support_dir / support_file.name
+            shutil.copy2(support_file, target)
+            copied_files.append(str(target))
+
+    manifest = {
+        "description": "Local MLflow upload bundle for AI Studio registration",
+        "tracking_uri": os.environ.get("MLFLOW_TRACKING_URI", LOCAL_MLFLOW_TRACKING_URI),
+        "local_mlruns_dir": str(local_mlflow_store.resolve()),
+        "local_model": str(local_model),
+        "bundle_dir": str(bundle_root.resolve()),
+        "files": copied_files,
+    }
+    (bundle_root / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return bundle_root
 
 
 def configure_mlflow_environment() -> None:
@@ -3882,7 +3917,10 @@ def main() -> None:
             source_model, train_df, test_df, test_x, metrics = train_sklearn_diabetes_model(config)
     local_model = prepare_local_model(source_model, config)
     os.environ["AI_STUDIO_LOCAL_MODEL_PATH"] = str(local_model)
+    upload_bundle = collect_mlflow_upload_bundle(local_model, config_path, local_mlflow_store)
     print(f"local model prepared: {local_model}")
+    print(f"local mlruns directory: {local_mlflow_store}")
+    print(f"mlflow upload bundle: {upload_bundle}")
 
     if args.prepare_only:
         return
@@ -3890,6 +3928,7 @@ def main() -> None:
         print("dry-run register command: python run_model.py --env-file ai_studio.env --register")
         print(f"mlflow tracking default: {LOCAL_MLFLOW_TRACKING_URI} when MLFLOW_TRACKING_URL is empty")
         print(f"local mlruns directory: {local_mlflow_store}")
+        print(f"mlflow upload bundle: {upload_bundle}")
         return
 
     run_mlflow_registration(local_model, config_path, config, train_df, test_df, test_x, metrics)
@@ -4815,6 +4854,8 @@ def write_report_file(
             "mlflow": "ok" if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else "missing",
             "job_template": "ready" if analysis.job_template_ready else "needs_input",
             "local_serving": analysis.local_serving.status,
+            "local_mlruns_dir": str(Path(analysis.path or ".") / "mlruns"),
+            "mlflow_model_upload_dir": str(Path(analysis.path or ".") / "mlflow_models"),
             "health_endpoint": analysis.local_serving.health_endpoint,
             "predict_endpoint": analysis.local_serving.predict_endpoint,
             "issue_count": len(analysis.issues),
