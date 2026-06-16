@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import textwrap
 from threading import Thread
+import time
 import unicodedata
 
 from deep_agent.app_config import AppConfig
@@ -215,6 +216,14 @@ def format_chat_card(
         )
     rows.append(divider)
     return "\n".join(rows)
+
+
+def format_thinking_animation(elapsed_seconds: int) -> str:
+    elapsed = max(0, int(elapsed_seconds))
+    width = 8
+    fill = (elapsed % width) + 1
+    bar = "=" * fill + " " * (width - fill)
+    return f"AI thinking [{bar}] {elapsed}s"
 
 
 def truncate_for_tui(text: str, *, max_chars: int, max_lines: int) -> str:
@@ -1209,10 +1218,11 @@ class BeginnerTuiController:
             return False
         return True
 
-    def set_thinking(self, raw: str) -> None:
+    def set_thinking(self, raw: str, elapsed_seconds: int = 0) -> None:
         command = raw.strip()
-        self.latest_message = format_chat_card(command, "생각중...")
-        self._append_or_replace_chat_log(command, "생각중...", [])
+        response = format_thinking_animation(elapsed_seconds)
+        self.latest_message = format_chat_card(command, response)
+        self._append_or_replace_chat_log(command, response, [])
 
     @property
     def qwen_model(self) -> str:
@@ -1997,10 +2007,10 @@ class BeginnerTuiController:
         agent_response: str,
         applied_changes: list[AppliedChange],
     ) -> None:
-        prefix = f"  YOU    {user_message}\n"
+        marker = f"  YOU    {user_message}"
         replacement = self._format_chat_log(user_message, agent_response, applied_changes)
         for index in range(len(self.log_lines) - 1, -1, -1):
-            if self.log_lines[index].startswith(prefix):
+            if marker in self.log_lines[index]:
                 self.log_lines[index] = replacement
                 self._prune_chat_log_lines()
                 return
@@ -2424,6 +2434,8 @@ def run_tui(project_path: str = "") -> int:
             self._active_chatbot_request_id: int | None = None
             self._active_chatbot_value = ""
             self._cancelled_chatbot_requests: set[int] = set()
+            self._thinking_started_at = 0.0
+            self._thinking_timer = None
 
         def compose(self) -> ComposeResult:
             with Vertical(id="shell"):
@@ -2544,6 +2556,7 @@ def run_tui(project_path: str = "") -> int:
                 return
             self._cancelled_chatbot_requests.add(request_id)
             self._chatbot_busy = False
+            self._stop_thinking_animation()
             message = "CHAT 요청을 취소했습니다. 늦게 도착한 응답은 표시하지 않습니다."
             self.controller.latest_message = message
             if self._active_chatbot_value:
@@ -2734,6 +2747,7 @@ def run_tui(project_path: str = "") -> int:
                 self._active_chatbot_request_id = request_id
                 self._active_chatbot_value = display_value.strip()
                 self.controller.set_thinking(display_value)
+                self._start_thinking_animation()
                 self._refresh()
                 self._focus_command()
                 self.set_timer(
@@ -2771,6 +2785,7 @@ def run_tui(project_path: str = "") -> int:
         def _finish_submit(self, request_id: int | None = None, value: str = "") -> None:
             if request_id is not None and request_id in self._cancelled_chatbot_requests:
                 self._cancelled_chatbot_requests.discard(request_id)
+                self._stop_thinking_animation()
                 self.controller.latest_message = "CHAT 요청을 취소했습니다."
                 if value.strip():
                     self.controller._append_or_replace_chat_log(value.strip(), "CHAT 요청을 취소했습니다.", [])
@@ -2783,6 +2798,7 @@ def run_tui(project_path: str = "") -> int:
             if request_id is not None and self._active_chatbot_request_id not in {None, request_id}:
                 return
             self._chatbot_busy = False
+            self._stop_thinking_animation()
             self._active_chatbot_request_id = None
             self._active_chatbot_value = ""
             if self.controller.exited:
@@ -2790,6 +2806,31 @@ def run_tui(project_path: str = "") -> int:
                 return
             self._refresh()
             self._focus_command()
+
+        def _start_thinking_animation(self) -> None:
+            self._stop_thinking_animation()
+            self._thinking_started_at = time.monotonic()
+            self._thinking_timer = self.set_interval(1.0, self._tick_thinking_animation, name="chatbot-thinking")
+
+        def _stop_thinking_animation(self) -> None:
+            timer = self._thinking_timer
+            self._thinking_timer = None
+            if timer is not None:
+                try:
+                    timer.stop()
+                except AttributeError:
+                    try:
+                        timer.pause()
+                    except AttributeError:
+                        pass
+
+        def _tick_thinking_animation(self) -> None:
+            if not self._chatbot_busy or not self._active_chatbot_value:
+                self._stop_thinking_animation()
+                return
+            elapsed = int(time.monotonic() - self._thinking_started_at)
+            self.controller.set_thinking(self._active_chatbot_value, elapsed_seconds=elapsed)
+            self._refresh()
 
         def _submit_value(self, value: str) -> None:
             self.controller.submit(value)
@@ -2885,6 +2926,7 @@ __all__ = [
     "StatusBar",
     "format_agent_mode_selector",
     "format_model_choices",
+    "format_thinking_animation",
     "format_tui_model_info",
     "format_tui_chatbot_screen",
     "format_tui_help_screen",

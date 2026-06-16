@@ -71,6 +71,7 @@ from deep_agent.tui import (
     format_agent_mode_selector,
     format_folder_choices,
     format_chat_card,
+    format_thinking_animation,
     format_model_choices,
     format_sample_choices,
     format_tui_chatbot_screen,
@@ -2366,9 +2367,22 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertTrue(controller.should_show_thinking("하이"))
         controller.set_thinking("하이")
 
-        self.assertIn("생각중", controller.render_log())
+        self.assertIn("AI thinking", controller.render_log())
+        self.assertIn("0s", controller.render_log())
         self.assertIn("YOU    하이", controller.render_log())
         self.assertIn("AGENT  response", controller.render_log())
+
+    def test_tui_thinking_animation_shows_elapsed_seconds(self):
+        self.assertIn("AI thinking [=", format_thinking_animation(0))
+        self.assertIn("0s", format_thinking_animation(0))
+        self.assertIn("5s", format_thinking_animation(5))
+
+        controller = BeginnerTuiController("")
+        controller.submit("2")
+        controller.set_thinking("하이", elapsed_seconds=3)
+
+        self.assertIn("AI thinking", controller.render_log())
+        self.assertIn("3s", controller.render_log())
 
     def test_chat_card_uses_clean_rich_sections(self):
         rendered = format_chat_card("모델 검증해줘", "검증 결과입니다.", [])
@@ -2432,7 +2446,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("YOU    분석해줘", rendered)
             self.assertIn("AGENT  response", rendered)
             self.assertIn("완료 응답", rendered)
-            self.assertNotIn("Agent: 생각중", rendered)
+            self.assertNotIn("AI thinking", rendered)
 
     def test_tui_chatbot_error_is_visible_in_log(self):
         controller = BeginnerTuiController("")
@@ -2450,6 +2464,10 @@ class WindowsSetupTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
         self.assertIn("def _submit_value_in_thread", source)
+        self.assertIn("def _start_thinking_animation", source)
+        self.assertIn("def _stop_thinking_animation", source)
+        self.assertIn("def _tick_thinking_animation", source)
+        self.assertIn("self._stop_thinking_animation()", source)
         self.assertIn("except BaseException as exc", source)
         self.assertIn("finally:", source)
         self.assertIn("self.call_from_thread(lambda: self._finish_submit(request_id, value))", source)
