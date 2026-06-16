@@ -60,6 +60,7 @@ from deep_agent.tui import (
     format_tui_chatbot_screen,
     format_tui_help_screen,
     format_tui_model_info,
+    is_chat_apply_approved,
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
@@ -1845,6 +1846,9 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertFalse(should_use_autofix_chat("PLAN BUILD CHAT 차이를 알려줘"))
         self.assertTrue(should_use_autofix_chat("프로젝트 분석해줘"))
         self.assertTrue(should_use_autofix_chat("오류 로그 보고 자동 수정해줘"))
+        self.assertTrue(is_chat_apply_approved("승인하고 코드 수정해줘"))
+        self.assertTrue(is_chat_apply_approved("apply 승인 후 반영"))
+        self.assertFalse(is_chat_apply_approved("분석만 해줘"))
 
     def test_tui_command_placeholder_mentions_deepagents_model(self):
         self.assertNotIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
@@ -2142,6 +2146,44 @@ class WindowsSetupTest(unittest.TestCase):
                     os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
                 else:
                     os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
+
+    def test_tui_resolves_windows_unc_path_with_share_mapping(self):
+        old_root = os.environ.get("AIU_UNC_ROOT")
+        old_specific = os.environ.get("AIU_UNC_MLSERVER_MODELS")
+        with TemporaryDirectory() as tmpdir:
+            unc_root = Path(tmpdir) / "unc"
+            project = unc_root / "mlserver" / "models" / "team-a" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ["AIU_UNC_ROOT"] = str(unc_root)
+            try:
+                self.assertEqual(normalize_input_path(r"\\mlserver\models\team-a\model"), project.resolve())
+                self.assertEqual(normalize_input_path("//mlserver/models/team-a/model"), project.resolve())
+            finally:
+                if old_root is None:
+                    os.environ.pop("AIU_UNC_ROOT", None)
+                else:
+                    os.environ["AIU_UNC_ROOT"] = old_root
+                if old_specific is None:
+                    os.environ.pop("AIU_UNC_MLSERVER_MODELS", None)
+                else:
+                    os.environ["AIU_UNC_MLSERVER_MODELS"] = old_specific
+
+    def test_tui_resolves_windows_unc_path_with_specific_share_mapping(self):
+        old_value = os.environ.get("AIU_UNC_MLSERVER_MODELS")
+        with TemporaryDirectory() as tmpdir:
+            share_root = Path(tmpdir) / "models-share"
+            project = share_root / "team-a" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ["AIU_UNC_MLSERVER_MODELS"] = str(share_root)
+            try:
+                self.assertEqual(normalize_input_path(r"\\mlserver\models\team-a\model"), project.resolve())
+            finally:
+                if old_value is None:
+                    os.environ.pop("AIU_UNC_MLSERVER_MODELS", None)
+                else:
+                    os.environ["AIU_UNC_MLSERVER_MODELS"] = old_value
 
     def test_analyze_project_accepts_windows_absolute_path_with_drive_mapping(self):
         old_value = os.environ.get("AIU_WINDOWS_DRIVE_C")
@@ -2492,6 +2534,41 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(session_payload["selected_model"], "qwen3.6")
             self.assertTrue(session_payload["applied_changes"])
 
+    def test_tui_chat_approved_apply_falls_back_to_local_fixable_changes(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("DeepAgents runtime 실행 실패: test", False, error="test")
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                requirements = root / "requirements.txt"
+                train = root / "train.py"
+                requirements.write_text("tensorflow==2.17.0\n")
+                train.write_text("print('train')\n")
+                (root / "model.keras").write_text("sample")
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+
+                output = controller.submit("승인하고 코드 수정해줘")
+            finally:
+                os.chdir(cwd)
+
+            self.assertEqual(fake.calls[-1], ("승인하고 코드 수정해줘", str(root), "Build"))
+            self.assertIn("DeepAgents runtime 실행 실패", output)
+            self.assertIn("자동 수정 결과", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+            self.assertNotIn("import mlflow", train.read_text())
+            self.assertTrue((root / "run_model.py").exists())
+
     def test_tui_chat_autofix_leaves_manual_sora_artifact_issue(self):
         class FakeRuntime:
             def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
@@ -2611,6 +2688,8 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("WIKI_DIR=deep_agent/wiki", content)
         self.assertIn("WIKI_PROMPT_DIR=deep_agent/wiki/prompts", content)
         self.assertIn("DEV_COMMAND_TIMEOUT=120", content)
+        self.assertIn("AIU_WINDOWS_DRIVE_C=", content)
+        self.assertIn("AIU_UNC_ROOT=", content)
 
     def test_app_config_get_int_uses_default_for_blank_or_invalid_values(self):
         blank = AppConfig(values={"DEV_COMMAND_TIMEOUT": ""}, root_dir=Path.cwd())

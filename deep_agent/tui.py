@@ -438,6 +438,20 @@ def should_use_autofix_chat(command: str) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
+def is_chat_apply_approved(command: str) -> bool:
+    lowered = command.lower()
+    approval_keywords = (
+        "승인",
+        "적용",
+        "반영",
+        "진행",
+        "apply",
+        "approved",
+        "go ahead",
+    )
+    return is_fix_request(command) and any(keyword in lowered for keyword in approval_keywords)
+
+
 def is_greeting(command: str) -> bool:
     normalized = command.strip().lower()
     return normalized in {
@@ -1080,11 +1094,12 @@ class BeginnerTuiController:
             self._save_chat_session(command, response, [], None)
             self._save_used_prompt(command, response, agent_mode="Chat")
             return response
-        use_autofix = should_use_autofix_chat(command)
-        runtime_mode = "AutoFix" if use_autofix else "Chat"
+        chat_apply_approved = is_chat_apply_approved(command)
+        use_autofix = should_use_autofix_chat(command) or chat_apply_approved
+        runtime_mode = "Build" if chat_apply_approved else ("AutoFix" if use_autofix else "Chat")
         result = self._invoke_deepagents(command, agent_mode=runtime_mode)
         applied_changes: list[AppliedChange] = []
-        if result.used_deepagents and use_autofix:
+        if (result.used_deepagents and use_autofix) or (chat_apply_approved and not result.used_deepagents):
             applied_changes = self._apply_fixable_issues_after_chat()
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
@@ -1908,6 +1923,7 @@ __all__ = [
     "format_tui_chatbot_screen",
     "format_tui_help_screen",
     "is_fix_request",
+    "is_chat_apply_approved",
     "is_greeting",
     "is_right_click_event",
     "is_wizard_navigation",

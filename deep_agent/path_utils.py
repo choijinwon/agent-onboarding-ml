@@ -62,6 +62,26 @@ def windows_drive_candidates(value: str) -> list[Path]:
     return candidates
 
 
+def windows_unc_candidates(value: str) -> list[Path]:
+    if not value.startswith(("\\\\", "//")):
+        return []
+    cleaned = value.replace("\\", "/").lstrip("/")
+    parts = [part for part in cleaned.split("/") if part]
+    if len(parts) < 2:
+        return []
+    server, share, *rest = parts
+    tail = Path(*rest) if rest else Path()
+    env_specific = os.environ.get(f"AIU_UNC_{server.upper()}_{share.upper()}".replace("-", "_"))
+    env_root = os.environ.get("AIU_UNC_ROOT")
+    candidates: list[Path] = []
+    if env_specific:
+        candidates.append(Path(env_specific).expanduser() / tail)
+    if env_root:
+        candidates.append(Path(env_root).expanduser() / server / share / tail)
+    candidates.extend([Path("/mnt") / server / share / tail, Path("/Volumes") / share / tail])
+    return candidates
+
+
 def filesystem_path_candidates(value: str) -> list[Path]:
     normalized = normalize_path_text(value)
     if not normalized:
@@ -69,6 +89,7 @@ def filesystem_path_candidates(value: str) -> list[Path]:
     candidates = [Path(normalized).expanduser()]
     if os.name != "nt":
         candidates.extend(windows_drive_candidates(normalized))
+        candidates.extend(windows_unc_candidates(normalized))
     return candidates
 
 
@@ -96,5 +117,6 @@ __all__ = [
     "is_windows_style_path",
     "normalize_path_text",
     "resolve_filesystem_path",
+    "windows_unc_candidates",
     "windows_drive_candidates",
 ]
