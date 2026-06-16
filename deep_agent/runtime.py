@@ -99,7 +99,8 @@ class DeepAgentsRuntime:
             temperature=0.2,
             timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT", default=120),
         )
-        tools = [] if agent_mode == "Chat" else [analyze_ml_project, preview_ml_fixes, apply_ml_fixes]
+        selected_project_path = resolved_project_path
+        tools = [] if agent_mode == "Chat" else build_project_tools(selected_project_path)
         backend = None
         permissions = None
         if resolved_project is not None and resolved_project.exists() and resolved_project.is_dir():
@@ -112,7 +113,11 @@ class DeepAgentsRuntime:
         agent = create_deep_agent(
             model=model,
             tools=tools,
-            system_prompt=build_deepagents_system_prompt(resolved_project_path or project_path, agent_mode),
+            system_prompt=build_deepagents_system_prompt(
+                resolved_project_path or project_path,
+                agent_mode,
+                filesystem_backend_enabled=backend is not None,
+            ),
             backend=backend,
             permissions=permissions,
             name="ai-ml-onboarding-deepagent",
@@ -122,7 +127,40 @@ class DeepAgentsRuntime:
         return agent
 
 
-def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
+def build_project_tools(selected_project_path: str):
+    def resolve_tool_project_path(project_path: str = "") -> str:
+        value = str(project_path or "").strip()
+        if not value or value in {".", "/"}:
+            return selected_project_path or value or "."
+        return str(resolve_filesystem_path(value))
+
+    def analyze_selected_ml_project(project_path: str = "/") -> str:
+        """Analyze an ML project registration readiness without modifying files."""
+        return format_beginner_analysis(analyze_project(resolve_tool_project_path(project_path)))
+
+    def preview_selected_ml_fixes(project_path: str = "/") -> str:
+        """Return dry-run ML onboarding fix previews without modifying files."""
+        return format_beginner_fix_preview(analyze_project(resolve_tool_project_path(project_path)))
+
+    def apply_selected_ml_fixes(project_path: str = "/") -> str:
+        """Apply supported ML onboarding fixes, then re-analyze the project."""
+        actual_project_path = resolve_tool_project_path(project_path)
+        analysis = analyze_project(actual_project_path)
+        previews = build_fix_previews(analysis)
+        applied = apply_fix_previews(actual_project_path, previews)
+        return format_beginner_apply_result(applied, analyze_project(actual_project_path))
+
+    analyze_selected_ml_project.__name__ = "analyze_ml_project"
+    preview_selected_ml_fixes.__name__ = "preview_ml_fixes"
+    apply_selected_ml_fixes.__name__ = "apply_ml_fixes"
+    return [analyze_selected_ml_project, preview_selected_ml_fixes, apply_selected_ml_fixes]
+
+
+def build_deepagents_system_prompt(
+    project_path: str,
+    agent_mode: str,
+    filesystem_backend_enabled: bool = False,
+) -> str:
     if agent_mode == "AutoFix":
         apply_policy = (
             "AutoFix mode: first call analyze_ml_project. If fixable issues are found, call preview_ml_fixes "
@@ -144,11 +182,19 @@ def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
         )
     else:
         apply_policy = "Plan mode: do not modify files. Use analyze_ml_project and preview_ml_fixes only."
+    filesystem_note = ""
+    if filesystem_backend_enabled:
+        filesystem_note = (
+            "The filesystem backend root is the selected project directory. "
+            "When using filesystem tools, use virtual paths starting with /, such as /run_model.py or /config.json. "
+            "Do not pass Windows absolute paths like C:\\Users\\... or D:\\... to filesystem tools; "
+            "use / instead. For ML onboarding tools, project_path=/ means the selected project root. "
+        )
     return (
         "You are AI ML Onboarding Deep Agent for a closed-network ML Platform POC. "
         "Answer in Korean. Use the provided ML onboarding tools before giving conclusions. "
         "Focus on MLflow, requirements, entrypoints, job templates, serving, and registration readiness. "
-        f"Current project path: {project_path or '(not selected)'}. {apply_policy} "
+        f"Current project path: {project_path or '(not selected)'}. {filesystem_note}{apply_policy} "
         "Never claim files changed unless apply_ml_fixes reports applied changes."
     )
 

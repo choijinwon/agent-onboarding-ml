@@ -680,9 +680,23 @@ def path_candidates_from_input(raw: str) -> list[str]:
         for prefix in (">", "경로:", "path:", "프로젝트:", "project:"):
             if candidate.lower().startswith(prefix.lower()):
                 candidate = candidate[len(prefix) :].strip()
+        candidate = strip_shell_path_prefix(candidate)
         if candidate:
             candidates.append(candidate)
     return candidates or [value.strip()]
+
+
+def strip_shell_path_prefix(candidate: str) -> str:
+    value = candidate.strip()
+    lowered = value.lower()
+    for prefix in ("cd ", "dir ", "ls ", "open ", "explorer ", "start "):
+        if lowered.startswith(prefix):
+            return value[len(prefix) :].strip()
+    if value.startswith("& "):
+        return value[2:].strip()
+    if value.startswith("@"):
+        return value[1:].strip()
+    return value
 
 
 def normalize_pasted_input(text: str) -> str:

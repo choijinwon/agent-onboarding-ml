@@ -88,6 +88,7 @@ from deep_agent.tui import (
     path_candidates_from_input,
     is_right_click_event,
     should_use_autofix_chat,
+    strip_shell_path_prefix,
     strip_path_command,
     truncate_for_tui,
 )
@@ -139,6 +140,24 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertIn("create or edit files inside the project root", build_prompt)
         self.assertIn("AutoFix mode", autofix_prompt)
         self.assertIn("apply_ml_fixes automatically", autofix_prompt)
+
+    def test_deepagents_prompt_maps_windows_project_to_virtual_root(self):
+        prompt = build_deepagents_system_prompt(
+            r"C:\Users\choi\AI ML\model",
+            "Build",
+            filesystem_backend_enabled=True,
+        )
+
+        self.assertIn("use virtual paths starting with /", prompt)
+        self.assertIn("Do not pass Windows absolute paths", prompt)
+        self.assertIn("project_path=/ means the selected project root", prompt)
+
+    def test_deepagents_runtime_uses_selected_project_tool_wrappers(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn("build_project_tools(selected_project_path)", source)
+        self.assertIn('if not value or value in {".", "/"}:', source)
+        self.assertIn('analyze_selected_ml_project.__name__ = "analyze_ml_project"', source)
 
     def test_extract_deepagents_content_reads_last_message(self):
         class Message:
@@ -2756,6 +2775,37 @@ class WindowsSetupTest(unittest.TestCase):
         )
         self.assertTrue(is_windows_absolute_path(r"C:\Users\choi\AI ML\model"))
         self.assertTrue(is_windows_absolute_path(r"\\mlserver\models\team-a\model"))
+
+    def test_tui_extracts_windows_paths_from_multiline_shell_paste(self):
+        pasted = "\n".join(
+            [
+                "PS C:\\Users\\choi>",
+                r"cd 'C:\Users\choi\AI ML\model'",
+                "다음 줄은 설명입니다",
+            ]
+        )
+
+        self.assertEqual(strip_shell_path_prefix(r"cd 'C:\Users\choi\AI ML\model'"), r"'C:\Users\choi\AI ML\model'")
+        self.assertIn(r"'C:\Users\choi\AI ML\model'", path_candidates_from_input(pasted))
+
+    def test_tui_resolves_windows_path_from_shell_prefixed_multiline_input(self):
+        old_value = os.environ.get("AIU_WINDOWS_DRIVE_C")
+        with TemporaryDirectory() as tmpdir:
+            drive_root = Path(tmpdir)
+            project = drive_root / "Users" / "choi" / "AI ML" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ["AIU_WINDOWS_DRIVE_C"] = str(drive_root)
+            try:
+                self.assertEqual(
+                    normalize_input_path("\n" + r"cd 'C:\Users\choi\AI ML\model'" + "\n"),
+                    project.resolve(),
+                )
+            finally:
+                if old_value is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
 
     def test_tui_expands_windows_env_path_variants(self):
         old_value = os.environ.get("AIU_TEST_HOME")
