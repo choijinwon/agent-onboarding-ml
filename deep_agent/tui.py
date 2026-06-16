@@ -40,6 +40,7 @@ from deep_agent.cli import (
     handle_intermediate_request,
     list_existing_work_projects,
     copy_text_to_clipboard,
+    normalize_clipboard_text,
     parse_mode,
     parse_mode_command,
     resolve_beginner_project_input,
@@ -1402,9 +1403,6 @@ def run_tui(project_path: str = "") -> int:
                 return
             await super()._on_key(event)
 
-        def on_key(self, event) -> None:
-            self._handle_submit_keys(event)
-
     class ModeSelector(Static):
         pass
 
@@ -1544,7 +1542,6 @@ def run_tui(project_path: str = "") -> int:
         }
         """
         BINDINGS = [
-            Binding("enter", "submit_input", "send", show=False, priority=True),
             Binding("tab", "toggle_agent", "agents", show=True, priority=True),
             Binding("shift+tab", "previous_agent", "prev agent", show=False, priority=True),
             Binding("ctrl+space", "insert_input_gap", "input gap", show=False, priority=True),
@@ -1758,7 +1755,7 @@ def run_tui(project_path: str = "") -> int:
                 return
 
         def action_copy_current_screen(self) -> None:
-            text = self.controller.render_log()
+            text = normalize_clipboard_text(self.controller.render_log())
             try:
                 self.copy_to_clipboard(text)
                 self.controller.latest_message = "현재 화면을 클립보드에 복사했습니다."

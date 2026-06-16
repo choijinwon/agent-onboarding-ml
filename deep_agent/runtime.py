@@ -88,7 +88,7 @@ class DeepAgentsRuntime:
             api_key=self.qwen_config.api_key,
             base_url=self.qwen_config.base_url.rstrip("/"),
             temperature=0.2,
-            timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT"),
+            timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT", default=120),
         )
         tools = [] if agent_mode == "Chat" else [analyze_ml_project, preview_ml_fixes, apply_ml_fixes]
         agent = create_deep_agent(

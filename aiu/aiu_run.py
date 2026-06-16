@@ -39,6 +39,7 @@ from deep_agent.cli import (
     handle_intermediate_request,
     list_existing_sample_projects,
     list_existing_work_projects,
+    normalize_clipboard_text,
     parse_mode,
     parse_mode_command,
     resolve_existing_sample_project,
@@ -133,7 +134,7 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertIn('use_cache = agent_mode != "Chat"', source)
         self.assertIn('if use_cache and cache_key in self._agent_cache:', source)
         self.assertIn('if use_cache:', source)
-        self.assertIn('timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT")', source)
+        self.assertIn('timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT", default=120)', source)
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -201,6 +202,30 @@ class BeginnerWizardTest(unittest.TestCase):
         copy.assert_called_once_with(LAUNCH_SCREEN)
         self.assertIn("AI ML Onboarding Console", output)
         self.assertIn("logo copied to clipboard: test-clipboard", output)
+
+    def test_clipboard_copy_normalizes_korean_multiline_text(self):
+        raw = "\u1112\u1161\u11ab\u1100\u1173\u11af\r\n멀티\x00 input"
+
+        output = normalize_clipboard_text(raw)
+
+        self.assertEqual(output, "한글\n멀티 input")
+
+    def test_clipboard_copy_uses_utf8_and_normalized_text(self):
+        calls = []
+
+        def fake_run(command, *, input="", text=False, encoding=None, check=False, capture_output=False):
+            calls.append((command, input, text, encoding, check, capture_output))
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch("deep_agent.cli.shutil.which", return_value="/usr/bin/pbcopy"):
+            with patch("deep_agent.cli.sys.platform", "darwin"):
+                with patch("deep_agent.cli.subprocess.run", side_effect=fake_run):
+                    copied, detail = ml_agent.copy_text_to_clipboard("\u1112\u1161\u11ab\u1100\u1173\u11af\r\n복사")
+
+        self.assertTrue(copied)
+        self.assertEqual(detail, "pbcopy")
+        self.assertEqual(calls[0][1], "한글\n복사")
+        self.assertEqual(calls[0][3], "utf-8")
 
     def test_logo_subcommand_is_registered(self):
         parser = build_parser()
@@ -1850,10 +1875,11 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("self.scroll_end(animate=False)", source)
         self.assertIn("overflow-y: auto", source)
         self.assertIn("LogView(id=\"log\", wrap=True", source)
-        self.assertIn('Binding("enter", "submit_input"', source)
+        self.assertNotIn('Binding("enter", "submit_input"', source)
         self.assertIn("def action_submit_input", source)
         self.assertIn("async def _on_key", source)
         self.assertIn("await super()._on_key(event)", source)
+        self.assertNotIn("def on_key(self, event) -> None:\n            self._handle_submit_keys(event)", source)
         self.assertIn("def _handle_submit_keys", source)
         self.assertIn('event.key in {"ctrl+enter", "ctrl+j"}', source)
         self.assertIn('event.key == "shift+enter"', source)
@@ -1925,6 +1951,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("def on_mouse_down", source)
         self.assertIn("action_copy_current_screen", source)
         self.assertIn("copy_to_clipboard", source)
+        self.assertIn("normalize_clipboard_text(self.controller.render_log())", source)
 
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
@@ -2583,6 +2610,16 @@ class AppConfigTest(unittest.TestCase):
         self.assertIn("SKILL_STORE_DIR=deep_agent/skills", content)
         self.assertIn("WIKI_DIR=deep_agent/wiki", content)
         self.assertIn("WIKI_PROMPT_DIR=deep_agent/wiki/prompts", content)
+        self.assertIn("DEV_COMMAND_TIMEOUT=120", content)
+
+    def test_app_config_get_int_uses_default_for_blank_or_invalid_values(self):
+        blank = AppConfig(values={"DEV_COMMAND_TIMEOUT": ""}, root_dir=Path.cwd())
+        invalid = AppConfig(values={"DEV_COMMAND_TIMEOUT": "abc"}, root_dir=Path.cwd())
+        configured = AppConfig(values={"DEV_COMMAND_TIMEOUT": "45"}, root_dir=Path.cwd())
+
+        self.assertEqual(blank.get_int("DEV_COMMAND_TIMEOUT", default=120), 120)
+        self.assertEqual(invalid.get_int("DEV_COMMAND_TIMEOUT", default=120), 120)
+        self.assertEqual(configured.get_int("DEV_COMMAND_TIMEOUT", default=120), 45)
 
     def test_runtime_layout_creates_skill_store(self):
         with TemporaryDirectory() as tmpdir:

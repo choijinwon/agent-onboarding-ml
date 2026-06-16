@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -3684,11 +3685,24 @@ def handle_error_command(parts: list[str]) -> str:
     return "unknown errors command. available: errors list, errors record <message>, errors analyze <id-or-path>"
 
 
+def normalize_clipboard_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFC", str(text))
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = "".join(
+        char
+        for char in normalized
+        if char == "\n" or char == "\t" or ord(char) >= 32
+    )
+    return unicodedata.normalize("NFC", normalized)
+
+
 def copy_text_to_clipboard(text: str) -> tuple[bool, str]:
+    normalized_text = normalize_clipboard_text(text)
     commands: list[list[str]] = []
     if sys.platform == "darwin":
         commands.append(["pbcopy"])
     elif os.name == "nt":
+        commands.append(["powershell", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"])
         commands.append(["clip"])
     else:
         commands.extend(
@@ -3704,7 +3718,7 @@ def copy_text_to_clipboard(text: str) -> tuple[bool, str]:
         if shutil.which(executable) is None:
             continue
         try:
-            subprocess.run(command, input=text, text=True, check=True, capture_output=True)
+            subprocess.run(command, input=normalized_text, text=True, encoding="utf-8", check=True, capture_output=True)
             return True, executable
         except (OSError, subprocess.CalledProcessError) as exc:
             errors.append(f"{executable}: {exc}")

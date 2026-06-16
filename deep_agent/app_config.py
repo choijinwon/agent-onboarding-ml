@@ -24,6 +24,7 @@ DEFAULT_ENV = {
     "WIKI_PROMPT_DIR": "deep_agent/wiki/prompts",
     "CHAT_ERROR_DIR": ".aiu/chat_errors",
     "SESSION_DIR": ".aiu/sessions",
+    "DEV_COMMAND_TIMEOUT": "120",
     "MASK_SENSITIVE_LOGS": "true",
     "REGISTRATION_PACKAGE_DIR": ".aiu/registration_packages",
     "FIX_REPORT_DIR": ".aiu/fix_reports",
@@ -452,8 +453,22 @@ class AppConfig:
     def get_bool(self, key: str) -> bool:
         return self.get(key).strip().lower() in {"1", "true", "yes", "on"}
 
-    def get_int(self, key: str) -> int:
-        return int(self.get(key))
+    def get_int(self, key: str, default: int | None = None) -> int:
+        raw_value = self.get(key).strip()
+        if not raw_value:
+            if default is not None:
+                return default
+            raw_value = DEFAULT_ENV.get(key, "0").strip()
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            if default is not None:
+                return default
+            fallback = DEFAULT_ENV.get(key, "0").strip()
+            try:
+                return int(fallback)
+            except (TypeError, ValueError):
+                return 0
 
     def runtime_directories(self) -> list[Path]:
         dirs = [self.root_dir / self.get(key) for key in DIRECTORY_KEYS if self.get(key)]
