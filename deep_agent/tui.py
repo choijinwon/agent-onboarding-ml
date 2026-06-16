@@ -91,6 +91,9 @@ AI_STUDIO_ENV_FIELDS = [
 PASTE_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
 PASTE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 AGENT_RESPONSE_CHOICE_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\[(\d+)\]|(\d+)[.)]|(\d+)\s*[-:])\s+(.+?)\s*$")
+LONG_PASTE_CHAR_LIMIT = 12000
+LONG_PASTE_LINE_LIMIT = 250
+PASTE_DEDUP_SECONDS = 0.75
 MAX_CHAT_LOG_ENTRIES = 8
 MAX_CHAT_RENDER_CHARS = 7000
 MAX_CHAT_RENDER_LINES = 180
@@ -137,6 +140,10 @@ class SampleButton:
 
 
 class CancelButton:
+    pass
+
+
+class ClearButton:
     pass
 
 
@@ -340,6 +347,8 @@ def format_tui_help_screen(
         "         Enter                  입력 제출",
         "         Shift+Enter            input 줄바꿈",
         "         Ctrl+Enter             입력 제출",
+        "         CLEAR 버튼             input 전체 삭제",
+        "         Ctrl+L / Ctrl+U        input 전체 삭제",
         "         /mode beginner         초급자 모드 전환",
         "         /mode intermediate     중급자 모드 전환",
         "         /mode advanced         고급자 모드 전환",
@@ -915,6 +924,18 @@ def normalize_pasted_input(text: str) -> str:
         compacted.append(line)
         blank_seen = False
     return unicodedata.normalize("NFC", "\n".join(compacted).strip())
+
+
+def is_long_paste(text: str) -> bool:
+    return len(text) > LONG_PASTE_CHAR_LIMIT or text.count("\n") + 1 > LONG_PASTE_LINE_LIMIT
+
+
+def paste_status_message(text: str, *, duplicate: bool = False) -> str:
+    if duplicate:
+        return "같은 붙여넣기가 감지되어 중복 입력을 무시했습니다."
+    if is_long_paste(text):
+        return "긴 입력이 정리되었습니다. Enter로 전송하세요."
+    return ""
 
 
 def read_ai_studio_env(path: Path) -> dict[str, str]:
@@ -2172,7 +2193,7 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CancelButton, CommandInput, FileButton, LogView, ModeSelector, SampleButton, SendButton, StatusBar
+    global AIOnboardingTuiApp, CancelButton, ClearButton, CommandInput, FileButton, LogView, ModeSelector, SampleButton, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
@@ -2218,9 +2239,15 @@ def run_tui(project_path: str = "") -> int:
             event.stop()
             if hasattr(event, "prevent_default"):
                 event.prevent_default()
-            self.insert_text_at_cursor(normalize_pasted_input(event.text))
+            self.app._insert_pasted_input(event.text)
 
         def _handle_submit_keys(self, event) -> bool:
+            if event.key in {"ctrl+l", "ctrl+u"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.app._clear_command_input()
+                return True
             if event.key in {"ctrl+enter", "ctrl+j"}:
                 event.stop()
                 if hasattr(event, "prevent_default"):
@@ -2280,6 +2307,9 @@ def run_tui(project_path: str = "") -> int:
         pass
 
     class CancelButton(Button):
+        pass
+
+    class ClearButton(Button):
         pass
 
     class AIOnboardingTuiApp(App[None]):
@@ -2356,8 +2386,7 @@ def run_tui(project_path: str = "") -> int:
             color: #3fb950;
         }
         #status {
-            display: none;
-            height: 0;
+            height: 1;
             color: #9a9a9a;
             background: #080808;
         }
@@ -2391,6 +2420,20 @@ def run_tui(project_path: str = "") -> int:
             background: #4a3720;
         }
         #sample.chatbot {
+            background: #223a2b;
+        }
+        #clear {
+            width: 14;
+            height: 3;
+            margin-right: 1;
+            background: #3a3a3a;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #clear.build {
+            background: #4a3720;
+        }
+        #clear.chatbot {
             background: #223a2b;
         }
         #cancel {
@@ -2436,6 +2479,9 @@ def run_tui(project_path: str = "") -> int:
             self._cancelled_chatbot_requests: set[int] = set()
             self._thinking_started_at = 0.0
             self._thinking_timer = None
+            self._input_status = ""
+            self._last_paste_signature = ""
+            self._last_paste_at = 0.0
 
         def compose(self) -> ComposeResult:
             with Vertical(id="shell"):
@@ -2447,6 +2493,7 @@ def run_tui(project_path: str = "") -> int:
                     with Horizontal(id="actions"):
                         yield FileButton("FILE", id="file")
                         yield SampleButton("SAMPLE", id="sample")
+                        yield ClearButton("CLEAR", id="clear")
                         yield CancelButton("CANCEL", id="cancel", disabled=True)
                         yield SendButton("SEND  Enter", id="send")
                 yield StatusBar("", id="status")
@@ -2527,7 +2574,32 @@ def run_tui(project_path: str = "") -> int:
             command = self.query_one(CommandInput)
             value = command.value
             command.value = ""
+            self._input_status = ""
             self._submit_or_queue(value)
+
+        def _clear_command_input(self) -> None:
+            command = self.query_one(CommandInput)
+            command.value = ""
+            self._input_status = ""
+            self._focus_command()
+
+        def _insert_pasted_input(self, raw_text: str) -> None:
+            command = self.query_one(CommandInput)
+            normalized = normalize_pasted_input(raw_text)
+            now = time.monotonic()
+            signature = f"{len(normalized)}:{hash(normalized)}"
+            if signature == self._last_paste_signature and now - self._last_paste_at <= PASTE_DEDUP_SECONDS:
+                self._input_status = paste_status_message(normalized, duplicate=True)
+                self.query_one(StatusBar).update(self._input_status)
+                self._focus_command()
+                return
+            self._last_paste_signature = signature
+            self._last_paste_at = now
+            command.insert_text_at_cursor(normalized)
+            command.cursor_position = len(command.value)
+            self._input_status = paste_status_message(normalized)
+            self.query_one(StatusBar).update(self._input_status)
+            self._focus_command()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "file":
@@ -2537,6 +2609,10 @@ def run_tui(project_path: str = "") -> int:
             if event.button.id == "sample":
                 event.stop()
                 self._open_sample_picker()
+                return
+            if event.button.id == "clear":
+                event.stop()
+                self._clear_command_input()
                 return
             if event.button.id == "cancel":
                 event.stop()
@@ -2618,7 +2694,7 @@ def run_tui(project_path: str = "") -> int:
             if hasattr(event, "prevent_default"):
                 event.prevent_default()
             self._focus_command()
-            command.insert_text_at_cursor(normalize_pasted_input(event.text))
+            self._insert_pasted_input(event.text)
 
         def on_key(self, event) -> None:
             command = self.query_one(CommandInput)
@@ -2692,6 +2768,12 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 command.insert_text_at_cursor("    ")
                 self._focus_command()
+                return
+            if event.key in {"ctrl+l", "ctrl+u"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self._clear_command_input()
                 return
             if event.key == "tab":
                 event.stop()
@@ -2886,6 +2968,9 @@ def run_tui(project_path: str = "") -> int:
             sample_button = self.query_one(SampleButton)
             sample_button.set_class(self.controller.agent_mode == "Build", "build")
             sample_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            clear_button = self.query_one(ClearButton)
+            clear_button.set_class(self.controller.agent_mode == "Build", "build")
+            clear_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).replace_text(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
@@ -2895,7 +2980,7 @@ def run_tui(project_path: str = "") -> int:
             selector.set_class(self.controller.agent_mode == "Plan", "plan")
             selector.set_class(self.controller.agent_mode == "Build", "build")
             selector.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
-            self.query_one(StatusBar).update("")
+            self.query_one(StatusBar).update(self._input_status)
 
         def _focus_command(self) -> None:
             self.set_focus(self.query_one(CommandInput))
@@ -2912,6 +2997,7 @@ __all__ = [
     "available_models_from_config",
     "CommandInput",
     "CancelButton",
+    "ClearButton",
     "FileButton",
     "SampleButton",
     "discover_selectable_folders",
@@ -2938,6 +3024,7 @@ __all__ = [
     "is_chat_apply_approved",
     "is_chat_coding_request",
     "is_greeting",
+    "is_long_paste",
     "is_right_click_event",
     "is_wizard_navigation",
     "model_selection_placeholder",
@@ -2946,6 +3033,7 @@ __all__ = [
     "normalize_pasted_input",
     "normalize_path_text",
     "path_candidates_from_input",
+    "paste_status_message",
     "parse_agent_mode_command",
     "parse_folder_command",
     "parse_model_command",

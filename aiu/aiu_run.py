@@ -64,6 +64,7 @@ from deep_agent.tui import (
     command_placeholder_for_mode,
     choose_folder_with_dialog,
     compact_chat_entries,
+    ClearButton,
     discover_selectable_folders,
     extract_agent_response_choices,
     format_agent_response_choices,
@@ -91,7 +92,9 @@ from deep_agent.tui import (
     parse_folder_command,
     parse_model_command,
     path_candidates_from_input,
+    is_long_paste,
     is_right_click_event,
+    paste_status_message,
     should_use_autofix_chat,
     strip_shell_path_prefix,
     strip_path_command,
@@ -1427,6 +1430,7 @@ class AdvancedModeTest(unittest.TestCase):
             wrapper_alias_source = (root / "aiu_custom" / "model_wrapper.py").read_text(encoding="utf-8")
             requirements_text = requirements.read_text(encoding="utf-8")
             self.assertEqual(config["mlflow_tracking_url"], "${MLFLOW_TRACKING_URL}")
+            self.assertEqual(config["bucket_uri"], "${AI_STUDIO_BUCKET_URI}")
             self.assertEqual(config["model"]["source_path"], "")
             self.assertEqual(config["model"]["artifact_path"], "ai_studio")
             self.assertEqual(config["execution"]["entrypoint"], "run_model.py")
@@ -1445,6 +1449,8 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("mlflow.pyfunc.log_model", generated_run_model)
             self.assertIn("from aiu_custom.predict import ModelWrapper", generated_run_model)
             self.assertIn("MLFLOW_TRACKING_URL=", env_source)
+            self.assertIn("AI_STUDIO_BUCKET_URI=", env_source)
+            self.assertIn("ML_PLATFORM_BUCKET_URI=", env_source)
             self.assertIn("class ModelWrapper", wrapper_source)
             self.assertIn("from .predict import ModelWrapper", wrapper_alias_source)
             self.assertIn("cloudpickle", requirements_text)
@@ -1799,6 +1805,8 @@ class AdvancedModeTest(unittest.TestCase):
             (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\nscikit-learn\n")
             (root / "train.py").write_text("import mlflow\n")
             ensure_ai_studio_sample_runtime(root)
+            with (root / "ai_studio.env").open("a", encoding="utf-8") as env_file:
+                env_file.write("\nAI_STUDIO_BUCKET_URI=s3://ai-studio/model-bucket\n")
             (root / "model.onnx").write_text("sample")
 
             output = handle_advanced_input(f"aiu serve {root} --json")
@@ -1816,6 +1824,9 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("predict_endpoint: \"http://127.0.0.1:8000/predict\"", template)
             self.assertIn("serve_command: \"python -m uvicorn serving_app:app --host 127.0.0.1 --port 8000\"", template)
             self.assertIn("local_store: ./mlruns", template)
+            self.assertIn("bucket_uri: \"s3://ai-studio/model-bucket\"", template)
+            self.assertIn("model_bundle: mlflow_models", template)
+            self.assertIn("upload_target: \"s3://ai-studio/model-bucket/", template)
 
     def test_serve_command_creates_serving_app_when_missing(self):
         with TemporaryDirectory() as tmpdir:
@@ -2682,7 +2693,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('event.key == "shift+enter"', source)
         self.assertIn('event.key == "enter"', source)
         self.assertIn('insert_text_at_cursor("\\n")', source)
-        self.assertIn("normalize_pasted_input(event.text)", source)
+        self.assertIn("self.app._insert_pasted_input(event.text)", source)
+        self.assertIn("self._insert_pasted_input(event.text)", source)
         self.assertIn("self.app._submit_command_input()", source)
         self.assertIn("SendButton", source)
         self.assertIn('SendButton("SEND  Enter", id="send")', source)
@@ -2690,6 +2702,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('FileButton("FILE", id="file")', source)
         self.assertIn("SampleButton", source)
         self.assertIn('SampleButton("SAMPLE", id="sample")', source)
+        self.assertIn("ClearButton", source)
+        self.assertIn('ClearButton("CLEAR", id="clear")', source)
         self.assertIn("CancelButton", source)
         self.assertIn('CancelButton("CANCEL", id="cancel"', source)
         self.assertIn('Vertical(id="input-area")', source)
@@ -2702,10 +2716,22 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('event.button.id == "sample"', source)
         self.assertIn("self._open_sample_picker()", source)
         self.assertIn("self.controller.start_sample_selection()", source)
+        self.assertIn('event.button.id == "clear"', source)
+        self.assertIn("self._clear_command_input()", source)
         self.assertIn('event.button.id == "cancel"', source)
         self.assertIn("self._cancel_chatbot_request()", source)
         self.assertIn('event.button.id != "send"', source)
         self.assertNotIn("Input.Submitted", source)
+
+    def test_tui_input_supports_clear_button_and_shortcuts(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("class ClearButton(Button)", source)
+        self.assertIn('yield ClearButton("CLEAR", id="clear")', source)
+        self.assertIn('event.key in {"ctrl+l", "ctrl+u"}', source)
+        self.assertIn("def _clear_command_input", source)
+        self.assertIn('command.value = ""', source)
+        self.assertIn("clear_button.set_class", source)
 
     def test_tui_sample_button_selection_creates_selected_sample(self):
         with TemporaryDirectory() as tmpdir:
@@ -2759,11 +2785,33 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertEqual(output, "프로젝트 분석해줘")
 
+    def test_tui_long_paste_policy_marks_large_text_without_auto_submit(self):
+        long_text = "\n".join(f"라인 {index}" for index in range(260))
+
+        output = normalize_pasted_input(long_text)
+
+        self.assertTrue(is_long_paste(output))
+        self.assertEqual(paste_status_message(output), "긴 입력이 정리되었습니다. Enter로 전송하세요.")
+
+    def test_tui_paste_normalization_keeps_windows_paths_and_unc_paths(self):
+        raw = r"""
+            "C:\Users\choi\AI ML\model"
+            \\server\share\AI Studio\Model Folder
+        """
+
+        output = normalize_pasted_input(raw)
+
+        self.assertIn(r"C:\Users\choi\AI ML\model", output)
+        self.assertIn(r"\\server\share\AI Studio\Model Folder", output)
+
     def test_tui_paste_prevents_textual_default_duplicate_insert(self):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
         self.assertGreaterEqual(source.count('if hasattr(event, "prevent_default"):'), 2)
         self.assertIn("event.prevent_default()", source)
+        self.assertIn("PASTE_DEDUP_SECONDS", source)
+        self.assertIn("같은 붙여넣기가 감지되어 중복 입력을 무시했습니다.", source)
+        self.assertIn("def _insert_pasted_input", source)
 
     def test_tui_right_click_copies_current_screen(self):
         class Event:

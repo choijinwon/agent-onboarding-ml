@@ -2858,6 +2858,7 @@ def standard_mlflow_config() -> dict[str, object]:
         "tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
         "experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
         "registered_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+        "bucket_uri": "${AI_STUDIO_BUCKET_URI}",
         "local_default_tracking_uri": "file:./mlruns",
     }
 
@@ -3133,6 +3134,7 @@ def default_ai_studio_config(framework: str = "generic") -> dict[str, object]:
         "mlflow_tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
         "mlflow_experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
         "mlflow_register_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+        "bucket_uri": "${AI_STUDIO_BUCKET_URI}",
         "data": {
             "train_path": "data/train",
             "test_path": "data/test",
@@ -3168,6 +3170,8 @@ MLFLOW_TRACKING_USERNAME=
 MLFLOW_TRACKING_PASSWORD=
 MLFLOW_EXPERIMENT_NAME=ai-studio-onboarding
 MLFLOW_REGISTER_MODEL_NAME=ai-studio-model
+AI_STUDIO_BUCKET_URI=
+ML_PLATFORM_BUCKET_URI=
 """
 
 
@@ -4908,6 +4912,7 @@ def build_job_template_payload(
     config = AppConfig.load()
     registration_plan = build_registration_plan(analysis, dry_run=False)
     root = Path(analysis.path or ".")
+    bucket_uri = resolve_bucket_uri(root, config)
     entrypoint = "run_model.py"
     if "run_model.py" in analysis.entrypoint_candidates:
         entrypoint = "run_model.py"
@@ -4949,6 +4954,12 @@ def build_job_template_payload(
                 "input_example": "input_example.json",
                 "requirements": "requirements.txt",
             },
+            "storage": {
+                "bucket_uri": bucket_uri,
+                "model_bundle": "mlflow_models",
+                "registration_package": "registration_packages",
+                "upload_target": f"{bucket_uri.rstrip('/')}/{root.name or 'aiu-model-job'}",
+            },
             "serving": {
                 "status": serving.status,
                 "mode": serving.mode,
@@ -4968,6 +4979,18 @@ def build_job_template_payload(
             },
         },
     }
+
+
+def resolve_bucket_uri(root: Path, config: AppConfig) -> str:
+    for key in ("AI_STUDIO_BUCKET_URI", "ML_PLATFORM_BUCKET_URI"):
+        value = read_ai_studio_env_value(root / "ai_studio.env", key)
+        if value:
+            return value
+    for key in ("AI_STUDIO_BUCKET_URI", "ML_PLATFORM_BUCKET_URI"):
+        value = config.get(key).strip()
+        if value:
+            return value
+    return "${AI_STUDIO_BUCKET_URI}"
 
 
 def yaml_scalar(value: object) -> str:
@@ -5168,11 +5191,14 @@ def execute_run_model(root: Path) -> dict[str, object]:
 def read_ai_studio_env_value(path: Path, key: str) -> str:
     if not path.exists():
         return ""
+    value = ""
     for raw_line in safe_read_text(path).splitlines():
         line = raw_line.strip()
         if line.startswith(f"{key}="):
-            return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
+            candidate = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if candidate:
+                value = candidate
+    return value
 
 
 def effective_tracking_uri(root: Path) -> str:
