@@ -1536,6 +1536,9 @@ def ensure_ai_studio_sample_runtime(root: Path) -> None:
     run_model_path = root / "run_model.py"
     if not run_model_path.exists():
         run_model_path.write_text(run_model_source(), encoding="utf-8")
+    serving_path = root / "serving_app.py"
+    if not serving_path.exists():
+        serving_path.write_text(serving_app_source(), encoding="utf-8")
 
 
 def ensure_sparse_file(path: Path, size_bytes: int) -> None:
@@ -2427,6 +2430,8 @@ def build_local_serving_plan(
 ) -> LocalServingPlan:
     host = "127.0.0.1"
     port = 8000
+    root = resolve_filesystem_path(project_path or ".")
+    serving_app_exists = root.is_dir() and (root / "serving_app.py").exists()
     checks: list[RegistrationCheck] = []
     notes = [
         "기본 방식은 FastAPI 호환 로컬 서버 기준입니다.",
@@ -2461,6 +2466,14 @@ def build_local_serving_plan(
             "서빙 패키지",
             "pass" if requirements_files else "warn",
             format_count(requirements_files) if requirements_files else "requirements.txt 확인 필요",
+        )
+    )
+    checks.append(
+        RegistrationCheck(
+            "serving_app",
+            "로컬 서빙 앱",
+            "pass" if serving_app_exists else "warn",
+            "serving_app.py 확인" if serving_app_exists else "serve 명령 또는 적용 단계에서 serving_app.py 생성 필요",
         )
     )
     checks.append(RegistrationCheck("serving_port", "로컬 포트", "pass", f"{host}:{port} 사용 예정"))
@@ -2730,7 +2743,7 @@ def apply_add_mlflow_tracking_snippet(target: Path) -> AppliedChange:
     )
 
 
-AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy", "scikit-learn", "joblib"]
+AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy", "scikit-learn", "joblib", "fastapi", "uvicorn"]
 
 STANDARD_TEMPLATE_FRAMEWORKS = {
     "generic": {
@@ -2932,6 +2945,7 @@ def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> Ap
         "aiu_custom/model_wrapper.py": "from .predict import ModelWrapper\n",
         "mlflow_ai_studio_logging.py": ai_studio_logging_source(),
         "run_model.py": run_model_source(),
+        "serving_app.py": serving_app_source(),
         "train.py": standard_train_source(framework),
     }
     for relative, content in files.items():
@@ -2943,7 +2957,7 @@ def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> Ap
             path.write_text(content, encoding="utf-8")
             updated.append(relative)
 
-    requirements = list(STANDARD_TEMPLATE_FRAMEWORKS[framework]["requirements"])
+    requirements = list(STANDARD_TEMPLATE_FRAMEWORKS[framework]["requirements"]) + ["fastapi", "uvicorn"]
     if ensure_requirement_lines(root / "requirements.txt", requirements):
         updated.append("requirements.txt")
 
@@ -3037,6 +3051,11 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
         run_model_path.write_text(run_model_source(), encoding="utf-8")
         updated.append("run_model.py")
 
+    serving_path = root / "serving_app.py"
+    if not serving_path.exists():
+        serving_path.write_text(serving_app_source(), encoding="utf-8")
+        created.append("serving_app.py")
+
     requirements_path = root / "requirements.txt"
     changed_requirements = ensure_requirement_lines(requirements_path, AI_STUDIO_REQUIREMENTS)
     if changed_requirements:
@@ -3059,6 +3078,24 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
         target=str(root),
         status="applied",
         message="AI Studio MLflow 등록 스캐폴드를 적용했습니다. " + " / ".join(parts),
+    )
+
+
+def ensure_serving_app(root: Path) -> AppliedChange:
+    serving_path = root / "serving_app.py"
+    if serving_path.exists():
+        return AppliedChange(
+            code="CREATE_LOCAL_SERVING_APP",
+            target=str(serving_path),
+            status="skipped",
+            message="serving_app.py가 이미 있습니다.",
+        )
+    serving_path.write_text(serving_app_source(), encoding="utf-8")
+    return AppliedChange(
+        code="CREATE_LOCAL_SERVING_APP",
+        target=str(serving_path),
+        status="applied",
+        message="로컬 서빙용 FastAPI 앱을 생성했습니다.",
     )
 
 
@@ -3169,6 +3206,78 @@ class ModelWrapper(mlflow.pyfunc.PythonModel):
         if not isinstance(model_input, pd.DataFrame):
             model_input = pd.DataFrame(model_input)
         return self.model.predict(model_input)
+'''
+
+
+def serving_app_source() -> str:
+    return '''"""Local FastAPI serving app for AI Studio onboarding samples.
+
+Run:
+  python -m uvicorn serving_app:app --host 127.0.0.1 --port 8000
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+from fastapi import FastAPI
+
+
+app = FastAPI(title="AIU Local Model Serving")
+PROJECT_ROOT = Path(__file__).resolve().parent
+MODEL_DIR = PROJECT_ROOT / "saved_model"
+INPUT_EXAMPLE_PATH = PROJECT_ROOT / "input_example.json"
+
+
+def latest_model_artifact() -> Path | None:
+    suffixes = {".pkl", ".joblib", ".onnx", ".pt", ".pth", ".keras", ".h5", ".safetensors", ".bin"}
+    if not MODEL_DIR.exists():
+        return None
+    candidates = [path for path in MODEL_DIR.rglob("*") if path.is_file() and path.suffix.lower() in suffixes]
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item.stat().st_mtime, reverse=True)[0]
+
+
+def load_input_example() -> dict:
+    if INPUT_EXAMPLE_PATH.exists():
+        return json.loads(INPUT_EXAMPLE_PATH.read_text(encoding="utf-8"))
+    return {"input": [{"name": "sample_input", "shape": [1, 1], "datatype": "ndarray", "data": [[0.0]]}]}
+
+
+@app.get("/health")
+def health() -> dict:
+    artifact = latest_model_artifact()
+    return {
+        "status": "ok",
+        "model_ready": artifact is not None,
+        "model_path": str(artifact.relative_to(PROJECT_ROOT)) if artifact else "",
+    }
+
+
+@app.get("/metadata")
+def metadata() -> dict:
+    artifact = latest_model_artifact()
+    return {
+        "project_root": str(PROJECT_ROOT),
+        "model_path": str(artifact.relative_to(PROJECT_ROOT)) if artifact else "",
+        "input_example": load_input_example(),
+        "mlflow_tracking_uri": os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
+    }
+
+
+@app.post("/predict")
+def predict(payload: dict) -> dict:
+    artifact = latest_model_artifact()
+    data = payload.get("data") or payload.get("input") or payload
+    return {
+        "status": "ok" if artifact else "no_model",
+        "model_path": str(artifact.relative_to(PROJECT_ROOT)) if artifact else "",
+        "prediction": data,
+        "note": "POC echo prediction. Replace serving_app.py predict() with real model inference for production.",
+    }
 '''
 
 
@@ -4575,6 +4684,12 @@ def run_command(command: str, path: str, dry_run: bool = False, skip_serving: bo
         details.append(f"applied_changes={len([change for change in applied_changes if change.status == 'applied'])}")
         details.append(f"skipped_changes={len([change for change in applied_changes if change.status == 'skipped'])}")
         analysis = analyze_project(path)
+    if command == "serve" and target.exists() and target.is_dir():
+        serving_change = ensure_serving_app(target)
+        details.append(f"serving_app={serving_change.status}")
+        if serving_change.status == "applied":
+            details.append(f"serving_app_file={serving_change.target}")
+        analysis = analyze_project(path)
     if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"}:
         details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
@@ -4999,21 +5114,21 @@ def prediction_to_jsonable(prediction) -> object:
 
 def run_local_serving_smoke_test(root: Path) -> dict[str, object]:
     try:
-        from fastapi import FastAPI  # type: ignore
         from fastapi.testclient import TestClient  # type: ignore
     except Exception as exc:
         return {"status": "skipped", "reason": f"fastapi serving dependency missing: {exc}"}
-    app = FastAPI()
-
-    @app.get("/health")
-    def health():
-        return {"status": "ok"}
-
-    @app.post("/predict")
-    def predict(payload: dict):
-        return {"prediction": payload}
-
+    serving_app_path = root / "serving_app.py"
+    if not serving_app_path.exists():
+        ensure_serving_app(root)
     try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("aiu_project_serving_app", root / "serving_app.py")
+        if spec is None or spec.loader is None:
+            return {"status": "error", "reason": "serving_app.py import spec 생성 실패"}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        app = module.app
         client = TestClient(app)
         health_response = client.get("/health")
         input_payload = default_input_example()

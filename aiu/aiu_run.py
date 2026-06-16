@@ -1430,6 +1430,10 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("cloudpickle", requirements_text)
             self.assertIn("scikit-learn", requirements_text)
             self.assertIn("joblib", requirements_text)
+            self.assertIn("fastapi", requirements_text)
+            self.assertIn("uvicorn", requirements_text)
+            self.assertTrue((root / "serving_app.py").exists())
+            self.assertIn("FastAPI", (root / "serving_app.py").read_text(encoding="utf-8"))
             self.assertTrue(any(change["code"] == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD" for change in payload["applied_changes"]))
 
             result = subprocess.run(
@@ -1760,6 +1764,25 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(serving["health_endpoint"], "http://127.0.0.1:8000/health")
             self.assertEqual(serving["predict_endpoint"], "http://127.0.0.1:8000/predict")
             self.assertIn("local_serving=준비 가능", payload["details"])
+            self.assertTrue((root / "serving_app.py").exists())
+
+    def test_serve_command_creates_serving_app_when_missing(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
+            (root / "serving_app.py").unlink()
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"aiu serve {root} --json")
+            payload = json.loads(output)
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue((root / "serving_app.py").exists())
+            self.assertIn("serving_app=applied", payload["details"])
+            checks = {check["code"]: check for check in payload["analysis"]["local_serving"]["checks"]}
+            self.assertEqual(checks["serving_app"]["status"], "pass")
 
     def test_report_writes_final_analysis_file(self):
         with TemporaryDirectory() as tmpdir:
@@ -2026,6 +2049,48 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("HELP   AI ML Onboarding Console", output)
         self.assertIn("chat", output)
         self.assertIn("/sample tensorflow", output)
+
+    def test_tui_chatbot_dragged_folder_selects_project_without_runtime_call(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                raise AssertionError("dragged folder path must not call runtime")
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "AI ML" / "model"
+            root.mkdir(parents=True)
+            (root / "requirements.txt").write_text("mlflow\n")
+            controller = self.beginner_tui("", deepagents_runtime=FakeRuntime())
+            controller.select_agent_mode("Chatbot")
+
+            output = controller.submit(f"cd '{root}'")
+
+        self.assertEqual(controller.project_path, str(root.resolve()))
+        self.assertIn("프로젝트 폴더를 선택했습니다", output)
+        self.assertIn(str(root.resolve()), output)
+        self.assertFalse(controller.should_show_thinking(f"cd '{root}'"))
+
+    def test_tui_intermediate_chatbot_dragged_windows_folder_selects_project(self):
+        old_value = os.environ.get("AIU_WINDOWS_DRIVE_C")
+        with TemporaryDirectory() as tmpdir:
+            drive_root = Path(tmpdir)
+            project = drive_root / "Users" / "choi" / "AI ML" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ["AIU_WINDOWS_DRIVE_C"] = str(drive_root)
+            try:
+                controller = BeginnerTuiController("")
+                controller.submit("2")
+
+                output = controller.submit(r"cd 'C:\Users\choi\AI ML\model'")
+            finally:
+                if old_value is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
+
+        self.assertEqual(controller.project_path, str(project.resolve()))
+        self.assertIn("프로젝트 폴더를 선택했습니다", output)
+        self.assertFalse(controller.should_show_thinking(r"cd 'C:\Users\choi\AI ML\model'"))
 
     def test_tui_does_not_accept_project_path_before_launch_mode(self):
         with TemporaryDirectory() as tmpdir:

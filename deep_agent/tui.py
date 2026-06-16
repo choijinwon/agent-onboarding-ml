@@ -758,6 +758,20 @@ def normalize_input_path(raw: str) -> Path | None:
     return None
 
 
+def looks_like_path_input(raw: str) -> bool:
+    for candidate in path_candidates_from_input(raw):
+        if not candidate:
+            continue
+        normalized = normalize_path_text(candidate)
+        if is_windows_style_path(normalized):
+            return True
+        if normalized.startswith(("/", "~", "file://")):
+            return True
+        if re.match(r"^[A-Za-z]:[\\/]", normalized):
+            return True
+    return False
+
+
 def folder_has_project_signals(path: Path) -> bool:
     signals = [
         path / "requirements.txt",
@@ -955,12 +969,18 @@ class BeginnerTuiController:
             or parse_folder_command(command) is not None
         ):
             return False
+        path_value, is_path_command = strip_path_command(command)
+        if (
+            is_path_command
+            or command.startswith("/sample ")
+            or command.startswith("/샘플 ")
+            or looks_like_path_input(command)
+            or normalize_input_path(command) is not None
+        ):
+            return False
         if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
             return self.agent_mode == "Chatbot"
         if self.selected_launch_mode != MODE_BEGINNER or self.agent_mode != "Chatbot":
-            return False
-        path_value, is_path_command = strip_path_command(command)
-        if is_path_command or command.startswith("/sample ") or command.startswith("/샘플 "):
             return False
         if is_wizard_navigation(command, self.total):
             return False
@@ -1297,25 +1317,15 @@ class BeginnerTuiController:
         if self.awaiting_agent_response_choice:
             return self.select_agent_response_choice(command)
 
-        path_value, is_path_command = strip_path_command(command)
-        if is_path_command and not path_value:
-            message = "경로를 함께 입력하세요. 예: /path /Users/me/my-model"
-            self.latest_message = message
-            return message
+        path_result = self._try_select_project_path_from_input(command, announce=self.agent_mode == "Chatbot")
+        if path_result is not None:
+            return path_result
 
         if command.startswith("/sample ") or command.startswith("/샘플 "):
             self.set_project(command)
             message = self.sample_message or ""
             self.latest_message = message
             return self.current_screen()
-
-        selected_path = normalize_input_path(command)
-        if selected_path is not None:
-            return self.select_project_path(selected_path)
-        if is_path_command:
-            message = f"경로를 찾을 수 없습니다: {path_value}"
-            self.latest_message = message
-            return message
 
         if self.index == 3:
             return self._handle_issue_choice(command)
@@ -1351,6 +1361,9 @@ class BeginnerTuiController:
                 return self.current_screen()
             self.select_agent_mode(agent_mode)
             return self.current_screen()
+        path_result = self._try_select_project_path_from_input(command, announce=True)
+        if path_result is not None:
+            return path_result
         if self.agent_mode == "Chatbot":
             if self.awaiting_agent_response_choice:
                 response = self.select_agent_response_choice(command)
@@ -1385,6 +1398,9 @@ class BeginnerTuiController:
                 return self.current_screen()
             self.select_agent_mode(agent_mode)
             return self.current_screen()
+        path_result = self._try_select_project_path_from_input(command, announce=True)
+        if path_result is not None:
+            return path_result
         if self.agent_mode == "Chatbot":
             if self.awaiting_agent_response_choice:
                 response = self.select_agent_response_choice(command)
@@ -1393,6 +1409,34 @@ class BeginnerTuiController:
             return self.render_log() if response else response
         self.latest_message = handle_advanced_input(command)
         return self.current_screen()
+
+    def _try_select_project_path_from_input(self, command: str, announce: bool = False) -> str | None:
+        path_value, is_path_command = strip_path_command(command)
+        if is_path_command and not path_value:
+            message = "경로를 함께 입력하세요. 예: /path C:\\Users\\me\\my-model"
+            self.latest_message = message
+            return self.render_log() if self.agent_mode == "Chatbot" else message
+        selected_path = normalize_input_path(command)
+        if selected_path is not None:
+            self.project_path = str(selected_path)
+            self.sample_message = None
+            self.applied_changes = None
+            self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+            self.index = 0
+            if announce:
+                self.latest_message = (
+                    "프로젝트 폴더를 선택했습니다.\n"
+                    f"- 위치: {self.project_path}\n"
+                    "- 이제 Chatbot 질문, 분석, 코드 수정 요청에 이 경로를 사용합니다."
+                )
+                return self.render_log() if self.agent_mode == "Chatbot" else self.current_screen()
+            self.latest_message = ""
+            return self.current_screen()
+        if is_path_command:
+            message = f"경로를 찾을 수 없습니다: {path_value}"
+            self.latest_message = message
+            return self.render_log() if self.agent_mode == "Chatbot" else message
+        return None
 
     def handle_chat_message(self, command: str) -> str:
         if is_greeting(command):
