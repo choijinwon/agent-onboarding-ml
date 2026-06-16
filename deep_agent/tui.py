@@ -15,7 +15,11 @@ from deep_agent.path_utils import (
     is_windows_style_path,
     normalize_path_text,
 )
-from deep_agent.stores.chat_session_store import append_chat_session_event
+from deep_agent.stores.chat_session_store import (
+    append_chat_session_event,
+    load_chat_context_summary,
+    save_chat_context_summary,
+)
 from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki
 
 from deep_agent.cli import (
@@ -55,6 +59,7 @@ from deep_agent.qwen_chat import QwenChatConfig
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
 HELP_COMMANDS = {"/help", "help", "도움말", "/도움말", "?"}
+COMPACT_COMMANDS = {"/compact", "/요약", "/context compact", "context compact", "컨텍스트 압축"}
 AGENT_MODES = ("Plan", "Build", "Chatbot")
 AGENT_MODE_DISPLAY = {
     "Plan": "PLAN",
@@ -88,6 +93,9 @@ AGENT_RESPONSE_CHOICE_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\[(\d+)\]|(\d+)[.)]|(
 MAX_CHAT_LOG_ENTRIES = 8
 MAX_CHAT_RENDER_CHARS = 7000
 MAX_CHAT_RENDER_LINES = 180
+DEFAULT_CONTEXT_COMPACT_AFTER = 12
+DEFAULT_CONTEXT_RECENT_MESSAGES = 4
+DEFAULT_CONTEXT_MAX_CHARS = 6000
 MAX_TUI_RENDER_CHARS = 24000
 SAFE_CHAT_FIX_CODES = {
     "CREATE_REQUIREMENTS",
@@ -224,6 +232,67 @@ def truncate_for_tui(text: str, *, max_chars: int, max_lines: int) -> str:
     if omitted_lines:
         note += f" (숨긴 줄: {omitted_lines})"
     return f"{text}\n{note}"
+
+
+def compact_chat_entries(
+    entries: list[dict[str, str]],
+    previous_summary: str = "",
+    *,
+    max_chars: int = 2400,
+) -> str:
+    rows: list[str] = []
+    if previous_summary:
+        rows.append(previous_summary.strip())
+    for entry in entries:
+        user_message = normalize_context_line(entry.get("user_message", ""))
+        agent_response = normalize_context_line(entry.get("agent_response", ""))
+        if user_message:
+            rows.append(f"사용자: {user_message}")
+        if agent_response:
+            rows.append(f"Agent: {agent_response}")
+    summary = "\n".join(row for row in rows if row).strip()
+    if len(summary) > max_chars:
+        summary = summary[-max_chars:].lstrip()
+        summary = "이전 대화 요약 일부 생략...\n" + summary
+    return summary
+
+
+def normalize_context_line(text: str, limit: int = 360) -> str:
+    compacted = " ".join(str(text).split())
+    if len(compacted) <= limit:
+        return compacted
+    return compacted[:limit].rstrip() + "..."
+
+
+def build_compacted_runtime_prompt(
+    command: str,
+    summary: str,
+    recent_entries: list[dict[str, str]],
+    *,
+    max_chars: int = DEFAULT_CONTEXT_MAX_CHARS,
+) -> str:
+    if not summary and not recent_entries:
+        return command
+    rows = [
+        "아래는 이전 대화 컨텍스트입니다. 반복 설명은 줄이고 현재 요청에 바로 답하세요.",
+    ]
+    if summary:
+        rows.extend(["", "[압축 요약]", summary.strip()])
+    if recent_entries:
+        rows.append("")
+        rows.append("[최근 대화]")
+        for entry in recent_entries:
+            user_message = normalize_context_line(entry.get("user_message", ""))
+            agent_response = normalize_context_line(entry.get("agent_response", ""))
+            if user_message:
+                rows.append(f"- 사용자: {user_message}")
+            if agent_response:
+                rows.append(f"  Agent: {agent_response}")
+    rows.extend(["", "[현재 요청]", command])
+    prompt = "\n".join(rows)
+    if len(prompt) > max_chars:
+        return prompt[-max_chars:].lstrip()
+    return prompt
 
 
 def trim_tui_render_text(text: str, max_chars: int = MAX_TUI_RENDER_CHARS) -> str:
@@ -1008,12 +1077,18 @@ class BeginnerTuiController:
     awaiting_ai_studio_env: bool = False
     ai_studio_env_index: int = 0
     ai_studio_env_values: dict[str, str] = field(default_factory=dict)
+    chat_context_entries: list[dict[str, str]] = field(default_factory=list)
+    chat_context_summary: str = ""
+    chat_context_compacted_count: int = 0
 
     def __post_init__(self) -> None:
         self.project_path = ""
         self.sample_message: str | None = None
         self.app_config = AppConfig.load()
         export_prompt_templates_to_wiki(self.app_config)
+        saved_summary = load_chat_context_summary(self.app_config)
+        self.chat_context_summary = str(saved_summary.get("summary") or "")
+        self.chat_context_compacted_count = int(saved_summary.get("message_count") or 0)
         self.available_models = available_models_from_config(self.app_config)
         if self.qwen_config is None:
             self.qwen_config = QwenChatConfig.from_app_config(self.app_config)
@@ -1099,6 +1174,7 @@ class BeginnerTuiController:
             not command
             or command in EXIT_COMMANDS
             or command in HELP_COMMANDS
+            or command in COMPACT_COMMANDS
             or self.awaiting_model_selection
             or self.awaiting_sample_selection
             or self.awaiting_ai_studio_env
@@ -1598,6 +1674,11 @@ class BeginnerTuiController:
         return None
 
     def handle_chat_message(self, command: str) -> str:
+        if command.strip() in COMPACT_COMMANDS:
+            response = self.compact_chat_context(reason="manual")
+            self.latest_message = response
+            self._append_chat_log(command, response, [])
+            return response
         if is_greeting(command):
             response = greeting_response()
             self.latest_message = response
@@ -1670,7 +1751,52 @@ class BeginnerTuiController:
 
     def _invoke_deepagents(self, command: str, agent_mode: str | None = None):
         runtime = self.deepagents_runtime or DeepAgentsRuntime(self.app_config)
-        return runtime.invoke(command, project_path=self.project_path, agent_mode=agent_mode or self.agent_mode)
+        self._auto_compact_chat_context()
+        prompt = self._runtime_prompt_with_context(command)
+        return runtime.invoke(prompt, project_path=self.project_path, agent_mode=agent_mode or self.agent_mode)
+
+    def _runtime_prompt_with_context(self, command: str) -> str:
+        recent_count = self.app_config.get_int("CHAT_CONTEXT_RECENT_MESSAGES", DEFAULT_CONTEXT_RECENT_MESSAGES)
+        max_chars = self.app_config.get_int("CHAT_CONTEXT_MAX_CHARS", DEFAULT_CONTEXT_MAX_CHARS)
+        recent_entries = self.chat_context_entries[-recent_count:] if recent_count > 0 else []
+        return build_compacted_runtime_prompt(
+            command,
+            self.chat_context_summary,
+            recent_entries,
+            max_chars=max_chars,
+        )
+
+    def _auto_compact_chat_context(self) -> None:
+        compact_after = self.app_config.get_int("CHAT_CONTEXT_COMPACT_AFTER", DEFAULT_CONTEXT_COMPACT_AFTER)
+        recent_count = self.app_config.get_int("CHAT_CONTEXT_RECENT_MESSAGES", DEFAULT_CONTEXT_RECENT_MESSAGES)
+        if compact_after <= 0 or len(self.chat_context_entries) < compact_after:
+            return
+        if len(self.chat_context_entries) <= recent_count:
+            return
+        self.compact_chat_context(reason="auto")
+
+    def compact_chat_context(self, reason: str = "manual") -> str:
+        recent_count = self.app_config.get_int("CHAT_CONTEXT_RECENT_MESSAGES", DEFAULT_CONTEXT_RECENT_MESSAGES)
+        if not self.chat_context_entries and not self.chat_context_summary:
+            return "압축할 챗봇 컨텍스트가 아직 없습니다."
+        keep_count = max(0, recent_count)
+        if reason == "manual" and len(self.chat_context_entries) <= keep_count:
+            keep_count = 0
+        compact_targets = self.chat_context_entries[:-keep_count] if keep_count else list(self.chat_context_entries)
+        recent_entries = self.chat_context_entries[-keep_count:] if keep_count else []
+        if compact_targets:
+            self.chat_context_summary = compact_chat_entries(compact_targets, self.chat_context_summary)
+            self.chat_context_compacted_count += len(compact_targets)
+            save_chat_context_summary(self.app_config, self.chat_context_summary, self.chat_context_compacted_count)
+            self.chat_context_entries = recent_entries
+        elif self.chat_context_summary:
+            save_chat_context_summary(self.app_config, self.chat_context_summary, self.chat_context_compacted_count)
+        return (
+            "챗봇 컨텍스트를 압축했습니다.\n"
+            f"- 방식: {'자동' if reason == 'auto' else '수동'}\n"
+            f"- 압축 누적 메시지: {self.chat_context_compacted_count}개\n"
+            f"- 최근 유지 메시지: {len(self.chat_context_entries)}개"
+        )
 
     def _apply_fixable_issues_after_chat(self) -> list[AppliedChange]:
         analysis = analyze_project(self.project_path)
@@ -1905,6 +2031,13 @@ class BeginnerTuiController:
         applied_changes: list[AppliedChange],
         final_analysis,
     ) -> None:
+        self.chat_context_entries.append(
+            {
+                "user_message": user_message,
+                "agent_response": agent_response,
+                "agent_mode": self.agent_mode,
+            }
+        )
         append_chat_session_event(
             self.app_config,
             {
@@ -2756,6 +2889,8 @@ __all__ = [
     "format_tui_chatbot_screen",
     "format_tui_help_screen",
     "classify_chat_fix_previews",
+    "build_compacted_runtime_prompt",
+    "compact_chat_entries",
     "format_chat_code_policy_plan",
     "is_fix_request",
     "is_chat_apply_approved",

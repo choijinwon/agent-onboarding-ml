@@ -4234,11 +4234,13 @@ def format_beginner_apply_result(applied_changes: list[AppliedChange], analysis:
 
 def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
     serving = analysis.local_serving
+    job_template_path = Path(analysis.path or ".") / "job_template.yml"
     rows = [
         f"- 상태: {serving.status}",
         f"- 방식: {serving.mode}",
         f"- health 확인: {serving.health_endpoint}",
         f"- predict 테스트: {serving.predict_endpoint}",
+        f"- Job Template YAML: {job_template_path}",
         "- 체크 결과:",
     ]
     rows.extend(f"  - {format_check_status(check.status)} {check.label}: {check.detail}" for check in serving.checks)
@@ -4249,7 +4251,7 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
         ]
     )
     if serving.status == "준비 가능":
-        rows.append("- dry-run 확인 후 로컬 서버 실행 명령을 안내합니다.")
+        rows.append("- 로컬 서빙 확인 시 호출 URL과 결과를 job_template.yml에 반영합니다.")
     elif serving.status == "보완 필요":
         rows.append("- 보완 항목을 수정한 뒤 다시 로컬 서빙 테스트를 진행합니다.")
     else:
@@ -4260,6 +4262,7 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
 def format_beginner_report(analysis: ProjectAnalysis) -> str:
     report_path = Path(analysis.path or ".") / "ml-agent-report.json"
     register_plan_path = Path(analysis.path or ".") / "mlflow-registration-plan.json"
+    job_template_path = Path(analysis.path or ".") / "job_template.yml"
     rows = [
         "- 최종 결과 요약:",
         f"  - 프로젝트: {analysis.path}",
@@ -4290,6 +4293,9 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
             f"  - 실행: ml-agent register {analysis.path}",
             "  - MLFLOW_TRACKING_URL이 비어 있으면 file:./mlruns 로컬 저장소를 사용합니다.",
             f"  - 등록 계획 파일: {register_plan_path}",
+            "- Job Template YAML:",
+            f"  - 저장 경로: {job_template_path}",
+            f"  - 생성 명령: ml-agent serve {analysis.path}",
             "- 리포트 저장:",
             f"  - 저장 경로: {report_path}",
             f"  - 저장 명령: ml-agent report {analysis.path}",
@@ -4721,6 +4727,8 @@ def run_command(command: str, path: str, dry_run: bool = False, skip_serving: bo
         if serving_change.status == "applied":
             details.append(f"serving_app_file={serving_change.target}")
         analysis = analyze_project(path)
+        job_template_path = write_job_template_file(target, analysis)
+        details.append(f"job_template_file={job_template_path}")
     if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"}:
         details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
@@ -4739,6 +4747,11 @@ def run_command(command: str, path: str, dry_run: bool = False, skip_serving: bo
         result_file = str(target / "mlflow-run-verification.json")
         verification = run_mlflow_verification(target, skip_serving=skip_serving)
         write_verification_file(Path(result_file), verification)
+        if target.exists() and target.is_dir():
+            serving_payload = verification.get("serving")
+            serving_result = serving_payload if isinstance(serving_payload, dict) else None
+            job_template_path = write_job_template_file(target, analysis, serving_result=serving_result)
+            details.append(f"job_template_file={job_template_path}")
         details.extend(str(item) for item in verification.get("details", []))
         status = str(verification.get("status", "error"))
         exit_code = int(verification.get("exit_code", 1))
@@ -4845,6 +4858,139 @@ def build_registration_plan(analysis: ProjectAnalysis, dry_run: bool = False) ->
         "details": details,
         "ready": analysis.registration_status == "등록 가능" and analysis.job_template_ready,
     }
+
+
+def build_job_template_payload(
+    analysis: ProjectAnalysis,
+    serving_result: dict[str, object] | None = None,
+) -> dict[str, object]:
+    config = AppConfig.load()
+    registration_plan = build_registration_plan(analysis, dry_run=False)
+    root = Path(analysis.path or ".")
+    entrypoint = "run_model.py"
+    if "run_model.py" in analysis.entrypoint_candidates:
+        entrypoint = "run_model.py"
+    elif analysis.entrypoint_candidates:
+        entrypoint = analysis.entrypoint_candidates[0]
+    artifact_path = analysis.model_artifacts[0] if analysis.model_artifacts else "saved_model"
+    serving = analysis.local_serving
+    smoke_test = serving_result or {"status": "not_run"}
+    resources = {
+        "queue": config.get("AI_STUDIO_DEFAULT_QUEUE") or config.get("ML_PLATFORM_DEFAULT_QUEUE") or "default",
+        "gpu": config.get("AI_STUDIO_DEFAULT_GPU") or config.get("ML_PLATFORM_DEFAULT_GPU") or "1",
+        "cpu": config.get("AI_STUDIO_DEFAULT_CPU") or config.get("ML_PLATFORM_DEFAULT_CPU") or "4",
+        "memory": config.get("AI_STUDIO_DEFAULT_MEMORY") or config.get("ML_PLATFORM_DEFAULT_MEMORY") or "16Gi",
+        "python_version": config.get("AI_STUDIO_PYTHON_VERSION") or config.get("ML_PLATFORM_PYTHON_VERSION") or "3.11",
+    }
+    return {
+        "apiVersion": "aiu/v1",
+        "kind": "JobTemplate",
+        "metadata": {
+            "name": root.name or "aiu-model-job",
+            "project_path": str(root),
+            "description": "AI Studio MLflow registration and local serving template",
+        },
+        "spec": {
+            "mode": "mlflow-register-and-serve",
+            "entrypoint": entrypoint,
+            "command": registration_plan["command"],
+            "resources": resources,
+            "mlflow": {
+                "tracking_uri": registration_plan["tracking_uri"],
+                "tracking_mode": registration_plan["tracking_mode"],
+                "experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
+                "registered_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+                "local_store": "./mlruns",
+            },
+            "artifacts": {
+                "model": artifact_path,
+                "config": "config.json",
+                "input_example": "input_example.json",
+                "requirements": "requirements.txt",
+            },
+            "serving": {
+                "status": serving.status,
+                "mode": serving.mode,
+                "app": "serving_app:app",
+                "host": serving.host,
+                "port": serving.port,
+                "health_endpoint": serving.health_endpoint,
+                "predict_endpoint": serving.predict_endpoint,
+                "serve_command": f"python -m uvicorn serving_app:app --host {serving.host} --port {serving.port}",
+                "smoke_test": smoke_test,
+            },
+            "checks": {
+                "registration_status": analysis.registration_status,
+                "job_template_ready": analysis.job_template_ready,
+                "local_serving": serving.status,
+                "issues": analysis.issues,
+            },
+        },
+    }
+
+
+def yaml_scalar(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if text == "":
+        return '""'
+    needs_quote = any(char.isspace() for char in text) or any(char in text for char in [":", "#", "{", "}", "[", "]", ",", "&", "*", "!", "|", ">", "%", "@", "`", '"', "'"])
+    reserved = text.lower() in {"true", "false", "null", "yes", "no", "on", "off"}
+    if not needs_quote and not reserved and "\n" not in text and text.strip() == text:
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def format_yaml_block(value: object, indent: int = 0) -> list[str]:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        rows: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                rows.append(f"{prefix}{key}:")
+                rows.extend(format_yaml_block(item, indent + 2))
+            else:
+                rows.append(f"{prefix}{key}: {yaml_scalar(item)}")
+        return rows
+    if isinstance(value, list):
+        if not value:
+            return [f"{prefix}[]"]
+        rows = []
+        for item in value:
+            if isinstance(item, dict):
+                rows.append(f"{prefix}-")
+                rows.extend(format_yaml_block(item, indent + 2))
+            elif isinstance(item, list):
+                rows.append(f"{prefix}-")
+                rows.extend(format_yaml_block(item, indent + 2))
+            else:
+                rows.append(f"{prefix}- {yaml_scalar(item)}")
+        return rows
+    return [f"{prefix}{yaml_scalar(value)}"]
+
+
+def build_job_template_yaml(
+    analysis: ProjectAnalysis,
+    serving_result: dict[str, object] | None = None,
+) -> str:
+    payload = build_job_template_payload(analysis, serving_result=serving_result)
+    return "\n".join(format_yaml_block(payload)) + "\n"
+
+
+def write_job_template_file(
+    root: Path,
+    analysis: ProjectAnalysis,
+    serving_result: dict[str, object] | None = None,
+) -> Path:
+    ensure_read_write_directory(root)
+    path = root / "job_template.yml"
+    path.write_text(build_job_template_yaml(analysis, serving_result=serving_result), encoding="utf-8")
+    return path
 
 
 def write_registration_plan_file(path: Path, plan: dict[str, object]) -> None:

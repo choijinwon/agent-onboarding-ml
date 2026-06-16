@@ -40,6 +40,39 @@ def chat_session_path(config: AppConfig, now: datetime | None = None) -> Path:
     return session_dir / f"chat-session-{timestamp:%Y%m%d}.jsonl"
 
 
+def chat_context_summary_path(config: AppConfig) -> Path:
+    session_dir = config.root_dir / (config.get("SESSION_DIR") or "sessions")
+    return session_dir / "chat-context-summary.json"
+
+
+def load_chat_context_summary(config: AppConfig) -> dict[str, Any]:
+    path = chat_context_summary_path(config)
+    if not path.exists():
+        return {"summary": "", "message_count": 0, "updated_at": ""}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"summary": "", "message_count": 0, "updated_at": ""}
+    if not isinstance(payload, dict):
+        return {"summary": "", "message_count": 0, "updated_at": ""}
+    return payload
+
+
+def save_chat_context_summary(config: AppConfig, summary: str, message_count: int) -> Path:
+    path = chat_context_summary_path(config)
+    ensure_read_write_directory(path.parent)
+    payload = mask_sensitive_payload(
+        {
+            "summary": summary,
+            "message_count": message_count,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        config,
+    )
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def append_chat_session_event(config: AppConfig, event: dict[str, Any], now: datetime | None = None) -> Path:
     path = chat_session_path(config, now=now)
     ensure_read_write_directory(path.parent)
@@ -56,7 +89,10 @@ def append_chat_session_event(config: AppConfig, event: dict[str, Any], now: dat
 
 __all__ = [
     "append_chat_session_event",
+    "chat_context_summary_path",
     "chat_session_path",
+    "load_chat_context_summary",
     "mask_sensitive_payload",
     "mask_sensitive_text",
+    "save_chat_context_summary",
 ]

@@ -60,8 +60,10 @@ from deep_agent.cli import (
 )
 from deep_agent.tui import (
     BeginnerTuiController,
+    build_compacted_runtime_prompt,
     command_placeholder_for_mode,
     choose_folder_with_dialog,
+    compact_chat_entries,
     discover_selectable_folders,
     extract_agent_response_choices,
     format_agent_response_choices,
@@ -1778,6 +1780,30 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("local_serving=준비 가능", payload["details"])
             self.assertTrue((root / "serving_app.py").exists())
 
+    def test_serve_command_writes_job_template_yml_with_serving_values(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\nscikit-learn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"aiu serve {root} --json")
+            payload = json.loads(output)
+            template_path = root / "job_template.yml"
+            template = template_path.read_text(encoding="utf-8")
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue(template_path.exists())
+            self.assertIn(f"job_template_file={template_path}", payload["details"])
+            self.assertIn("kind: JobTemplate", template)
+            self.assertIn("command: \"python run_model.py --env-file ai_studio.env --register\"", template)
+            self.assertIn("app: \"serving_app:app\"", template)
+            self.assertIn("health_endpoint: \"http://127.0.0.1:8000/health\"", template)
+            self.assertIn("predict_endpoint: \"http://127.0.0.1:8000/predict\"", template)
+            self.assertIn("serve_command: \"python -m uvicorn serving_app:app --host 127.0.0.1 --port 8000\"", template)
+            self.assertIn("local_store: ./mlruns", template)
+
     def test_serve_command_creates_serving_app_when_missing(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1795,6 +1821,32 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("serving_app=applied", payload["details"])
             checks = {check["code"]: check for check in payload["analysis"]["local_serving"]["checks"]}
             self.assertEqual(checks["serving_app"]["status"], "pass")
+
+    def test_verify_run_writes_job_template_with_serving_smoke_status(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow\ncloudpickle\npandas\n")
+            (root / "model.onnx").write_text("sample")
+            self.write_fake_mlflow_runtime(root)
+            sys.path.insert(0, str(root))
+            try:
+                output = handle_advanced_input(f"aiu verify-run {root} --json")
+            finally:
+                sys.path.remove(str(root))
+                for name in list(sys.modules):
+                    if name == "mlflow" or name.startswith("mlflow.") or name == "pandas":
+                        sys.modules.pop(name, None)
+
+            payload = json.loads(output)
+            template_path = root / "job_template.yml"
+            template = template_path.read_text(encoding="utf-8")
+
+            self.assertIn(f"job_template_file={template_path}", payload["details"])
+            self.assertTrue(template_path.exists())
+            self.assertIn("smoke_test:", template)
+            self.assertIn("status: skipped", template)
+            self.assertIn("fastapi serving dependency missing", template)
 
     def test_report_writes_final_analysis_file(self):
         with TemporaryDirectory() as tmpdir:
@@ -3375,6 +3427,90 @@ class WindowsSetupTest(unittest.TestCase):
                 "PLAN BUILD CHAT 차이를 알려줘",
                 (Path(tmpdir) / "deep_agent" / "wiki" / "prompts" / "used_prompts.md").read_text(encoding="utf-8"),
             )
+
+    def test_compacted_runtime_prompt_includes_summary_recent_and_current_request(self):
+        prompt = build_compacted_runtime_prompt(
+            "현재 질문",
+            "이전 요약",
+            [{"user_message": "전 질문", "agent_response": "전 답변"}],
+        )
+
+        self.assertIn("[압축 요약]", prompt)
+        self.assertIn("이전 요약", prompt)
+        self.assertIn("[최근 대화]", prompt)
+        self.assertIn("전 질문", prompt)
+        self.assertIn("[현재 요청]", prompt)
+        self.assertIn("현재 질문", prompt)
+
+    def test_tui_manual_compact_saves_summary_and_next_prompt_uses_it(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("응답", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+                controller._save_chat_session("이전 질문 1", "이전 답변 1", [], None)
+                controller._save_chat_session("이전 질문 2", "이전 답변 2", [], None)
+
+                compact_output = controller.submit("/compact")
+                output = controller.submit("다음 질문")
+            finally:
+                os.chdir(cwd)
+
+            summary_file = Path(tmpdir) / ".aiu" / "sessions" / "chat-context-summary.json"
+            self.assertIn("챗봇 컨텍스트를 압축했습니다", compact_output)
+            self.assertTrue(summary_file.exists())
+            self.assertIn("응답", output)
+            self.assertIn("[압축 요약]", fake.calls[-1][0])
+            self.assertIn("이전 질문", fake.calls[-1][0])
+            self.assertIn("다음 질문", fake.calls[-1][0])
+
+    def test_tui_auto_compacts_chat_context_before_runtime_call(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("자동 압축 후 응답", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                Path(".env").write_text(
+                    "CHAT_CONTEXT_COMPACT_AFTER=3\n"
+                    "CHAT_CONTEXT_RECENT_MESSAGES=1\n",
+                    encoding="utf-8",
+                )
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+                controller._save_chat_session("질문 1", "답변 1", [], None)
+                controller._save_chat_session("질문 2", "답변 2", [], None)
+                controller._save_chat_session("질문 3", "답변 3", [], None)
+
+                controller.submit("현재 분석")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("[압축 요약]", fake.calls[-1][0])
+            self.assertIn("질문 1", fake.calls[-1][0])
+            self.assertEqual(len(controller.chat_context_entries), 2)
+            self.assertGreaterEqual(controller.chat_context_compacted_count, 2)
 
     def test_tui_chat_coding_request_routes_to_build_runtime(self):
         class FakeRuntime:
