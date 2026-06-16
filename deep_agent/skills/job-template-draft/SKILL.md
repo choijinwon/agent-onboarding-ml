@@ -1,36 +1,34 @@
 ---
 name: job-template-draft
-description: 학습 entrypoint와 실행 인자를 기반으로 AI Studio 또는 ML Platform Job Template 초안을 만든다.
+description: 학습 entrypoint, MLflow 등록 명령, 로컬 서빙 호출 결과를 기반으로 Job Template YAML 초안을 만든다.
 ---
 
 # Job Template Draft
 
 ## When To Use
 
-- 사용자가 Job Template 초안을 요청할 때
-- 학습 코드의 entrypoint, arguments, resource 요구사항을 정리해야 할 때
-- AI Studio 또는 ML Platform 제출 양식을 만들 때
+- 사용자가 Job Template을 모르지만 학습/등록/서빙 값을 YAML로 남겨야 할 때
+- `run_model.py`, resource, MLflow 설정, serving endpoint를 한 파일로 정리해야 할 때
+- 로컬 서빙 테스트 후 호출 값을 ML Platform 실행 설정으로 연결해야 할 때
 
-## Inputs
+## YAML Contents
 
-- entrypoint script
-- command arguments
-- requirements file
-- Python version
-- queue
-- CPU, GPU, memory
-- environment variables
+- project metadata
+- entrypoint and command
+- resource defaults: queue, cpu, gpu, memory, python_version
+- MLflow tracking mode and registry model name placeholder
+- artifact paths
+- local serving app, health endpoint, predict endpoint
+- smoke test result
 
-## Output
+## Workflow
 
-- Job Template 초안
-- 필요한 파일 목록
-- dry-run 변경안
-- validate 명령
+- 분석 결과에서 entrypoint, requirements, model artifact를 가져온다.
+- 로컬 서빙 plan 또는 smoke test 결과를 YAML에 반영한다.
+- 값이 없으면 안전한 placeholder를 사용하고 사용자 입력이 필요한 항목을 표시한다.
+- YAML 생성 후 재검증 명령을 안내한다.
 
 ## Safety
 
-- `fix`는 기본 dry-run이다.
-- 초급자 모드에서는 사용자가 `적용하기`를 선택하기 전에는 파일을 쓰지 않는다.
-- 고급자 모드에서는 `apply`가 명시적으로 실행되기 전에는 파일을 쓰지 않는다.
-- 삭제 작업은 하지 않는다.
+- credential 값을 YAML에 직접 쓰지 않는다.
+- 원격 업로드나 배치 실행은 YAML 생성과 분리한다.

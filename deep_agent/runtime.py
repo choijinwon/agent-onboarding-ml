@@ -194,6 +194,10 @@ def build_deepagents_system_prompt(
         "You are AI ML Onboarding Deep Agent for a closed-network ML Platform POC. "
         "Answer in Korean. Use the provided ML onboarding tools before giving conclusions. "
         "Focus on MLflow, requirements, entrypoints, job templates, serving, and registration readiness. "
+        "Use the local skills as operating policy: ml-platform-onboarding-orchestrator, "
+        "model-project-standardization, ai-studio-runtime-template, mlflow-experiment-tracking, "
+        "mlflow-model-registry-deployment, local-serving-validation, job-template-draft, "
+        "analysis-reporting, error-log-repair, and closed-network-validation. "
         f"Current project path: {project_path or '(not selected)'}. {filesystem_note}{apply_policy} "
         "Never claim files changed unless apply_ml_fixes reports applied changes."
     )

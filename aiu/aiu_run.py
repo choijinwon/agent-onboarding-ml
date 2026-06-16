@@ -145,6 +145,11 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertIn("create or edit files inside the project root", build_prompt)
         self.assertIn("AutoFix mode", autofix_prompt)
         self.assertIn("apply_ml_fixes automatically", autofix_prompt)
+        self.assertIn("ml-platform-onboarding-orchestrator", build_prompt)
+        self.assertIn("model-project-standardization", build_prompt)
+        self.assertIn("job-template-draft", build_prompt)
+        self.assertIn("analysis-reporting", build_prompt)
+        self.assertIn("error-log-repair", build_prompt)
 
     def test_deepagents_prompt_maps_windows_project_to_virtual_root(self):
         prompt = build_deepagents_system_prompt(
@@ -3912,6 +3917,24 @@ class PromptAndSkillStoreTest(unittest.TestCase):
 
         for skill_name in DEFAULT_SKILLS:
             self.assertTrue((root / "deep_agent" / "skills" / skill_name / "SKILL.md").exists(), skill_name)
+
+    def test_default_skills_include_ml_platform_onboarding_flow(self):
+        expected = {
+            "ml-platform-onboarding-orchestrator",
+            "model-project-standardization",
+            "ai-studio-runtime-template",
+            "local-serving-validation",
+            "job-template-draft",
+            "analysis-reporting",
+            "error-log-repair",
+            "closed-network-validation",
+        }
+
+        self.assertTrue(expected.issubset(set(DEFAULT_SKILLS)))
+        for name in expected:
+            content = DEFAULT_SKILLS[name]
+            self.assertIn("## When To Use", content)
+            self.assertIn("##", content)
 
     def test_prompt_templates_export_to_wiki(self):
         with TemporaryDirectory() as tmpdir:

@@ -1,44 +1,32 @@
 ---
 name: error-log-repair
-description: 저장된 에러 로그를 기반으로 원인 후보를 찾고 dry-run 수정안을 다시 생성한다.
+description: 저장된 에러 로그와 실패한 실행 결과를 기반으로 원인 후보를 찾고 승인 기반 재수정안을 만든다.
 ---
 
 # Error Log Repair
 
 ## When To Use
 
-- 사용자가 에러 로그 기반 재수정을 요청할 때
-- `.aiu/chat_errors/`에 저장된 로그를 다시 분석해야 할 때
-- validate, apply, report 이후 실패 로그가 남았을 때
-
-## Inputs
-
-- error log id 또는 json 파일 경로
-- project path
-- previous fix report
-- command output
-- stack trace
+- `run_model.py`, MLflow 등록, local serving, TUI chatbot 실행이 실패했을 때
+- 사용자가 에러 로그를 붙여넣거나 `chat_errors`, `dev_runs`, `sessions` 로그를 분석해달라고 할 때
+- 같은 오류를 바탕으로 다시 자동 수정해야 할 때
 
 ## Workflow
 
-1. 에러 로그를 읽는다.
-2. 민감정보가 마스킹되어 있는지 확인한다.
-3. MLflow, requirements, arguments, Job Template, Qwen 연결 문제로 분류한다.
-4. 원인 후보와 증거를 요약한다.
-5. `ml-agent fix <project> --dry-run` 형태의 재수정 명령을 제안한다.
-6. 초급자 모드에서는 `적용하기 / 다시 보기 / 취소하기` 선택지를 보여주고, `적용하기` 선택 전에는 파일을 쓰지 않는다.
-7. 고급자 모드에서는 apply 명령 전에는 파일을 쓰지 않는다.
+- traceback, command, exit code, stderr, 최근 변경 파일을 분리한다.
+- dependency, path, encoding, MLflow config, model artifact, serving request 문제로 분류한다.
+- safe 항목은 승인 후 자동 보완하고 review_required 항목은 미리보기를 만든다.
+- 수정 후 같은 검증 명령을 다시 안내한다.
 
 ## Output
 
 - 에러 요약
 - 원인 후보
-- 재수정 액션
-- 추천 명령
+- 수정 정책 분류
+- 적용 가능한 수정안
 - 재검증 명령
 
 ## Safety
 
-- API key, token, password, secret은 출력하지 않는다.
-- 로그 원문 전체를 불필요하게 반복하지 않는다.
-- 삭제 작업은 제안하지 않는다.
+- 로그 안 credential은 마스킹한다.
+- 삭제, 프로젝트 외부 수정, 모델 artifact 교체는 차단한다.
