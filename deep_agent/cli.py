@@ -1677,6 +1677,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             scan=scan,
             registration_status="불가",
             registration_checks=build_registration_checks(
+                None,
                 requirements_files=[],
                 has_mlflow_dependency=False,
                 mlflow_usage_files=[],
@@ -1720,6 +1721,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
             scan=scan,
             registration_status="불가",
             registration_checks=build_registration_checks(
+                None,
                 requirements_files=[],
                 has_mlflow_dependency=False,
                 mlflow_usage_files=[],
@@ -1767,6 +1769,7 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
     ]
     model_parameters = extract_model_parameters(target, scan)
     registration_checks = build_registration_checks(
+        target,
         requirements_files=[relative_path(path, target) for path in requirements_files],
         has_mlflow_dependency=has_mlflow_dependency,
         mlflow_usage_files=mlflow_usage_files,
@@ -2052,6 +2055,7 @@ def scan_project(root: Path) -> ProjectScan:
 
 
 def build_registration_checks(
+    root: Path | None,
     requirements_files: list[str],
     has_mlflow_dependency: bool,
     mlflow_usage_files: list[str],
@@ -2059,7 +2063,7 @@ def build_registration_checks(
     model_artifacts: list[str],
     scan: ProjectScan,
 ) -> list[RegistrationCheck]:
-    return [
+    checks = [
         RegistrationCheck(
             code="project_path",
             label="프로젝트 경로",
@@ -2103,6 +2107,203 @@ def build_registration_checks(
             detail="entrypoint와 dependency 정보 확인" if entrypoint_candidates and requirements_files else "entrypoint/dependency 보완 필요",
         ),
     ]
+    if root is not None and scan.exists and scan.is_directory:
+        checks.extend(build_mlflow_config_checks(root, requirements_files))
+    return checks
+
+
+RUN_MODEL_REQUIRED_TOKENS = (
+    "--env-file",
+    "--config",
+    "--model",
+    "--mode",
+    "--register",
+    "AI_STUDIO_CONFIG_PATH",
+    "AI_STUDIO_LOCAL_MODEL_PATH",
+)
+LOG_MODEL_REQUIRED_TOKENS = (
+    "python_model=ModelWrapper()",
+    "artifact_path",
+    "code_path",
+    "artifacts",
+    "registered_model_name",
+    "pip_requirements",
+    "input_example",
+)
+AI_STUDIO_ENV_KEYS = (
+    "MLFLOW_TRACKING_URL",
+    "MLFLOW_TRACKING_USERNAME",
+    "MLFLOW_TRACKING_PASSWORD",
+    "MLFLOW_EXPERIMENT_NAME",
+    "MLFLOW_REGISTER_MODEL_NAME",
+)
+SERVING_REQUIREMENT_TOKENS = ("fastapi", "uvicorn")
+
+
+def build_mlflow_config_checks(root: Path, requirements_files: list[str]) -> list[RegistrationCheck]:
+    checks: list[RegistrationCheck] = []
+    run_model_path = root / "run_model.py"
+    run_model_source_text = safe_read_text(run_model_path)
+    if run_model_path.exists():
+        missing = [token for token in RUN_MODEL_REQUIRED_TOKENS if token not in run_model_source_text]
+        checks.append(
+            RegistrationCheck(
+                code="run_model_config",
+                label="run_model.py 설정 변수",
+                status="pass" if not missing else "warn",
+                detail="등록 실행 옵션/환경변수 확인" if not missing else "누락 확인: " + ", ".join(missing),
+            )
+        )
+    else:
+        checks.append(
+            RegistrationCheck(
+                code="run_model_config",
+                label="run_model.py 설정 변수",
+                status="block",
+                detail="run_model.py 없음",
+            )
+        )
+
+    wrapper_path, wrapper_text = find_model_wrapper_source(root)
+    if wrapper_text:
+        required = ("class ModelWrapper", "predict")
+        missing = [token for token in required if token not in wrapper_text]
+        if "mlflow.pyfunc.PythonModel" not in wrapper_text:
+            missing.append("mlflow.pyfunc.PythonModel")
+        if "load_context" not in wrapper_text:
+            missing.append("load_context")
+        checks.append(
+            RegistrationCheck(
+                code="model_wrapper",
+                label="ModelWrapper 구현",
+                status="pass" if not missing else "warn",
+                detail=f"{wrapper_path} 확인" if not missing else f"{wrapper_path} 보완 필요: " + ", ".join(missing),
+            )
+        )
+    else:
+        checks.append(
+            RegistrationCheck(
+                code="model_wrapper",
+                label="ModelWrapper 구현",
+                status="warn",
+                detail="predict.py 또는 aiu_custom/model_wrapper.py에서 ModelWrapper를 찾지 못했습니다.",
+            )
+        )
+
+    log_model_file, log_model_text = find_pyfunc_log_model_source(root)
+    if log_model_text:
+        missing = [token for token in LOG_MODEL_REQUIRED_TOKENS if token not in compact_source(log_model_text)]
+        checks.append(
+            RegistrationCheck(
+                code="pyfunc_log_model",
+                label="mlflow.pyfunc.log_model 파라미터",
+                status="pass" if not missing else "warn",
+                detail=f"{log_model_file} 확인" if not missing else f"{log_model_file} 누락 확인: " + ", ".join(missing),
+            )
+        )
+    else:
+        checks.append(
+            RegistrationCheck(
+                code="pyfunc_log_model",
+                label="mlflow.pyfunc.log_model 파라미터",
+                status="warn",
+                detail="mlflow.pyfunc.log_model 호출을 찾지 못했습니다.",
+            )
+        )
+
+    requirements_text = "\n".join(safe_read_text(root / path) for path in requirements_files)
+    serving_present = all(token in requirements_text.lower() for token in SERVING_REQUIREMENT_TOKENS)
+    checks.append(
+        RegistrationCheck(
+            code="serving_requirements",
+            label="requirements.txt serve/mlflow",
+            status="pass" if has_requirement_token(requirements_text, "mlflow") and serving_present else "warn",
+            detail=build_serving_requirements_detail(requirements_text),
+        )
+    )
+
+    env_check = inspect_ai_studio_env(root)
+    checks.append(env_check)
+    return checks
+
+
+def compact_source(text: str) -> str:
+    return "".join(text.split())
+
+
+def find_model_wrapper_source(root: Path) -> tuple[str, str]:
+    candidates = [root / "predict.py", root / "aiu_custom" / "model_wrapper.py"]
+    candidates.extend(path for path in list_project_files(root, {".py"}, limit=120) if path.name not in {"predict.py"})
+    for path in candidates:
+        text = safe_read_text(path)
+        if "ModelWrapper" in text:
+            return relative_path(path, root), text
+    return "", ""
+
+
+def find_pyfunc_log_model_source(root: Path) -> tuple[str, str]:
+    preferred = root / "mlflow_ai_studio_logging.py"
+    candidates = [preferred] if preferred.exists() else []
+    candidates.extend(path for path in list_project_files(root, {".py"}, limit=120) if path != preferred)
+    for path in candidates:
+        text = safe_read_text(path)
+        if "mlflow.pyfunc.log_model" in text:
+            return relative_path(path, root), text
+    return "", ""
+
+
+def has_requirement_token(requirements_text: str, token: str) -> bool:
+    normalized = requirements_text.lower().replace("_", "-")
+    return token.lower().replace("_", "-") in normalized
+
+
+def build_serving_requirements_detail(requirements_text: str) -> str:
+    missing: list[str] = []
+    if not has_requirement_token(requirements_text, "mlflow"):
+        missing.append("mlflow")
+    for token in SERVING_REQUIREMENT_TOKENS:
+        if not has_requirement_token(requirements_text, token):
+            missing.append(token)
+    if not missing:
+        return "mlflow, fastapi, uvicorn 확인"
+    return "보완 권장: " + ", ".join(missing)
+
+
+def inspect_ai_studio_env(root: Path) -> RegistrationCheck:
+    env_path = root / "ai_studio.env"
+    config_path = root / "config.json"
+    env_text = safe_read_text(env_path)
+    config_text = safe_read_text(config_path)
+    combined = env_text + "\n" + config_text
+    missing_keys = [key for key in AI_STUDIO_ENV_KEYS if key not in combined]
+    empty_keys = [key for key in AI_STUDIO_ENV_KEYS if f"{key}=" in env_text and not env_value(env_text, key)]
+    if missing_keys:
+        return RegistrationCheck(
+            code="mlflow_environment",
+            label="기타 환경변수",
+            status="warn",
+            detail="키 누락: " + ", ".join(missing_keys),
+        )
+    if empty_keys:
+        return RegistrationCheck(
+            code="mlflow_environment",
+            label="기타 환경변수",
+            status="warn",
+            detail="원격 등록 값 비어 있음: " + ", ".join(empty_keys) + " / 로컬 file:./mlruns fallback 가능",
+        )
+    return RegistrationCheck(
+        code="mlflow_environment",
+        label="기타 환경변수",
+        status="pass",
+        detail="MLflow 환경변수 키 확인",
+    )
+
+
+def env_value(env_text: str, key: str) -> str:
+    for line in env_text.splitlines():
+        if line.strip().startswith(f"{key}="):
+            return line.split("=", 1)[1].strip()
+    return ""
 
 
 def format_model_artifact_detail(model_artifacts: list[str], scan: ProjectScan) -> str:
@@ -3665,6 +3866,11 @@ def handle_intermediate_request(request: str) -> str:
             "- tracking 설정 확인\n"
             "- experiment/run 기록 코드 확인\n"
             "- model artifact 저장 경로 확인\n"
+            "- run_model.py 설정 변수 확인\n"
+            "- predict.py 또는 ModelWrapper 구현 확인\n"
+            "- mlflow.pyfunc.log_model 파라미터 확인\n"
+            "- requirements.txt serve/mlflow 패키지 확인\n"
+            "- AI Studio MLflow 환경변수 확인\n"
             "파일 수정 전에는 dry-run 결과를 먼저 제공합니다."
         )
     if "job" in request.lower() or "template" in request.lower() or "초안" in request:
@@ -3729,11 +3935,11 @@ def handle_advanced_input(command: str) -> str:
         return format_deepagents_libs(source_zip)
     if parts[0] == "sample":
         return handle_sample_command(parts[1:])
-    if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
-        return "unknown command. available: analyze, validate, fix, apply, serve, report, register, sample, chat, profile, deepagents, config, init, prompts, errors"
+    if parts[0] not in {"analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"}:
+        return "unknown command. available: analyze, validate, fix, apply, serve, report, register, verify-run, sample, chat, profile, deepagents, config, init, prompts, errors"
     path = parts[1] if len(parts) > 1 else "."
     as_json = "--json" in parts
-    result = run_command(parts[0], path, dry_run="--dry-run" in parts)
+    result = run_command(parts[0], path, dry_run="--dry-run" in parts, skip_serving="--skip-serving" in parts)
     if as_json:
         return json.dumps(result.as_dict(), ensure_ascii=False, indent=2)
     return format_command_result(result)
@@ -3846,7 +4052,7 @@ def format_sample_catalog(payload: dict[str, object]) -> str:
     return "\n".join(rows)
 
 
-def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult:
+def run_command(command: str, path: str, dry_run: bool = False, skip_serving: bool = False) -> CommandResult:
     target = Path(path)
     profile = build_ml_platform_profile(MODE_ADVANCED)
     details = []
@@ -3857,7 +4063,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
     approval_options = build_approval_options(analysis) if command in {"fix", "apply"} else None
     applied_changes = None
 
-    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"}:
         details.append(f"path={target}")
         details.append(f"agent_profile={profile.name}")
     if command == "fix" and not dry_run:
@@ -3869,7 +4075,7 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         details.append(f"applied_changes={len([change for change in applied_changes if change.status == 'applied'])}")
         details.append(f"skipped_changes={len([change for change in applied_changes if change.status == 'skipped'])}")
         analysis = analyze_project(path)
-    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register"}:
+    if command in {"analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"}:
         details.append(f"registration_status={analysis.registration_status}")
     if command == "fix":
         details.append(f"preview_items={len(fix_previews or [])}")
@@ -3883,17 +4089,26 @@ def run_command(command: str, path: str, dry_run: bool = False) -> CommandResult
         register_plan = build_registration_plan(analysis, dry_run=dry_run)
         write_registration_plan_file(Path(result_file), register_plan)
         details.extend(register_plan["details"])
+    elif command == "verify-run":
+        result_file = str(target / "mlflow-run-verification.json")
+        verification = run_mlflow_verification(target, skip_serving=skip_serving)
+        write_verification_file(Path(result_file), verification)
+        details.extend(str(item) for item in verification.get("details", []))
+        status = str(verification.get("status", "error"))
+        exit_code = int(verification.get("exit_code", 1))
     else:
         result_file = None
 
     details.append(f"mlflow={'ok' if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else 'missing'}")
     details.append(f"job_template={'ready' if analysis.job_template_ready else 'needs_input'}")
-    if command in {"serve", "report"}:
+    if command in {"serve", "report", "verify-run"}:
         details.append(f"local_serving={analysis.local_serving.status}")
         details.append(f"health={analysis.local_serving.health_endpoint}")
         details.append(f"predict={analysis.local_serving.predict_endpoint}")
     details.append(f"issues={len(analysis.issues)}")
-    if analysis.registration_status == "불가":
+    if command == "verify-run":
+        pass
+    elif analysis.registration_status == "불가":
         status = "error"
         exit_code = 2
     elif command == "validate" and analysis.issues:
@@ -3989,6 +4204,319 @@ def build_registration_plan(analysis: ProjectAnalysis, dry_run: bool = False) ->
 def write_registration_plan_file(path: Path, plan: dict[str, object]) -> None:
     ensure_read_write_directory(path.parent)
     path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_mlflow_verification(project_path: Path, skip_serving: bool = False) -> dict[str, object]:
+    root = project_path.resolve()
+    report: dict[str, object] = {
+        "status": "error",
+        "exit_code": 1,
+        "project_path": str(root),
+        "details": [],
+        "errors": [],
+        "run_model": {},
+        "mlflow_run": {},
+        "metric_report": {},
+        "model_test": {},
+        "serving": {"status": "skipped", "reason": "not-run"},
+    }
+    details: list[str] = report["details"]  # type: ignore[assignment]
+    errors: list[str] = report["errors"]  # type: ignore[assignment]
+
+    if not root.exists() or not root.is_dir():
+        errors.append("프로젝트 폴더를 찾을 수 없습니다.")
+        details.append("verify_run=project_missing")
+        return report
+    run_model_path = root / "run_model.py"
+    if not run_model_path.exists():
+        errors.append("run_model.py가 없어 실제 MLflow 실행 검증을 시작할 수 없습니다.")
+        details.append("verify_run=run_model_missing")
+        return report
+
+    run_result = execute_run_model(root)
+    report["run_model"] = run_result
+    details.append(f"run_model_exit_code={run_result['exit_code']}")
+    if run_result["exit_code"] != 0:
+        report["status"] = "error"
+        report["exit_code"] = 1
+        errors.append("run_model.py 실행 실패")
+        return report
+
+    mlflow_result = inspect_latest_mlflow_run(root)
+    report["mlflow_run"] = mlflow_result
+    details.append(f"mlflow_run_status={mlflow_result['status']}")
+    run_id = str(mlflow_result.get("run_id") or "")
+    if run_id:
+        details.append(f"run_id={run_id}")
+    if mlflow_result["status"] != "pass":
+        report["status"] = "error"
+        report["exit_code"] = 1
+        errors.append(str(mlflow_result.get("reason") or "MLflow run 생성 확인 실패"))
+        return report
+
+    metrics = mlflow_result.get("metrics") if isinstance(mlflow_result.get("metrics"), dict) else {}
+    params = mlflow_result.get("params") if isinstance(mlflow_result.get("params"), dict) else {}
+    report["metric_report"] = {
+        "status": "pass" if metrics or params else "warn",
+        "metrics": metrics,
+        "params": params,
+        "metric_count": len(metrics),
+        "param_count": len(params),
+    }
+    details.append(f"metrics={len(metrics)}")
+    details.append(f"params={len(params)}")
+
+    model_result = load_logged_model_and_predict(root, mlflow_result)
+    report["model_test"] = model_result
+    details.append(f"model_test_status={model_result['status']}")
+
+    if skip_serving:
+        report["serving"] = {"status": "skipped", "reason": "--skip-serving"}
+    else:
+        serving_result = run_local_serving_smoke_test(root)
+        report["serving"] = serving_result
+        details.append(f"serving_status={serving_result['status']}")
+
+    required_ok = (
+        run_result["exit_code"] == 0
+        and mlflow_result["status"] == "pass"
+        and (metrics or params)
+        and model_result["status"] == "pass"
+        and (skip_serving or report["serving"].get("status") == "pass")  # type: ignore[union-attr]
+    )
+    if required_ok:
+        report["status"] = "ok"
+        report["exit_code"] = 0
+        details.append("completion=run_created")
+    else:
+        report["status"] = "needs_action"
+        report["exit_code"] = 1
+        details.append("completion=needs_action")
+    return report
+
+
+def execute_run_model(root: Path) -> dict[str, object]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONPATH", str(root))
+    if env.get("PYTHONPATH"):
+        env["PYTHONPATH"] = str(root) + os.pathsep + env["PYTHONPATH"]
+    tracking_url = read_ai_studio_env_value(root / "ai_studio.env", "MLFLOW_TRACKING_URL")
+    if not tracking_url:
+        env["MLFLOW_TRACKING_URI"] = "file:./mlruns"
+    command = [sys.executable, "run_model.py", "--env-file", "ai_studio.env", "--register"]
+    timeout = AppConfig.load().get_int("DEV_COMMAND_TIMEOUT", 120)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "status": "timeout",
+            "exit_code": 124,
+            "command": " ".join(command),
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or "",
+        }
+    return {
+        "status": "pass" if completed.returncode == 0 else "error",
+        "exit_code": completed.returncode,
+        "command": " ".join(command),
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def read_ai_studio_env_value(path: Path, key: str) -> str:
+    if not path.exists():
+        return ""
+    for raw_line in safe_read_text(path).splitlines():
+        line = raw_line.strip()
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def effective_tracking_uri(root: Path) -> str:
+    return read_ai_studio_env_value(root / "ai_studio.env", "MLFLOW_TRACKING_URL") or f"file:{root / 'mlruns'}"
+
+
+def inspect_latest_mlflow_run(root: Path) -> dict[str, object]:
+    try:
+        import mlflow  # type: ignore
+    except Exception as exc:
+        fallback = inspect_latest_mlruns_file_store(root)
+        if fallback["status"] == "pass":
+            fallback["reason"] = "mlflow import unavailable; inspected local mlruns files"
+            return fallback
+        return {"status": "error", "reason": f"mlflow import failed: {exc}"}
+
+    tracking_uri = effective_tracking_uri(root)
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        client = mlflow.tracking.MlflowClient()
+        experiments = client.search_experiments()
+        runs = []
+        for experiment in experiments:
+            runs.extend(
+                client.search_runs(
+                    [experiment.experiment_id],
+                    order_by=["attributes.start_time DESC"],
+                    max_results=1,
+                )
+            )
+        if not runs:
+            return {"status": "error", "reason": "MLflow run을 찾지 못했습니다.", "tracking_uri": tracking_uri}
+        latest = sorted(runs, key=lambda run: run.info.start_time or 0, reverse=True)[0]
+        config = safe_read_json(root / "config.json")
+        artifact_path = "ai_studio"
+        if isinstance(config.get("model"), dict):
+            artifact_path = str(config["model"].get("artifact_path") or artifact_path)  # type: ignore[index]
+        return {
+            "status": "pass",
+            "tracking_uri": tracking_uri,
+            "run_id": latest.info.run_id,
+            "experiment_id": latest.info.experiment_id,
+            "artifact_uri": latest.info.artifact_uri,
+            "model_uri": f"runs:/{latest.info.run_id}/{artifact_path}",
+            "metrics": dict(latest.data.metrics),
+            "params": dict(latest.data.params),
+            "tags": dict(latest.data.tags),
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": f"MLflow run inspection failed: {exc}", "tracking_uri": tracking_uri}
+
+
+def inspect_latest_mlruns_file_store(root: Path) -> dict[str, object]:
+    mlruns = root / "mlruns"
+    if not mlruns.exists():
+        return {"status": "error", "reason": "mlruns 폴더를 찾지 못했습니다."}
+    run_dirs = [
+        path
+        for path in mlruns.rglob("*")
+        if path.is_dir() and (path / "meta.yaml").exists() and path.parent.name != "models"
+    ]
+    if not run_dirs:
+        return {"status": "error", "reason": "mlruns 안에서 run meta.yaml을 찾지 못했습니다."}
+    latest = sorted(run_dirs, key=lambda path: path.stat().st_mtime, reverse=True)[0]
+    return {
+        "status": "pass",
+        "tracking_uri": "file:./mlruns",
+        "run_id": latest.name,
+        "experiment_id": latest.parent.name,
+        "artifact_uri": str(latest / "artifacts"),
+        "model_uri": str(latest / "artifacts" / "ai_studio"),
+        "metrics": read_mlflow_key_value_dir(latest / "metrics"),
+        "params": read_mlflow_key_value_dir(latest / "params"),
+        "tags": read_mlflow_key_value_dir(latest / "tags"),
+    }
+
+
+def read_mlflow_key_value_dir(path: Path) -> dict[str, object]:
+    values: dict[str, object] = {}
+    if not path.exists():
+        return values
+    for item in path.iterdir():
+        if not item.is_file():
+            continue
+        text = safe_read_text(item).strip()
+        if not text:
+            continue
+        last = text.splitlines()[-1].split()
+        value = last[-1] if last else text
+        try:
+            values[item.name] = float(value)
+        except ValueError:
+            values[item.name] = value
+    return values
+
+
+def load_logged_model_and_predict(root: Path, mlflow_result: dict[str, object]) -> dict[str, object]:
+    model_uri = str(mlflow_result.get("model_uri") or "")
+    if not model_uri:
+        return {"status": "error", "reason": "model_uri 없음"}
+    try:
+        import mlflow.pyfunc  # type: ignore
+        import pandas as pd  # type: ignore
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"mlflow/pandas import failed: {exc}", "model_uri": model_uri}
+    try:
+        model = mlflow.pyfunc.load_model(model_uri)
+        payload = default_input_example()
+        input_path = root / "input_example.json"
+        if input_path.exists():
+            payload = json.loads(input_path.read_text(encoding="utf-8"))
+        model_input = pd.DataFrame(payload["data"], columns=payload["columns"])
+        prediction = model.predict(model_input)
+        return {
+            "status": "pass",
+            "model_uri": model_uri,
+            "input_rows": len(model_input),
+            "prediction_sample": prediction_to_jsonable(prediction),
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": f"model load/predict failed: {exc}", "model_uri": model_uri}
+
+
+def prediction_to_jsonable(prediction) -> object:
+    if hasattr(prediction, "to_dict"):
+        try:
+            return prediction.to_dict(orient="records")
+        except TypeError:
+            return prediction.to_dict()
+    if hasattr(prediction, "tolist"):
+        return prediction.tolist()
+    if isinstance(prediction, (str, int, float, bool)) or prediction is None:
+        return prediction
+    if isinstance(prediction, (list, tuple, dict)):
+        return prediction
+    return str(prediction)
+
+
+def run_local_serving_smoke_test(root: Path) -> dict[str, object]:
+    try:
+        from fastapi import FastAPI  # type: ignore
+        from fastapi.testclient import TestClient  # type: ignore
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"fastapi serving dependency missing: {exc}"}
+    app = FastAPI()
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.post("/predict")
+    def predict(payload: dict):
+        return {"prediction": payload}
+
+    try:
+        client = TestClient(app)
+        health_response = client.get("/health")
+        input_payload = default_input_example()
+        input_path = root / "input_example.json"
+        if input_path.exists():
+            input_payload = json.loads(input_path.read_text(encoding="utf-8"))
+        predict_response = client.post("/predict", json=input_payload)
+        passed = health_response.status_code == 200 and predict_response.status_code == 200
+        return {
+            "status": "pass" if passed else "error",
+            "health_status": health_response.status_code,
+            "health_body": health_response.json(),
+            "predict_status": predict_response.status_code,
+            "predict_body": predict_response.json(),
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": f"serving smoke test failed: {exc}"}
+
+
+def write_verification_file(path: Path, verification: dict[str, object]) -> None:
+    ensure_read_write_directory(path.parent)
+    path.write_text(json.dumps(verification, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def format_command_result(result: CommandResult) -> str:
@@ -4117,11 +4645,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ml-agent")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["analyze", "validate", "fix", "apply", "serve", "report", "register"]:
+    for command in ["analyze", "validate", "fix", "apply", "serve", "report", "register", "verify-run"]:
         sub = subparsers.add_parser(command)
         sub.add_argument("path", nargs="?", default=".")
         sub.add_argument("--json", action="store_true")
         sub.add_argument("--dry-run", action="store_true")
+        if command == "verify-run":
+            sub.add_argument("--skip-serving", action="store_true")
 
     sample_parser = subparsers.add_parser("sample")
     sample_parser.add_argument("action", nargs="?", default="list", choices=["list", "create"])
@@ -4207,7 +4737,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
 
-    result = run_command(args.command, args.path, dry_run=args.dry_run)
+    result = run_command(args.command, args.path, dry_run=args.dry_run, skip_serving=getattr(args, "skip_serving", False))
     if args.json:
         print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
     else:
@@ -4276,6 +4806,7 @@ validate   MLflow / Job Template 검증
 fix        수정안 생성
 apply      승인된 수정안 적용
 serve      로컬 서빙 테스트 계획 확인
+verify-run MLflow run 생성/모델 로드/추론 실행 검증
 report     분석 리포트 생성
 chat       Agent 대화 모드 진입
 profile    Deep Agent 프로파일 확인

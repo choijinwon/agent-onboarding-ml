@@ -965,6 +965,11 @@ class IntermediateModeTest(unittest.TestCase):
         self.assertIn("MLflow 설정 검증", output)
         self.assertIn("mlflow-validator", output)
         self.assertIn("dry-run", output)
+        self.assertIn("run_model.py 설정 변수", output)
+        self.assertIn("ModelWrapper 구현", output)
+        self.assertIn("mlflow.pyfunc.log_model", output)
+        self.assertIn("requirements.txt serve/mlflow", output)
+        self.assertIn("환경변수", output)
 
     def test_job_template_request_gets_template_guidance(self):
         output = handle_intermediate_request("Job Template 초안 만들어줘")
@@ -995,7 +1000,7 @@ class AdvancedModeTest(unittest.TestCase):
     def test_validate_json_contains_step3_analysis(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "requirements.txt").write_text("mlflow==2.17.0\nfastapi\nuvicorn\n")
             (root / "train.py").write_text(
                 "import mlflow\n"
                 "if __name__ == \"__main__\":\n"
@@ -1010,7 +1015,85 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(payload["exit_code"], 0)
             self.assertEqual(payload["analysis"]["registration_status"], "등록 가능")
             self.assertTrue(payload["analysis"]["job_template_ready"])
-            self.assertTrue(all(check["status"] == "pass" for check in payload["analysis"]["registration_checks"]))
+            checks = {check["code"]: check for check in payload["analysis"]["registration_checks"]}
+            for code in (
+                "project_path",
+                "dependencies",
+                "mlflow_dependency",
+                "mlflow_code",
+                "entrypoint",
+                "model_artifact",
+                "job_template",
+                "run_model_config",
+                "model_wrapper",
+                "pyfunc_log_model",
+                "serving_requirements",
+            ):
+                self.assertEqual(checks[code]["status"], "pass", code)
+            self.assertEqual(checks["mlflow_environment"]["status"], "warn")
+            self.assertIn("file:./mlruns", checks["mlflow_environment"]["detail"])
+
+    def test_mlflow_config_checks_include_requested_items(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
+            (root / "model.onnx").write_text("sample")
+
+            analysis = analyze_project(str(root))
+            checks = {check.code: check for check in analysis.registration_checks}
+
+            self.assertIn("run_model_config", checks)
+            self.assertIn("model_wrapper", checks)
+            self.assertIn("pyfunc_log_model", checks)
+            self.assertIn("serving_requirements", checks)
+            self.assertIn("mlflow_environment", checks)
+            self.assertEqual(checks["run_model_config"].status, "pass")
+            self.assertEqual(checks["model_wrapper"].status, "pass")
+            self.assertEqual(checks["pyfunc_log_model"].status, "pass")
+            self.assertEqual(checks["serving_requirements"].status, "pass")
+
+    def test_predict_py_model_wrapper_satisfies_wrapper_check(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\n")
+            (root / "run_model.py").write_text("--env-file --config --model --mode --register AI_STUDIO_CONFIG_PATH AI_STUDIO_LOCAL_MODEL_PATH")
+            (root / "predict.py").write_text(
+                "import mlflow.pyfunc\n\n"
+                "class ModelWrapper(mlflow.pyfunc.PythonModel):\n"
+                "    def load_context(self, context):\n"
+                "        pass\n"
+                "    def predict(self, context, model_input):\n"
+                "        return model_input\n"
+            )
+            (root / "mlflow_ai_studio_logging.py").write_text("mlflow.pyfunc.log_model(python_model=ModelWrapper())\n")
+            (root / "model.onnx").write_text("sample")
+
+            analysis = analyze_project(str(root))
+            wrapper = next(check for check in analysis.registration_checks if check.code == "model_wrapper")
+
+            self.assertEqual(wrapper.status, "pass")
+            self.assertIn("predict.py", wrapper.detail)
+
+    def test_pyfunc_log_model_missing_parameters_warns(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow\n")
+            ensure_ai_studio_sample_runtime(root)
+            (root / "mlflow_ai_studio_logging.py").write_text(
+                "import mlflow\n"
+                "from aiu_custom import ModelWrapper\n"
+                "mlflow.pyfunc.log_model(python_model=ModelWrapper())\n"
+            )
+            (root / "model.onnx").write_text("sample")
+
+            analysis = analyze_project(str(root))
+            check = next(check for check in analysis.registration_checks if check.code == "pyfunc_log_model")
+
+            self.assertEqual(check.status, "warn")
+            self.assertIn("registered_model_name", check.detail)
+            self.assertIn("pip_requirements", check.detail)
 
     def test_validate_json_contains_step2_scan(self):
         with TemporaryDirectory() as tmpdir:
@@ -1294,6 +1377,147 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertTrue((created / "config" / "model_config.json").exists())
             self.assertIn("onnx", (created / "requirements.txt").read_text(encoding="utf-8"))
 
+    def test_verify_run_without_mlflow_writes_failure_report(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            output = handle_advanced_input(f"aiu verify-run {root} --skip-serving --json")
+            payload = json.loads(output)
+            report = json.loads((root / "mlflow-run-verification.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["command"], "verify-run")
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(report["run_model"]["exit_code"], 1)
+            self.assertIn("run_model.py 실행 실패", report["errors"])
+
+    def test_verify_run_with_fake_mlflow_confirms_run_and_prediction(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow\ncloudpickle\npandas\n")
+            (root / "model.onnx").write_text("sample")
+            self.write_fake_mlflow_runtime(root)
+            sys.path.insert(0, str(root))
+            try:
+                output = handle_advanced_input(f"aiu verify-run {root} --skip-serving --json")
+            finally:
+                sys.path.remove(str(root))
+                for name in list(sys.modules):
+                    if name == "mlflow" or name.startswith("mlflow.") or name == "pandas":
+                        sys.modules.pop(name, None)
+
+            payload = json.loads(output)
+            report = json.loads((root / "mlflow-run-verification.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(report["status"], "ok")
+            self.assertEqual(report["run_model"]["exit_code"], 0)
+            self.assertTrue(report["mlflow_run"]["run_id"])
+            self.assertGreaterEqual(report["metric_report"]["param_count"], 1)
+            self.assertEqual(report["model_test"]["status"], "pass")
+            self.assertEqual(report["serving"]["status"], "skipped")
+
+    def write_fake_mlflow_runtime(self, root: Path) -> None:
+        mlflow_dir = root / "mlflow"
+        mlflow_dir.mkdir()
+        (root / "pandas.py").write_text(
+            "class DataFrame:\n"
+            "    def __init__(self, data, columns=None):\n"
+            "        self.data = data\n"
+            "        self.columns = columns or []\n"
+            "    def __len__(self):\n"
+            "        return len(self.data)\n"
+            "    def to_dict(self, orient='dict'):\n"
+            "        if orient == 'records':\n"
+            "            return [dict(zip(self.columns, row)) for row in self.data]\n"
+            "        return {'data': self.data, 'columns': self.columns}\n",
+            encoding="utf-8",
+        )
+        (mlflow_dir / "__init__.py").write_text(
+            "import os, shutil, time, uuid\n"
+            "from pathlib import Path\n"
+            "from . import pyfunc, tracking\n"
+            "_tracking_uri = 'file:./mlruns'\n"
+            "_experiment_name = 'default'\n"
+            "def set_tracking_uri(uri):\n"
+            "    global _tracking_uri; _tracking_uri = uri\n"
+            "def set_experiment(name):\n"
+            "    global _experiment_name; _experiment_name = name\n"
+            "def _mlruns_root():\n"
+            "    raw = _tracking_uri.replace('file:', '', 1)\n"
+            "    return Path(raw)\n"
+            "class _Run:\n"
+            "    def __enter__(self):\n"
+            "        run_id = uuid.uuid4().hex\n"
+            "        run_dir = _mlruns_root() / '0' / run_id\n"
+            "        (run_dir / 'params').mkdir(parents=True, exist_ok=True)\n"
+            "        (run_dir / 'metrics').mkdir(parents=True, exist_ok=True)\n"
+            "        (run_dir / 'tags').mkdir(parents=True, exist_ok=True)\n"
+            "        (run_dir / 'artifacts').mkdir(parents=True, exist_ok=True)\n"
+            "        (run_dir / 'meta.yaml').write_text('run_id: ' + run_id + '\\n', encoding='utf-8')\n"
+            "        os.environ['FAKE_MLFLOW_RUN_DIR'] = str(run_dir)\n"
+            "        return self\n"
+            "    def __exit__(self, exc_type, exc, tb):\n"
+            "        os.environ.pop('FAKE_MLFLOW_RUN_DIR', None)\n"
+            "def start_run(): return _Run()\n"
+            "def _run_dir(): return Path(os.environ['FAKE_MLFLOW_RUN_DIR'])\n"
+            "def log_params(params):\n"
+            "    for key, value in params.items(): (_run_dir() / 'params' / key).write_text(str(value), encoding='utf-8')\n"
+            "def log_artifact(path):\n"
+            "    target = _run_dir() / 'artifacts' / Path(path).name\n"
+            "    shutil.copy2(path, target)\n"
+            "def log_text(text, artifact_file):\n"
+            "    target = _run_dir() / 'artifacts' / artifact_file\n"
+            "    target.parent.mkdir(parents=True, exist_ok=True)\n"
+            "    target.write_text(text, encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        (mlflow_dir / "pyfunc.py").write_text(
+            "import os\n"
+            "from pathlib import Path\n"
+            "class PythonModel: pass\n"
+            "def log_model(**kwargs):\n"
+            "    run_dir = Path(os.environ['FAKE_MLFLOW_RUN_DIR'])\n"
+            "    artifact_path = kwargs.get('artifact_path', 'model')\n"
+            "    target = run_dir / 'artifacts' / artifact_path\n"
+            "    target.mkdir(parents=True, exist_ok=True)\n"
+            "    (target / 'MLmodel').write_text('fake model', encoding='utf-8')\n"
+            "class _LoadedModel:\n"
+            "    def predict(self, model_input):\n"
+            "        return model_input.to_dict(orient='records')\n"
+            "def load_model(model_uri): return _LoadedModel()\n",
+            encoding="utf-8",
+        )
+        (mlflow_dir / "tracking.py").write_text(
+            "from pathlib import Path\n"
+            "import mlflow\n"
+            "class _Experiment:\n"
+            "    experiment_id = '0'\n"
+            "class _Info:\n"
+            "    def __init__(self, run_dir):\n"
+            "        self.run_id = run_dir.name; self.experiment_id = run_dir.parent.name\n"
+            "        self.artifact_uri = str(run_dir / 'artifacts'); self.start_time = int(run_dir.stat().st_mtime * 1000)\n"
+            "class _Data:\n"
+            "    def __init__(self, run_dir):\n"
+            "        self.params = {p.name: p.read_text(encoding='utf-8') for p in (run_dir / 'params').iterdir()}\n"
+            "        self.metrics = {}\n"
+            "        self.tags = {}\n"
+            "class _Run:\n"
+            "    def __init__(self, run_dir): self.info = _Info(run_dir); self.data = _Data(run_dir)\n"
+            "class MlflowClient:\n"
+            "    def search_experiments(self): return [_Experiment()]\n"
+            "    def search_runs(self, experiment_ids, order_by=None, max_results=1):\n"
+            "        root = Path(mlflow._tracking_uri.replace('file:', '', 1)) / '0'\n"
+            "        runs = [p for p in root.iterdir() if (p / 'meta.yaml').exists()] if root.exists() else []\n"
+            "        runs = sorted(runs, key=lambda p: p.stat().st_mtime, reverse=True)\n"
+            "        return [_Run(p) for p in runs[:max_results]]\n",
+            encoding="utf-8",
+        )
+
     def test_apply_creates_requirements_when_missing(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1467,6 +1691,7 @@ class WindowsSetupTest(unittest.TestCase):
         parser = build_parser()
         sample_args = parser.parse_args(["sample", "create", "--kind", "tensorflow", "--json"])
         register_args = parser.parse_args(["register", ".", "--dry-run", "--json"])
+        verify_args = parser.parse_args(["verify-run", ".", "--skip-serving", "--json"])
 
         self.assertEqual(sample_args.command, "sample")
         self.assertEqual(sample_args.action, "create")
@@ -1474,6 +1699,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertTrue(sample_args.json)
         self.assertEqual(register_args.command, "register")
         self.assertTrue(register_args.dry_run)
+        self.assertEqual(verify_args.command, "verify-run")
+        self.assertTrue(verify_args.skip_serving)
 
     def test_aiu_module_entrypoint_delegates_to_ml_agent(self):
         from aiu.__main__ import main as aiu_main
