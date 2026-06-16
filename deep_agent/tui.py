@@ -21,6 +21,7 @@ from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_pr
 from deep_agent.cli import (
     AppliedChange,
     ADVANCED_INTRO,
+    FixPreview,
     INTERMEDIATE_MENU,
     MODE_ADVANCED,
     MODE_CHANGE_MESSAGES,
@@ -43,6 +44,7 @@ from deep_agent.cli import (
     copy_text_to_clipboard,
     normalize_standard_framework,
     normalize_clipboard_text,
+    repair_clipboard_mojibake,
     parse_mode,
     parse_mode_command,
     resolve_beginner_project_input,
@@ -87,6 +89,14 @@ MAX_CHAT_LOG_ENTRIES = 8
 MAX_CHAT_RENDER_CHARS = 7000
 MAX_CHAT_RENDER_LINES = 180
 MAX_TUI_RENDER_CHARS = 24000
+SAFE_CHAT_FIX_CODES = {
+    "CREATE_REQUIREMENTS",
+    "ADD_MLFLOW_DEPENDENCY",
+    "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD",
+}
+REVIEW_REQUIRED_CHAT_FIX_CODES = {
+    "ADD_MLFLOW_TRACKING_SNIPPET",
+}
 
 
 class LogView:
@@ -593,6 +603,79 @@ def is_chat_apply_approved(command: str) -> bool:
     return approved and (is_fix_request(command) or is_standard_template_request(command))
 
 
+def chat_blocked_reasons(command: str) -> list[str]:
+    lowered = command.lower()
+    reasons: list[str] = []
+    if any(keyword in lowered for keyword in ("삭제", "지워", "delete", "remove file", "rm ")):
+        reasons.append("파일 삭제 요청은 차단됩니다.")
+    if any(keyword in lowered for keyword in ("프로젝트 외부", "system32", "/etc/", "다른 프로젝트", "outside project")):
+        reasons.append("선택한 프로젝트 폴더 밖의 쓰기 작업은 차단됩니다.")
+    if any(keyword in lowered for keyword in ("artifact 삭제", "artifact 교체", "모델 교체", "모델 삭제", "replace model")):
+        reasons.append("모델 artifact 삭제/교체는 차단됩니다.")
+    if any(keyword in lowered for keyword in ("api key", "apikey", "password", "credential", "secret", "비밀번호", "토큰")):
+        reasons.append("credential/API key를 코드에 직접 삽입하는 요청은 차단됩니다.")
+    if any(keyword in lowered for keyword in ("bucket 업로드", "원격 업로드", "remote upload")) and not any(
+        keyword in lowered for keyword in ("설정", "env", "환경")
+    ):
+        reasons.append("Bucket/MLflow 원격 업로드는 설정값 확인 없이 실행하지 않습니다.")
+    return reasons
+
+
+@dataclass(frozen=True)
+class ChatCodePolicyPlan:
+    safe: list[FixPreview]
+    review_required: list[FixPreview]
+    blocked: list[str]
+
+    @property
+    def has_applicable(self) -> bool:
+        return bool(self.safe or self.review_required)
+
+
+def classify_chat_fix_previews(previews: list[FixPreview], command: str = "") -> ChatCodePolicyPlan:
+    safe: list[FixPreview] = []
+    review_required: list[FixPreview] = []
+    blocked = chat_blocked_reasons(command)
+    for preview in previews:
+        if preview.code in SAFE_CHAT_FIX_CODES:
+            safe.append(preview)
+        elif preview.code in REVIEW_REQUIRED_CHAT_FIX_CODES:
+            review_required.append(preview)
+        else:
+            review_required.append(preview)
+    return ChatCodePolicyPlan(safe=safe, review_required=review_required, blocked=blocked)
+
+
+def format_chat_code_policy_plan(plan: ChatCodePolicyPlan) -> str:
+    rows = ["수정 정책: 승인 기반 자동수정"]
+    if plan.safe:
+        rows.append("")
+        rows.append("승인하면 자동 적용 가능한 항목")
+        rows.extend(f"- {preview.target}: {preview.title}" for preview in plan.safe)
+    if plan.review_required:
+        rows.append("")
+        rows.append("검토 필요")
+        rows.extend(f"- {preview.target}: {preview.title}" for preview in plan.review_required)
+    if plan.blocked:
+        rows.append("")
+        rows.append("수정 차단")
+        rows.extend(f"- {reason}" for reason in plan.blocked)
+    if plan.has_applicable:
+        rows.extend(
+            [
+                "",
+                "선택하세요. 번호만 입력하면 됩니다.",
+                "1. safe 항목 적용",
+                "2. 검토 필요 항목 미리보기",
+                "3. safe + 검토 필요 항목 적용",
+                "4. 취소",
+            ]
+        )
+    else:
+        rows.extend(["", "- 적용 가능한 수정 항목이 없습니다. 파일은 수정하지 않았습니다."])
+    return "\n".join(rows)
+
+
 def is_standard_template_request(command: str) -> bool:
     lowered = command.lower()
     keywords = (
@@ -677,13 +760,49 @@ def path_candidates_from_input(raw: str) -> list[str]:
         candidate = line.strip()
         if not candidate:
             continue
+        if is_shell_prompt_line(candidate):
+            continue
         for prefix in (">", "경로:", "path:", "프로젝트:", "project:"):
             if candidate.lower().startswith(prefix.lower()):
                 candidate = candidate[len(prefix) :].strip()
         candidate = strip_shell_path_prefix(candidate)
-        if candidate:
-            candidates.append(candidate)
+        for expanded in expand_drag_drop_path_candidates(candidate):
+            if expanded:
+                candidates.append(expanded)
     return candidates or [value.strip()]
+
+
+def is_shell_prompt_line(candidate: str) -> bool:
+    if re.match(r"^(PS\s+)?[A-Za-z]:\\.*>\s*$", candidate):
+        return True
+    if re.match(r"^[^@\s]+@[^:\s]+:.*[$#]\s*$", candidate):
+        return True
+    return False
+
+
+def expand_drag_drop_path_candidates(candidate: str) -> list[str]:
+    value = candidate.strip().strip("\u200e\u200f")
+    if not value:
+        return []
+    variants = [value]
+    stripped = value.strip().strip('"').strip("'")
+    variants.append(stripped)
+    if stripped.endswith(("/", "\\")) and len(stripped) > 1:
+        variants.append(stripped.rstrip("/\\"))
+    quoted_matches = re.findall(r"""['"]([^'"]+)['"]""", value)
+    variants.extend(match.strip() for match in quoted_matches)
+    file_matches = re.findall(r"file://[^\s'\"<>]+", value)
+    variants.extend(file_matches)
+    if "file://localhost/" in value:
+        variants.append(value.replace("file://localhost", "file://"))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in variants:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
 
 
 def strip_shell_path_prefix(candidate: str) -> str:
@@ -700,7 +819,8 @@ def strip_shell_path_prefix(candidate: str) -> str:
 
 
 def normalize_pasted_input(text: str) -> str:
-    normalized = unicodedata.normalize("NFC", text)
+    normalized = repair_clipboard_mojibake(text)
+    normalized = unicodedata.normalize("NFC", normalized)
     normalized = PASTE_ESCAPE_RE.sub("", normalized)
     normalized = PASTE_CONTROL_RE.sub("", normalized)
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
@@ -756,6 +876,28 @@ def normalize_input_path(raw: str) -> Path | None:
             if path.is_dir():
                 return path
     return None
+
+
+def choose_folder_with_dialog(initial_path: str = "") -> Path | None:
+    initial_dir = normalize_input_path(initial_path) if initial_path.strip() else None
+    try:
+        from tkinter import Tk, filedialog
+    except Exception:
+        return None
+    try:
+        root = Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(initialdir=str(initial_dir) if initial_dir else None)
+        root.destroy()
+    except Exception:
+        return None
+    if not selected:
+        return None
+    path = existing_filesystem_path(selected)
+    if path is None:
+        return None
+    return path if path.is_dir() else path.parent
 
 
 def looks_like_path_input(raw: str) -> bool:
@@ -859,6 +1001,10 @@ class BeginnerTuiController:
     agent_response_choice_index: int = 0
     agent_response_choices: list[str] = field(default_factory=list)
     last_agent_response: str = ""
+    awaiting_chat_code_policy: bool = False
+    pending_chat_code_policy: ChatCodePolicyPlan | None = None
+    pending_chat_command: str = ""
+    pending_chat_agent_content: str = ""
     awaiting_ai_studio_env: bool = False
     ai_studio_env_index: int = 0
     ai_studio_env_values: dict[str, str] = field(default_factory=dict)
@@ -956,6 +1102,7 @@ class BeginnerTuiController:
             or self.awaiting_model_selection
             or self.awaiting_sample_selection
             or self.awaiting_ai_studio_env
+            or self.awaiting_chat_code_policy
         ):
             return False
         if self.selected_launch_mode is None:
@@ -1274,6 +1421,8 @@ class BeginnerTuiController:
             return self.select_sample("")
         if not command and self.awaiting_agent_response_choice:
             return self.select_agent_response_choice("")
+        if not command and self.awaiting_chat_code_policy:
+            return self.select_chat_code_policy("1")
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command:
@@ -1304,6 +1453,8 @@ class BeginnerTuiController:
             return self.select_model(model)
         if self.awaiting_model_selection:
             return self.select_model(command)
+        if self.awaiting_chat_code_policy and command in {"1", "2", "3", "4"}:
+            return self.select_chat_code_policy(command)
         if self.awaiting_agent_response_choice and command.isdigit():
             return self.select_agent_response_choice(command)
 
@@ -1314,6 +1465,8 @@ class BeginnerTuiController:
             return self.select_folder(command)
         if self.awaiting_sample_selection:
             return self.select_sample(command)
+        if self.awaiting_chat_code_policy:
+            return self.select_chat_code_policy(command)
         if self.awaiting_agent_response_choice:
             return self.select_agent_response_choice(command)
 
@@ -1365,6 +1518,9 @@ class BeginnerTuiController:
         if path_result is not None:
             return path_result
         if self.agent_mode == "Chatbot":
+            if self.awaiting_chat_code_policy:
+                response = self.select_chat_code_policy(command)
+                return self.render_log() if response else response
             if self.awaiting_agent_response_choice:
                 response = self.select_agent_response_choice(command)
                 return self.render_log() if response else response
@@ -1402,6 +1558,9 @@ class BeginnerTuiController:
         if path_result is not None:
             return path_result
         if self.agent_mode == "Chatbot":
+            if self.awaiting_chat_code_policy:
+                response = self.select_chat_code_policy(command)
+                return self.render_log() if response else response
             if self.awaiting_agent_response_choice:
                 response = self.select_agent_response_choice(command)
                 return self.render_log() if response else response
@@ -1449,8 +1608,10 @@ class BeginnerTuiController:
         chat_apply_approved = is_chat_apply_approved(command)
         template_requested = is_standard_template_request(command)
         coding_requested = is_chat_coding_request(command)
-        if coding_requested and not self.project_path:
-            response = "코딩 기능을 사용하려면 먼저 프로젝트 폴더를 선택하세요. FILE 버튼 또는 /folder 명령으로 선택할 수 있습니다."
+        blocked_reasons = chat_blocked_reasons(command)
+        fix_requested = is_fix_request(command) or coding_requested or template_requested or bool(blocked_reasons)
+        if fix_requested and not self.project_path:
+            response = "코드 수정 기능을 사용하려면 먼저 프로젝트 폴더를 선택하세요. FILE 버튼 또는 /folder 명령으로 선택할 수 있습니다."
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, [])
             self._save_chat_session(command, response, [], None)
@@ -1462,6 +1623,22 @@ class BeginnerTuiController:
         applied_changes: list[AppliedChange] = []
         if template_requested and chat_apply_approved:
             applied_changes.append(ensure_standard_ml_dl_template(Path(self.project_path), extract_template_framework(command)))
+        if fix_requested:
+            if chat_apply_approved:
+                applied_changes.extend(self._apply_chat_code_policy(command, result.content, include_review=False))
+                final_analysis = analyze_project(self.project_path)
+                response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
+                self.latest_message = response
+                self._append_or_replace_chat_log(command, response, applied_changes)
+                self._save_chat_session(command, response, applied_changes, final_analysis)
+                self._save_used_prompt(command, response, agent_mode=runtime_mode)
+                self._capture_agent_response_choices(response)
+                return response
+            policy_response = self._start_chat_code_policy(command, result.content)
+            self._append_or_replace_chat_log(command, policy_response, [])
+            self._save_chat_session(command, policy_response, [], analyze_project(self.project_path))
+            self._save_used_prompt(command, policy_response, agent_mode=runtime_mode)
+            return policy_response
         if (result.used_deepagents and use_autofix) or (chat_apply_approved and not result.used_deepagents):
             applied_changes.extend(self._apply_fixable_issues_after_chat())
             final_analysis = analyze_project(self.project_path)
@@ -1503,6 +1680,152 @@ class BeginnerTuiController:
         self.applied_changes = apply_fix_previews(self.project_path, previews)
         self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
         self.index = min(6, len(self.steps) - 1)
+        return self.applied_changes
+
+    def _start_chat_code_policy(self, command: str, agent_content: str) -> str:
+        analysis = analyze_project(self.project_path)
+        plan = self._build_chat_code_policy_plan(analysis, command)
+        self.pending_chat_code_policy = plan
+        self.pending_chat_command = command
+        self.pending_chat_agent_content = agent_content
+        self.awaiting_chat_code_policy = plan.has_applicable
+        response = f"{agent_content}\n\n{format_chat_code_policy_plan(plan)}"
+        self.latest_message = response
+        return response
+
+    def select_chat_code_policy(self, value: str) -> str:
+        command = value.strip()
+        plan = self.pending_chat_code_policy
+        if plan is None:
+            self.awaiting_chat_code_policy = False
+            message = "대기 중인 수정안이 없습니다."
+            self.latest_message = message
+            return message
+        if command == "1":
+            return self._apply_pending_chat_code_policy(include_review=False)
+        if command == "2":
+            message = self._format_review_required_preview(plan)
+            self.latest_message = message
+            return message
+        if command == "3":
+            return self._apply_pending_chat_code_policy(include_review=True)
+        if command == "4":
+            self.awaiting_chat_code_policy = False
+            self.pending_chat_code_policy = None
+            message = "수정을 취소했습니다. 파일은 수정하지 않았습니다."
+            self.latest_message = message
+            self._append_or_replace_chat_log(self.pending_chat_command or "수정 취소", message, [])
+            return message
+        message = "번호로 선택하세요. 1=safe 적용, 2=검토 필요 미리보기, 3=전체 승인 적용, 4=취소"
+        self.latest_message = message
+        return message
+
+    def _format_review_required_preview(self, plan: ChatCodePolicyPlan) -> str:
+        if not plan.review_required:
+            return "검토 필요 항목이 없습니다. 1번을 선택하면 safe 항목만 적용합니다."
+        rows = ["검토 필요 항목 미리보기"]
+        for preview in plan.review_required:
+            rows.extend(
+                [
+                    f"- 대상: {preview.target}",
+                    f"  항목: {preview.title}",
+                    f"  조치: {preview.action}",
+                ]
+            )
+            rows.extend(f"  {line}" for line in preview.preview_lines)
+        rows.extend(["", "3번을 선택하면 위 검토 필요 항목까지 승인 적용합니다."])
+        return "\n".join(rows)
+
+    def _apply_pending_chat_code_policy(self, *, include_review: bool) -> str:
+        plan = self.pending_chat_code_policy
+        if plan is None:
+            message = "대기 중인 수정안이 없습니다."
+            self.latest_message = message
+            return message
+        previews = list(plan.safe)
+        if include_review:
+            previews.extend(plan.review_required)
+        applied_changes = self._apply_chat_previews(previews)
+        final_analysis = analyze_project(self.project_path)
+        rows = [
+            "수정 정책: 승인 기반 자동수정",
+            "- Build 모드로 전환해 승인된 항목만 적용했습니다.",
+            "- 수정이 완료되어 Plan 모드로 돌아왔습니다.",
+        ]
+        if plan.blocked:
+            rows.append("수정 차단")
+            rows.extend(f"- {reason}" for reason in plan.blocked)
+        rows.append("")
+        rows.append(self._format_chatbot_response(self.pending_chat_agent_content, applied_changes, final_analysis))
+        response = "\n".join(rows)
+        self.awaiting_chat_code_policy = False
+        self.pending_chat_code_policy = None
+        self.latest_message = response
+        self._append_or_replace_chat_log(self.pending_chat_command, response, applied_changes)
+        self._save_chat_session(self.pending_chat_command, response, applied_changes, final_analysis)
+        self._save_used_prompt(self.pending_chat_command, response, agent_mode="Build")
+        self._capture_agent_response_choices(response)
+        return response
+
+    def _apply_chat_code_policy(
+        self,
+        command: str,
+        agent_content: str,
+        *,
+        include_review: bool,
+    ) -> list[AppliedChange]:
+        analysis = analyze_project(self.project_path)
+        plan = self._build_chat_code_policy_plan(analysis, command)
+        if plan.blocked and not plan.has_applicable:
+            return []
+        previews = list(plan.safe)
+        if include_review:
+            previews.extend(plan.review_required)
+        return self._apply_chat_previews(previews)
+
+    def _build_chat_code_policy_plan(self, analysis, command: str) -> ChatCodePolicyPlan:
+        plan = classify_chat_fix_previews(build_fix_previews(analysis), command)
+        extra_review = self._manual_review_previews_from_command(command)
+        if not extra_review:
+            return plan
+        return ChatCodePolicyPlan(
+            safe=plan.safe,
+            review_required=[*plan.review_required, *extra_review],
+            blocked=plan.blocked,
+        )
+
+    def _manual_review_previews_from_command(self, command: str) -> list[FixPreview]:
+        lowered = command.lower()
+        if not any(keyword in lowered for keyword in ("train.py", "학습 코드", "기록 코드", "로직", "modelwrapper", "predict.py")):
+            return []
+        root = Path(self.project_path)
+        target = "train.py" if (root / "train.py").exists() else ""
+        if not target and (root / "aiu_custom" / "predict.py").exists():
+            target = "aiu_custom/predict.py"
+        if not target:
+            return []
+        return [
+            FixPreview(
+                code="CHAT_REVIEW_EXISTING_CODE_CHANGE",
+                title="MLflow 기록 코드 추가" if "기록 코드" in lowered or "mlflow" in lowered else "기존 코드 로직 변경 검토",
+                target=target,
+                action="기존 학습/추론 코드는 바로 변경하지 않고 미리보기와 사용자 승인을 요구합니다.",
+                preview_lines=[
+                    "+ 변경 후보를 검토한 뒤 3번을 선택한 경우에만 적용 경로로 진입합니다.",
+                    "+ 대규모 로직 변경, 모델 로딩 변경, MLflow 코드 삽입은 검토 필요 항목입니다.",
+                ],
+            )
+        ]
+
+    def _apply_chat_previews(self, previews: list[FixPreview]) -> list[AppliedChange]:
+        if not previews:
+            return []
+        previous_mode = self.agent_mode
+        self.agent_mode = "Build"
+        self.applied_changes = apply_fix_previews(self.project_path, previews)
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        self.index = min(6, len(self.steps) - 1)
+        self.agent_mode = "Plan" if previous_mode == "Chatbot" else previous_mode
         return self.applied_changes
 
     def _format_chatbot_response(
@@ -1658,18 +1981,20 @@ class BeginnerTuiController:
 
     def _handle_approval_choice(self, command: str) -> str:
         if command == "1":
-            self.agent_mode = "Build"
             analysis = analyze_project(self.project_path)
             previews = build_fix_previews(analysis)
             if not previews:
                 self.index += 1
-                message = ""
+                message = "자동 수정할 항목이 없어 Step 6을 스킵했습니다. 파일은 수정하지 않았습니다."
                 self.latest_message = message
                 return self.current_screen()
+            self.agent_mode = "Build"
             self.applied_changes = apply_fix_previews(self.project_path, previews)
             self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
             result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
             self.index += 1
+            self.agent_mode = "Plan"
+            result = f"{result}\n- Agent 모드: Build에서 수정 적용 후 Plan으로 자동 전환했습니다."
             self.latest_message = result
             return self.current_screen()
         if command == "2":
@@ -1680,7 +2005,7 @@ class BeginnerTuiController:
             message = ""
             self.latest_message = message
             return message
-        message = "번호로 선택하세요. 1=승인, 2=다시 보기, 3=취소"
+        message = "번호로 선택하세요. 1=승인 후 생성/수정, 2=수정안 다시 보기, 3=취소"
         self.latest_message = message
         return message
 
@@ -2102,6 +2427,16 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh()
                 self._focus_command()
                 return
+            selected = choose_folder_with_dialog(base)
+            if selected is not None:
+                self.controller.select_project_path(selected)
+                self.controller.latest_message = (
+                    "폴더 선택창에서 프로젝트 폴더를 선택했습니다.\n"
+                    f"- 위치: {self.controller.project_path}"
+                )
+                self._refresh()
+                self._focus_command()
+                return
             self.controller.start_folder_selection(base)
             self._refresh(force_folder_value=True)
             self._focus_command()
@@ -2235,14 +2570,14 @@ def run_tui(project_path: str = "") -> int:
 
         def action_copy_current_screen(self) -> None:
             text = normalize_clipboard_text(self.controller.render_log())
-            try:
-                self.copy_to_clipboard(text)
-                self.controller.latest_message = "현재 화면을 클립보드에 복사했습니다."
-            except Exception:
-                copied, detail = copy_text_to_clipboard(text)
-                if copied:
-                    self.controller.latest_message = f"현재 화면을 클립보드에 복사했습니다. ({detail})"
-                else:
+            copied, detail = copy_text_to_clipboard(text)
+            if copied:
+                self.controller.latest_message = f"현재 화면을 클립보드에 복사했습니다. ({detail}, UTF-8)"
+            else:
+                try:
+                    self.copy_to_clipboard(text)
+                    self.controller.latest_message = "현재 화면을 클립보드에 복사했습니다. (Textual fallback)"
+                except Exception:
                     self.controller.latest_message = f"클립보드 복사에 실패했습니다: {detail}"
             self._refresh()
             self._focus_command()
@@ -2360,6 +2695,8 @@ def run_tui(project_path: str = "") -> int:
                 if force_agent_choice_value or not command.value:
                     command.value = str(self.controller.agent_response_choice_index + 1)
                     command.cursor_position = len(command.value)
+            elif self.controller.awaiting_chat_code_policy:
+                command.placeholder = "1=safe 적용, 2=검토 미리보기, 3=전체 승인, 4=취소"
             else:
                 command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
@@ -2418,6 +2755,8 @@ __all__ = [
     "format_tui_model_info",
     "format_tui_chatbot_screen",
     "format_tui_help_screen",
+    "classify_chat_fix_previews",
+    "format_chat_code_policy_plan",
     "is_fix_request",
     "is_chat_apply_approved",
     "is_chat_coding_request",

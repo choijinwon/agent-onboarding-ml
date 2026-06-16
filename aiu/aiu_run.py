@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -60,6 +61,7 @@ from deep_agent.cli import (
 from deep_agent.tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
+    choose_folder_with_dialog,
     discover_selectable_folders,
     extract_agent_response_choices,
     format_agent_response_choices,
@@ -256,6 +258,13 @@ class BeginnerWizardTest(unittest.TestCase):
         output = normalize_clipboard_text(raw)
 
         self.assertEqual(output, "한글\n멀티 input")
+
+    def test_clipboard_copy_repairs_common_korean_mojibake(self):
+        raw = "íê¸ ë³µì¬"
+
+        output = normalize_clipboard_text(raw)
+
+        self.assertEqual(output, "한글 복사")
 
     def test_clipboard_copy_uses_utf8_and_normalized_text(self):
         calls = []
@@ -499,12 +508,12 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("Step 6. 사용자 승인", output)
-            self.assertIn("적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.", output)
-            self.assertIn("선택 방법: 번호만 입력합니다.", output)
-            self.assertIn("1. 적용하기 (선택 가능)", output)
-            self.assertIn("결과: 파일 수정 있음", output)
-            self.assertIn("2. 다시 보기 (선택 가능)", output)
-            self.assertIn("3. 취소하기 (선택 가능)", output)
+            self.assertIn("선택하세요. 번호만 입력하면 됩니다.", output)
+            self.assertIn("1. 승인 후 생성/수정", output)
+            self.assertIn("Step 5의 미리보기 항목만 파일에 반영합니다.", output)
+            self.assertIn("2. 수정안 다시 보기", output)
+            self.assertIn("3. 취소", output)
+            self.assertIn("아직 파일은 수정되지 않았습니다.", output)
 
     def test_beginner_wizard_disables_apply_without_preview(self):
         with TemporaryDirectory() as tmpdir:
@@ -526,8 +535,9 @@ class BeginnerWizardTest(unittest.TestCase):
 
             output = build_beginner_wizard(str(root))
 
-            self.assertIn("1. 적용하기 (선택 불가)", output)
-            self.assertIn("1번은 수정안이 있을 때만 선택할 수 있습니다.", output)
+            self.assertIn("자동 수정할 항목이 없습니다.", output)
+            self.assertIn("Step 6은 자동 스킵됩니다.", output)
+            self.assertIn("파일을 생성하거나 수정하지 않습니다.", output)
 
     def test_beginner_wizard_shows_step7_apply_scope(self):
         with TemporaryDirectory() as tmpdir:
@@ -538,8 +548,9 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(root))
 
             self.assertIn("Step 7. 파일 생성 또는 수정", output)
-            self.assertIn("Step 6에서 1번 승인 후에만", output)
+            self.assertIn("Step 6에서 1번을 선택한 경우에만", output)
             self.assertIn("삭제 작업은 수행하지 않습니다.", output)
+            self.assertIn("1. 승인 후 생성/수정", output)
             self.assertIn("requirements.txt: MLflow 의존성 추가", output)
             self.assertIn(".: AI Studio MLflow 등록 스캐폴드 생성", output)
 
@@ -1344,6 +1355,7 @@ class AdvancedModeTest(unittest.TestCase):
 
             self.assertIn("approval_required=true", payload["details"])
             self.assertEqual(payload["approval_options"][0]["key"], "apply")
+            self.assertEqual(payload["approval_options"][0]["label"], "승인 후 생성/수정")
             self.assertTrue(payload["approval_options"][0]["enabled"])
             self.assertTrue(payload["approval_options"][0]["will_modify_files"])
             self.assertEqual(payload["approval_options"][1]["key"], "review")
@@ -2656,6 +2668,13 @@ class WindowsSetupTest(unittest.TestCase):
 
         self.assertEqual(output, "한글 테스트")
 
+    def test_tui_paste_normalization_repairs_korean_mojibake_for_chat_input(self):
+        raw = "íë¡ì í¸ ë¶ìí´ì¤"
+
+        output = normalize_pasted_input(raw)
+
+        self.assertEqual(output, "프로젝트 분석해줘")
+
     def test_tui_paste_prevents_textual_default_duplicate_insert(self):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
 
@@ -2679,6 +2698,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("action_copy_current_screen", source)
         self.assertIn("copy_to_clipboard", source)
         self.assertIn("normalize_clipboard_text(self.controller.render_log())", source)
+        self.assertIn("copy_text_to_clipboard(text)", source)
+        self.assertIn("UTF-8", source)
 
     def test_tui_model_selection_placeholder_shows_number_range(self):
         self.assertIn("1-4", model_selection_placeholder(["qwen3.6", "qwen3.5", "gpt20", "gamma"]))
@@ -2821,6 +2842,56 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(normalize_input_path(f"> {spaced}"), spaced.resolve())
             self.assertEqual(path_candidates_from_input(f"\n{spaced}\nignored"), [str(spaced), "ignored"])
 
+    def test_tui_normalizes_dragged_folder_path_variants(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            spaced = root / "AI ML" / "model"
+            spaced.mkdir(parents=True)
+            encoded = str(spaced).replace(" ", "%20")
+
+            self.assertEqual(normalize_input_path(f"'{spaced}' "), spaced.resolve())
+            self.assertEqual(normalize_input_path(f"file://localhost{encoded}/"), spaced.resolve())
+            self.assertEqual(normalize_input_path(f"open \"{spaced}\""), spaced.resolve())
+            self.assertEqual(
+                normalize_input_path(f"PS C:\\Users\\choi>\nfile://localhost{encoded}\n"),
+                spaced.resolve(),
+            )
+
+    def test_tui_file_button_folder_dialog_returns_selected_folder(self):
+        with TemporaryDirectory() as tmpdir:
+            selected = Path(tmpdir) / "selected model"
+            selected.mkdir()
+
+            class FakeTk:
+                def withdraw(self):
+                    return None
+
+                def attributes(self, *args):
+                    return None
+
+                def destroy(self):
+                    return None
+
+            fake_tkinter = types.ModuleType("tkinter")
+            fake_filedialog = types.SimpleNamespace(askdirectory=lambda initialdir=None: str(selected))
+            fake_tkinter.Tk = FakeTk
+            fake_tkinter.filedialog = fake_filedialog
+            old_tkinter = sys.modules.get("tkinter")
+            old_filedialog = sys.modules.get("tkinter.filedialog")
+            sys.modules["tkinter"] = fake_tkinter
+            sys.modules["tkinter.filedialog"] = fake_filedialog
+            try:
+                self.assertEqual(choose_folder_with_dialog(), selected.resolve())
+            finally:
+                if old_tkinter is None:
+                    sys.modules.pop("tkinter", None)
+                else:
+                    sys.modules["tkinter"] = old_tkinter
+                if old_filedialog is None:
+                    sys.modules.pop("tkinter.filedialog", None)
+                else:
+                    sys.modules["tkinter.filedialog"] = old_filedialog
+
     def test_tui_preserves_windows_paths_with_backslashes_and_spaces(self):
         self.assertEqual(
             normalize_path_text(r"C:\Users\choi\AI ML\model"),
@@ -2833,6 +2904,14 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(
             normalize_path_text("file:///C:/Users/choi/AI%20ML/model"),
             "C:/Users/choi/AI ML/model",
+        )
+        self.assertEqual(
+            normalize_path_text("//C:/Users/choi/AI%20ML/model"),
+            "C:/Users/choi/AI ML/model",
+        )
+        self.assertEqual(
+            normalize_path_text(r"\\C:\Users\choi\AI ML\model"),
+            r"C:\Users\choi\AI ML\model",
         )
         self.assertEqual(
             normalize_path_text(r"\\?\C:\Users\choi\AI ML\model"),
@@ -2900,6 +2979,8 @@ class WindowsSetupTest(unittest.TestCase):
             os.environ["AIU_WINDOWS_DRIVE_C"] = str(drive_root)
             try:
                 self.assertEqual(normalize_input_path(r"C:\Users\choi\AI ML\model"), project.resolve())
+                self.assertEqual(normalize_input_path(r"\\C:\Users\choi\AI ML\model"), project.resolve())
+                self.assertEqual(normalize_input_path("//C:/Users/choi/AI%20ML/model"), project.resolve())
                 self.assertEqual(normalize_input_path("file:///C:/Users/choi/AI%20ML/model"), project.resolve())
             finally:
                 if old_value is None:
@@ -3135,11 +3216,30 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 5)
             output = controller.submit("1")
 
-            self.assertEqual(controller.agent_mode, "Build")
+            self.assertEqual(controller.agent_mode, "Plan")
             self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("Build에서 수정 적용 후 Plan으로 자동 전환", controller.latest_message)
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
+
+    def test_tui_controller_step6_skips_when_no_fix_preview(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            for _ in range(5):
+                controller.submit("다음")
+
+            output = controller.submit("1")
+
+            self.assertEqual(controller.index, 6)
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("자동 수정할 항목이 없어 Step 6을 스킵했습니다", controller.latest_message)
 
     def test_tui_chat_without_deepagents_config_does_not_modify_files(self):
         with TemporaryDirectory() as tmpdir:
@@ -3313,7 +3413,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("프로젝트 폴더를 선택", output)
         self.assertIn("FILE", output)
 
-    def test_tui_chat_autofix_applies_fixable_issues_after_deepagents_success(self):
+    def test_tui_chat_autofix_requires_policy_approval_before_applying(self):
         class FakeRuntime:
             def __init__(self):
                 self.calls = []
@@ -3338,11 +3438,14 @@ class WindowsSetupTest(unittest.TestCase):
                 controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("코드 자동 수정해줘")
+                approved = controller.submit("1")
             finally:
                 os.chdir(cwd)
 
             self.assertIn("DeepAgents 수정 완료", output)
-            self.assertIn("자동 수정 결과", output)
+            self.assertIn("수정 정책: 승인 기반 자동수정", output)
+            self.assertTrue(controller.awaiting_chat_code_policy is False)
+            self.assertIn("자동 수정 결과", approved)
             self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "AutoFix"))
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
@@ -3390,6 +3493,50 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
 
+    def test_tui_chat_policy_blocks_delete_request_without_modifying_files(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                return DeepAgentsRunResult("삭제 요청을 확인했습니다.", True)
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            target = root / "train.py"
+            target.write_text("print('keep')\n")
+            controller = self.beginner_tui(str(root), deepagents_runtime=FakeRuntime())
+            controller.select_agent_mode("Chatbot")
+
+            output = controller.submit("train.py 삭제해줘")
+
+            self.assertIn("수정 정책: 승인 기반 자동수정", output)
+            self.assertIn("수정 차단", output)
+            self.assertIn("파일 삭제 요청", output)
+            self.assertEqual(target.read_text(), "print('keep')\n")
+
+    def test_tui_chat_policy_review_required_preview_for_train_code_change(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                return DeepAgentsRunResult("MLflow 코드를 점검했습니다.", True)
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            ensure_ai_studio_sample_runtime(root)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("mlflow\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = self.beginner_tui(str(root), deepagents_runtime=FakeRuntime())
+            controller.select_agent_mode("Chatbot")
+
+            output = controller.submit("MLflow 기록 코드 수정해줘")
+            preview = controller.submit("2")
+
+            self.assertIn("검토 필요", output)
+            self.assertIn("MLflow 기록 코드 추가", preview)
+            self.assertNotIn("import mlflow", train.read_text())
+
     def test_tui_chat_approved_standard_template_creates_ml_dl_structure(self):
         class FakeRuntime:
             def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
@@ -3430,11 +3577,13 @@ class WindowsSetupTest(unittest.TestCase):
                 controller.select_agent_mode("Chatbot")
 
                 output = controller.submit("문제 발견하면 자동 수정해줘")
+                approved = controller.submit("1")
             finally:
                 os.chdir(cwd)
 
-            self.assertIn("자동 수정 결과", output)
-            self.assertIn("모델 산출물 없음", output)
+            self.assertIn("수정 정책: 승인 기반 자동수정", output)
+            self.assertIn("자동 수정 결과", approved)
+            self.assertIn("모델 산출물 없음", approved)
             self.assertIn("mlflow", (sample / "requirements.txt").read_text().lower())
             final_codes = {issue.code for issue in analyze_project(str(sample)).issue_details}
             self.assertIn("MODEL_ARTIFACT_MISSING", final_codes)
@@ -3456,9 +3605,10 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("1")
 
-            self.assertEqual(controller.agent_mode, "Build")
+            self.assertEqual(controller.agent_mode, "Plan")
             self.assertEqual(controller.index, 6)
             self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("Build에서 수정 적용 후 Plan으로 자동 전환", controller.latest_message)
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
@@ -3477,9 +3627,10 @@ class WindowsSetupTest(unittest.TestCase):
 
             output = controller.submit("1")
 
-            self.assertEqual(controller.agent_mode, "Build")
+            self.assertEqual(controller.agent_mode, "Plan")
             self.assertEqual(controller.index, 6)
             self.assertIn("Current: Tab 7/10", output)
+            self.assertIn("Build에서 수정 적용 후 Plan으로 자동 전환", controller.latest_message)
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())

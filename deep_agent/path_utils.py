@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 
 
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?([A-Za-z]):(?:[\\/](.*))?$")
+WINDOWS_SLOPPY_DRIVE_PATH_RE = re.compile(r"^[\\/]+([A-Za-z]):(?:[\\/](.*))?$")
 WINDOWS_EXTENDED_DRIVE_RE = re.compile(r"^\\\\\?\\([A-Za-z]):\\?(.*)$")
 WINDOWS_EXTENDED_UNC_RE = re.compile(r"^\\\\\?\\UNC\\(.+)$", re.IGNORECASE)
 WINDOWS_ENV_RE = re.compile(r"%([^%]+)%")
@@ -41,6 +42,13 @@ def is_windows_absolute_path(value: str) -> bool:
 
 
 def normalize_windows_namespace(value: str) -> str:
+    sloppy_drive_match = WINDOWS_SLOPPY_DRIVE_PATH_RE.match(value)
+    if sloppy_drive_match:
+        drive, rest = sloppy_drive_match.groups()
+        if rest is None:
+            return f"{drive}:"
+        separator = "\\" if "\\" in value else "/"
+        return f"{drive}:{separator}{rest}".rstrip("\\/")
     drive_match = WINDOWS_EXTENDED_DRIVE_RE.match(value)
     if drive_match:
         drive, rest = drive_match.groups()
@@ -67,7 +75,7 @@ def normalize_path_text(value: str) -> str:
     normalized = value.strip().strip('"').strip("'")
     if normalized.startswith("file://"):
         parsed = urlparse(normalized)
-        if parsed.netloc and parsed.netloc not in ("localhost", ""):
+        if parsed.netloc and parsed.netloc.lower() not in ("localhost", ""):
             normalized = f"//{parsed.netloc}{unquote(parsed.path)}"
         else:
             normalized = unquote(parsed.path or normalized.removeprefix("file://"))

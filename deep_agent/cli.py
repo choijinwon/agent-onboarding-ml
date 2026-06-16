@@ -2584,8 +2584,8 @@ def build_approval_options(analysis: ProjectAnalysis) -> list[ApprovalOption]:
     return [
         ApprovalOption(
             key="apply",
-            label="적용하기",
-            description="Step 5의 미리보기 항목만 적용합니다.",
+            label="승인 후 생성/수정",
+            description="Step 5의 미리보기 항목만 파일에 반영합니다.",
             will_modify_files=True,
             enabled=can_apply,
         ),
@@ -4119,25 +4119,49 @@ def format_beginner_fix_preview(analysis: ProjectAnalysis) -> str:
 
 
 def format_beginner_approval(analysis: ProjectAnalysis, approval_policy: str) -> str:
-    options = build_approval_options(analysis)
-    rows = [
-        "- 1번을 선택한 경우에만 변경을 적용합니다.",
-        "- 승인 전 상태: 파일은 아직 수정되지 않았습니다.",
-        "- 적용 범위: Step 5에 표시된 미리보기 항목으로 제한됩니다.",
-        "- 선택 방법: 번호만 입력합니다.",
-    ]
-    for index, option in enumerate(options, start=1):
-        state = "선택 가능" if option.enabled else "선택 불가"
-        modifies = "파일 수정 있음" if option.will_modify_files else "파일 수정 없음"
-        rows.extend(
-            [
-                f"- {index}. {option.label} ({state})",
-                f"  설명: {option.description}",
-                f"  결과: {modifies}",
-            ]
+    previews = build_fix_previews(analysis)
+    if analysis.registration_status == "불가":
+        return (
+            "- 선택 가능한 수정 작업이 없습니다.\n"
+            "- 프로젝트 경로 또는 폴더 구조를 먼저 확인해야 합니다.\n"
+            "- Step 6은 파일을 수정하지 않고 건너뜁니다.\n"
+            "- 선택이 필요한 화면에서는 번호만 입력하면 됩니다.\n"
+            "- 승인 전 상태: 아직 파일은 수정되지 않았습니다.\n"
+            "\n"
+            "선택 가능한 다음 단계:\n"
+            "1. 프로젝트 경로 다시 보기\n"
+            "2. 수정안 다시 보기\n"
+            "3. 취소하기"
         )
-    if not options[0].enabled:
-        rows.append("- 1번은 수정안이 있을 때만 선택할 수 있습니다.")
+    if not previews:
+        return (
+            "- 자동 수정할 항목이 없습니다.\n"
+            "- 사용자 승인 없이도 수정할 파일이 없으므로 Step 6은 자동 스킵됩니다.\n"
+            "- 다음 단계로 이동해 재검증 또는 리포트를 확인하세요.\n"
+            "- 선택이 필요한 화면에서는 번호만 입력하면 됩니다.\n"
+            "- 승인 전 상태: 아직 파일은 수정되지 않았습니다.\n"
+            "\n"
+            "선택 가능한 다음 단계:\n"
+            "1. 재검증으로 이동\n"
+            "2. 수정안 다시 보기\n"
+            "3. 취소하기"
+        )
+    rows = [
+        "선택하세요. 번호만 입력하면 됩니다.",
+        "",
+        "1. 승인 후 생성/수정",
+        "   - Step 5의 미리보기 항목만 파일에 반영합니다.",
+        "   - 삭제 작업은 하지 않습니다.",
+        "",
+        "2. 수정안 다시 보기",
+        "   - 파일을 수정하지 않고 Step 5로 돌아갑니다.",
+        "",
+        "3. 취소하기",
+        "   - 파일을 수정하지 않고 종료합니다.",
+        "",
+        "- 승인 전 상태: 아직 파일은 수정되지 않았습니다.",
+        f"- 승인 정책: {approval_policy}",
+    ]
     return "\n".join(rows)
 
 
@@ -4172,18 +4196,25 @@ def format_beginner_apply_step(
         return (
             "- 현재는 적용할 수 없습니다.\n"
             "- 프로젝트 경로 문제가 먼저 해결되어야 합니다.\n"
+            "- Step 7은 파일을 생성하거나 수정하지 않고 스킵됩니다.\n"
             "- 삭제 작업은 수행하지 않습니다."
         )
     if not previews:
         return (
             "- 적용할 수정안이 없습니다.\n"
+            "- Step 6은 자동 스킵됩니다.\n"
             "- 파일을 생성하거나 수정하지 않습니다.\n"
-            "- 삭제 작업은 수행하지 않습니다."
+            "- 삭제 작업은 수행하지 않습니다.\n"
+            "- 다음 단계에서 재검증과 리포트를 확인하세요."
         )
     rows = [
-        "- Step 6에서 1번 승인 후에만 아래 파일을 생성하거나 수정합니다.",
+        "- Step 6에서 1번을 선택한 경우에만 아래 파일을 생성하거나 수정합니다.",
         "- 삭제 작업은 수행하지 않습니다.",
         f"- 적용 예정 항목: {len(previews)}개",
+        "- 사용자 선택:",
+        "  1. 승인 후 생성/수정",
+        "  2. 수정안 다시 보기",
+        "  3. 취소하기",
     ]
     rows.extend(f"  - {preview.target}: {preview.title}" for preview in previews)
     return "\n".join(rows)
@@ -5221,7 +5252,8 @@ def handle_error_command(parts: list[str]) -> str:
 
 
 def normalize_clipboard_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFC", str(text))
+    normalized = repair_clipboard_mojibake(str(text))
+    normalized = unicodedata.normalize("NFC", normalized)
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     normalized = "".join(
         char
@@ -5231,13 +5263,41 @@ def normalize_clipboard_text(text: str) -> str:
     return unicodedata.normalize("NFC", normalized)
 
 
+def repair_clipboard_mojibake(text: str) -> str:
+    """Repair common UTF-8 text that was decoded as Latin-1/CP1252 by a terminal."""
+    value = str(text)
+    if not any(char in value for char in ("ì", "ë", "í", "ê", "ã", "Â", "¤")):
+        return value
+    candidates = [value]
+    for encoding in ("latin1", "cp1252"):
+        try:
+            candidates.append(value.encode(encoding).decode("utf-8"))
+        except UnicodeError:
+            continue
+
+    def score(candidate: str) -> int:
+        hangul = sum(1 for char in candidate if "\uac00" <= char <= "\ud7a3")
+        mojibake = sum(1 for char in candidate if char in "ìëíêãÂ¤")
+        replacement = candidate.count("\ufffd")
+        return hangul * 4 - mojibake * 3 - replacement * 10
+
+    return max(candidates, key=score)
+
+
 def copy_text_to_clipboard(text: str) -> tuple[bool, str]:
     normalized_text = normalize_clipboard_text(text)
     commands: list[list[str]] = []
     if sys.platform == "darwin":
         commands.append(["pbcopy"])
     elif os.name == "nt":
-        commands.append(["powershell", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"])
+        commands.append(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+            ]
+        )
         commands.append(["clip"])
     else:
         commands.extend(
