@@ -3263,6 +3263,7 @@ MODEL_SUFFIXES = {
     ".safetensors",
 }
 IGNORED_DIRS = {".aiu", ".git", ".venv", "__pycache__", "registration_packages", "saved_model"}
+LOCAL_MLFLOW_TRACKING_URI = "file:./mlruns"
 
 
 def load_env_file(path: Path) -> None:
@@ -3305,6 +3306,17 @@ def ensure_read_write_directory(path: Path) -> Path:
             except Exception:
                 pass
     return path
+
+
+def ensure_local_mlflow_store() -> Path:
+    mlruns = ensure_read_write_directory(Path.cwd() / "mlruns")
+    tracking_url = os.environ.get("MLFLOW_TRACKING_URL", "").strip()
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "").strip()
+    if tracking_url:
+        os.environ["MLFLOW_TRACKING_URI"] = tracking_url
+    elif not tracking_uri:
+        os.environ["MLFLOW_TRACKING_URI"] = LOCAL_MLFLOW_TRACKING_URI
+    return mlruns
 
 
 def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
@@ -3431,6 +3443,7 @@ def main() -> None:
     args = parser.parse_args()
 
     load_env_file(Path(args.env_file))
+    local_mlflow_store = ensure_local_mlflow_store()
     config_path = Path(args.config)
     config = load_config(config_path)
     os.environ["AI_STUDIO_CONFIG_PATH"] = str(config_path)
@@ -3447,7 +3460,8 @@ def main() -> None:
         return
     if args.dry_run:
         print("dry-run register command: python run_model.py --env-file ai_studio.env --register")
-        print("mlflow tracking default: file:./mlruns when MLFLOW_TRACKING_URL is empty")
+        print(f"mlflow tracking default: {LOCAL_MLFLOW_TRACKING_URI} when MLFLOW_TRACKING_URL is empty")
+        print(f"local mlruns directory: {local_mlflow_store}")
         return
     from mlflow_ai_studio_logging import main as run_mlflow_logging
 
@@ -4353,7 +4367,21 @@ def read_ai_studio_env_value(path: Path, key: str) -> str:
 
 
 def effective_tracking_uri(root: Path) -> str:
-    return read_ai_studio_env_value(root / "ai_studio.env", "MLFLOW_TRACKING_URL") or f"file:{root / 'mlruns'}"
+    return read_ai_studio_env_value(root / "ai_studio.env", "MLFLOW_TRACKING_URL") or "file:./mlruns"
+
+
+@dataclass
+class WorkingDirectory:
+    path: Path
+    previous: Path | None = None
+
+    def __enter__(self) -> None:
+        self.previous = Path.cwd()
+        os.chdir(self.path)
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        if self.previous is not None:
+            os.chdir(self.previous)
 
 
 def inspect_latest_mlflow_run(root: Path) -> dict[str, object]:
@@ -4368,18 +4396,19 @@ def inspect_latest_mlflow_run(root: Path) -> dict[str, object]:
 
     tracking_uri = effective_tracking_uri(root)
     try:
-        mlflow.set_tracking_uri(tracking_uri)
-        client = mlflow.tracking.MlflowClient()
-        experiments = client.search_experiments()
-        runs = []
-        for experiment in experiments:
-            runs.extend(
-                client.search_runs(
-                    [experiment.experiment_id],
-                    order_by=["attributes.start_time DESC"],
-                    max_results=1,
+        with WorkingDirectory(root):
+            mlflow.set_tracking_uri(tracking_uri)
+            client = mlflow.tracking.MlflowClient()
+            experiments = client.search_experiments()
+            runs = []
+            for experiment in experiments:
+                runs.extend(
+                    client.search_runs(
+                        [experiment.experiment_id],
+                        order_by=["attributes.start_time DESC"],
+                        max_results=1,
+                    )
                 )
-            )
         if not runs:
             return {"status": "error", "reason": "MLflow run을 찾지 못했습니다.", "tracking_uri": tracking_uri}
         latest = sorted(runs, key=lambda run: run.info.start_time or 0, reverse=True)[0]

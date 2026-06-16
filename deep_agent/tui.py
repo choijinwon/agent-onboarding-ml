@@ -83,6 +83,10 @@ AI_STUDIO_ENV_FIELDS = [
 PASTE_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
 PASTE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 AGENT_RESPONSE_CHOICE_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\[(\d+)\]|(\d+)[.)]|(\d+)\s*[-:])\s+(.+?)\s*$")
+MAX_CHAT_LOG_ENTRIES = 8
+MAX_CHAT_RENDER_CHARS = 7000
+MAX_CHAT_RENDER_LINES = 180
+MAX_TUI_RENDER_CHARS = 24000
 
 
 class LogView:
@@ -170,12 +174,18 @@ def format_chat_card(
     changes = applied_changes or []
     width = 76
     divider = "  " + "-" * width
+    display_user_message = truncate_for_tui(user_message, max_chars=900, max_lines=18)
+    display_agent_response = truncate_for_tui(
+        agent_response,
+        max_chars=MAX_CHAT_RENDER_CHARS,
+        max_lines=MAX_CHAT_RENDER_LINES,
+    )
     rows = [
         divider,
-        f"  YOU    {user_message}",
+        f"  YOU    {display_user_message}",
         "",
         "  AGENT  response",
-        *indent_block(agent_response, "         "),
+        *indent_block(display_agent_response, "         "),
     ]
     if changes:
         rows.extend(
@@ -187,6 +197,32 @@ def format_chat_card(
         )
     rows.append(divider)
     return "\n".join(rows)
+
+
+def truncate_for_tui(text: str, *, max_chars: int, max_lines: int) -> str:
+    if len(text) <= max_chars and text.count("\n") < max_lines:
+        return text
+    lines = text.splitlines()
+    clipped_by_lines = len(lines) > max_lines
+    if clipped_by_lines:
+        text = "\n".join(lines[:max_lines])
+    clipped_by_chars = len(text) > max_chars
+    if clipped_by_chars:
+        text = text[:max_chars].rstrip()
+    omitted_lines = max(0, len(lines) - max_lines) if clipped_by_lines else 0
+    note = "... 화면 성능을 위해 일부 응답을 접었습니다. 전체 내용은 sessions/wiki 로그에 저장됩니다."
+    if omitted_lines:
+        note += f" (숨긴 줄: {omitted_lines})"
+    return f"{text}\n{note}"
+
+
+def trim_tui_render_text(text: str, max_chars: int = MAX_TUI_RENDER_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return (
+        "... 이전 화면 일부를 생략했습니다. 전체 대화는 sessions/wiki 로그에 저장됩니다.\n\n"
+        + text[-max_chars:]
+    )
 
 
 def indent_block(text: str, prefix: str) -> list[str]:
@@ -483,6 +519,34 @@ def is_fix_request(command: str) -> bool:
         "patch",
     )
     return any(keyword in lowered for keyword in keywords)
+
+
+def is_chat_coding_request(command: str) -> bool:
+    lowered = command.lower()
+    coding_keywords = (
+        "코딩",
+        "개발",
+        "구현",
+        "기능 추가",
+        "기능 수정",
+        "파일 수정",
+        "파일 생성",
+        "코드 작성",
+        "코드 수정",
+        "디렉토리 분석",
+        "폴더 분석",
+        "코드베이스",
+        "coding",
+        "develop",
+        "implement",
+        "implementation",
+        "edit file",
+        "write code",
+        "modify code",
+        "add feature",
+        "codebase",
+    )
+    return any(keyword in lowered for keyword in coding_keywords)
 
 
 def should_use_autofix_chat(command: str) -> bool:
@@ -816,22 +880,22 @@ class BeginnerTuiController:
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
     def render_log(self) -> str:
-        log_text = "\n\n".join(self.log_lines[-12:])
+        log_text = "\n\n".join(self.log_lines[-MAX_CHAT_LOG_ENTRIES:])
         if self.agent_mode == "Chatbot" and self.selected_launch_mode is not None:
             screen = self.current_screen()
             if log_text:
-                return f"{log_text}\n\n{screen}"
+                return trim_tui_render_text(f"{log_text}\n\n{screen}")
             if self.latest_message and self.latest_message != screen:
-                return f"{self.latest_message}\n\n{screen}"
+                return trim_tui_render_text(f"{self.latest_message}\n\n{screen}")
             return screen
         if self.selected_launch_mode in {MODE_INTERMEDIATE, MODE_ADVANCED}:
             screen = self.current_screen()
-            return f"{log_text}\n\n{screen}" if log_text else screen
+            return trim_tui_render_text(f"{log_text}\n\n{screen}") if log_text else screen
         if self.selected_launch_mode == MODE_BEGINNER and self.latest_message:
             parts = [part for part in [log_text, self.latest_message, self.current_screen()] if part]
-            return "\n\n".join(parts)
+            return trim_tui_render_text("\n\n".join(parts))
         if log_text:
-            return f"{log_text}\n\n{self.current_screen()}"
+            return trim_tui_render_text(f"{log_text}\n\n{self.current_screen()}")
         return self.current_screen()
 
     def activate_launch_mode(self, mode: str) -> str:
@@ -1324,8 +1388,16 @@ class BeginnerTuiController:
             return response
         chat_apply_approved = is_chat_apply_approved(command)
         template_requested = is_standard_template_request(command)
+        coding_requested = is_chat_coding_request(command)
+        if coding_requested and not self.project_path:
+            response = "코딩 기능을 사용하려면 먼저 프로젝트 폴더를 선택하세요. FILE 버튼 또는 /folder 명령으로 선택할 수 있습니다."
+            self.latest_message = response
+            self._append_or_replace_chat_log(command, response, [])
+            self._save_chat_session(command, response, [], None)
+            self._save_used_prompt(command, response, agent_mode="Build")
+            return response
         use_autofix = should_use_autofix_chat(command) or chat_apply_approved
-        runtime_mode = "Build" if chat_apply_approved else ("AutoFix" if use_autofix else "Chat")
+        runtime_mode = "Build" if (chat_apply_approved or coding_requested) else ("AutoFix" if use_autofix else "Chat")
         result = self._invoke_deepagents(command, agent_mode=runtime_mode)
         applied_changes: list[AppliedChange] = []
         if template_requested and chat_apply_approved:
@@ -1408,6 +1480,7 @@ class BeginnerTuiController:
         applied_changes: list[AppliedChange],
     ) -> None:
         self.log_lines.append(self._format_chat_log(user_message, agent_response, applied_changes))
+        self._prune_chat_log_lines()
 
     def _append_or_replace_chat_log(
         self,
@@ -1420,8 +1493,14 @@ class BeginnerTuiController:
         for index in range(len(self.log_lines) - 1, -1, -1):
             if self.log_lines[index].startswith(prefix):
                 self.log_lines[index] = replacement
+                self._prune_chat_log_lines()
                 return
         self.log_lines.append(replacement)
+        self._prune_chat_log_lines()
+
+    def _prune_chat_log_lines(self) -> None:
+        if len(self.log_lines) > MAX_CHAT_LOG_ENTRIES:
+            self.log_lines = self.log_lines[-MAX_CHAT_LOG_ENTRIES:]
 
     def _append_chat_error(self, user_message: str, error: Exception) -> None:
         response = f"Chatbot 응답 처리 중 오류가 발생했습니다: {error}"
@@ -1574,7 +1653,12 @@ def run_tui(project_path: str = "") -> int:
     from textual.widgets import Button, RichLog, Static, TextArea
 
     class LogView(RichLog):
+        _last_rendered_text = ""
+
         def replace_text(self, text: str) -> None:
+            if text == self._last_rendered_text:
+                return
+            self._last_rendered_text = text
             self.clear()
             self.write(text)
             self.scroll_end(animate=False)
@@ -2276,6 +2360,7 @@ __all__ = [
     "format_tui_help_screen",
     "is_fix_request",
     "is_chat_apply_approved",
+    "is_chat_coding_request",
     "is_greeting",
     "is_right_click_event",
     "is_wizard_navigation",

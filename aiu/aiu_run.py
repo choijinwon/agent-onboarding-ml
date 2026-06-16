@@ -73,6 +73,7 @@ from deep_agent.tui import (
     format_tui_help_screen,
     format_tui_model_info,
     is_chat_apply_approved,
+    is_chat_coding_request,
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
@@ -88,6 +89,7 @@ from deep_agent.tui import (
     is_right_click_event,
     should_use_autofix_chat,
     strip_path_command,
+    truncate_for_tui,
 )
 
 
@@ -133,6 +135,8 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertIn("preview_ml_fixes", plan_prompt)
         self.assertIn("Build mode", build_prompt)
         self.assertIn("apply_ml_fixes", build_prompt)
+        self.assertIn("read files, search the codebase", build_prompt)
+        self.assertIn("create or edit files inside the project root", build_prompt)
         self.assertIn("AutoFix mode", autofix_prompt)
         self.assertIn("apply_ml_fixes automatically", autofix_prompt)
 
@@ -1324,8 +1328,31 @@ class AdvancedModeTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
+            self.assertTrue((root / "mlruns").exists())
             self.assertIn("dry-run register command", result.stdout)
             self.assertIn("file:./mlruns", result.stdout)
+            self.assertIn("local mlruns directory", result.stdout)
+
+    def test_run_model_source_maps_empty_tracking_url_to_root_mlruns(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "run_model.py").write_text(run_model_source(), encoding="utf-8")
+            (root / "config.json").write_text(json.dumps({"model": {"save_path": "saved_model"}}), encoding="utf-8")
+            (root / "ai_studio.env").write_text("MLFLOW_TRACKING_URL=\n", encoding="utf-8")
+            source = root / "my_model.onnx"
+            source.write_text("model", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, "run_model.py", "--env-file", "ai_studio.env", "--model", str(source), "--register", "--dry-run"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "mlruns").is_dir())
+            self.assertIn("mlflow tracking default: file:./mlruns", result.stdout)
 
     def test_run_model_source_prepares_explicit_local_model_without_mlflow(self):
         with TemporaryDirectory() as tmpdir:
@@ -2052,6 +2079,33 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("----------------------------------------------------------------------------", rendered)
         self.assertNotIn("+----------------", rendered)
 
+    def test_tui_truncates_long_chat_response_for_scroll_performance(self):
+        long_text = "\n".join(f"line {index}" for index in range(250))
+
+        rendered = format_chat_card("긴 응답", long_text, [])
+
+        self.assertIn("화면 성능을 위해 일부 응답을 접었습니다", rendered)
+        self.assertIn("전체 내용은 sessions/wiki 로그에 저장", rendered)
+        self.assertIn("line 179", rendered)
+        self.assertNotIn("line 249", rendered)
+
+    def test_tui_prunes_chat_log_entries_for_scroll_performance(self):
+        controller = self.beginner_tui("")
+        controller.select_agent_mode("Chatbot")
+
+        for index in range(20):
+            controller._append_chat_log(f"질문 {index}", f"응답 {index}", [])
+
+        self.assertLessEqual(len(controller.log_lines), 8)
+        self.assertIn("질문 19", controller.render_log())
+        self.assertNotIn("질문 0", controller.render_log())
+
+    def test_tui_render_trim_keeps_screen_under_budget(self):
+        clipped = truncate_for_tui("x" * 9000, max_chars=1000, max_lines=1000)
+
+        self.assertIn("화면 성능", clipped)
+        self.assertLess(len(clipped), 1300)
+
     def test_tui_chatbot_response_replaces_thinking_log_entry(self):
         class FakeRuntime:
             def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
@@ -2252,6 +2306,9 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertTrue(is_chat_apply_approved("승인하고 코드 수정해줘"))
         self.assertTrue(is_chat_apply_approved("apply 승인 후 반영"))
         self.assertFalse(is_chat_apply_approved("분석만 해줘"))
+        self.assertTrue(is_chat_coding_request("파일 디렉토리 분석해서 기능 구현해줘"))
+        self.assertTrue(is_chat_coding_request("add feature after reading the codebase"))
+        self.assertFalse(is_chat_coding_request("PLAN BUILD CHAT 차이를 알려줘"))
 
     def test_tui_command_placeholder_mentions_deepagents_model(self):
         self.assertNotIn("DeepAgents", command_placeholder_for_mode("Plan", "qwen3.6"))
@@ -2279,6 +2336,7 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("RichLog", source)
         self.assertIn("class LogView(RichLog)", source)
         self.assertIn("def replace_text", source)
+        self.assertIn("if text == self._last_rendered_text:", source)
         self.assertIn("self.scroll_end(animate=False)", source)
         self.assertIn("overflow-y: auto", source)
         self.assertIn("LogView(id=\"log\", wrap=True", source)
@@ -2950,6 +3008,43 @@ class WindowsSetupTest(unittest.TestCase):
                 "PLAN BUILD CHAT 차이를 알려줘",
                 (Path(tmpdir) / "deep_agent" / "wiki" / "prompts" / "used_prompts.md").read_text(encoding="utf-8"),
             )
+
+    def test_tui_chat_coding_request_routes_to_build_runtime(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("디렉토리 분석 후 코딩 변경 완료", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                (root / "requirements.txt").write_text("mlflow\n")
+                (root / "app.py").write_text("print('hello')\n")
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+
+                output = controller.submit("파일 디렉토리 분석해서 기능 구현해줘")
+            finally:
+                os.chdir(cwd)
+
+        self.assertIn("디렉토리 분석 후 코딩 변경 완료", output)
+        self.assertEqual(fake.calls[-1], ("파일 디렉토리 분석해서 기능 구현해줘", str(root), "Build"))
+
+    def test_tui_chat_coding_request_requires_project_path(self):
+        controller = self.beginner_tui("")
+        controller.select_agent_mode("Chatbot")
+
+        output = controller.submit("코딩 기능으로 파일 수정해줘")
+
+        self.assertIn("프로젝트 폴더를 선택", output)
+        self.assertIn("FILE", output)
 
     def test_tui_chat_autofix_applies_fixable_issues_after_deepagents_success(self):
         class FakeRuntime:

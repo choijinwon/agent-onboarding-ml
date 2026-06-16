@@ -130,7 +130,13 @@ def build_deepagents_system_prompt(project_path: str, agent_mode: str) -> str:
             "large structural rewrites. Explain manual-only issues after applying supported fixes."
         )
     elif agent_mode == "Build":
-        apply_policy = "Build mode: if the user asks to fix, modify, patch, or apply changes, you may call apply_ml_fixes."
+        apply_policy = (
+            "Build mode: you may inspect the selected project directory, read files, search the codebase, "
+            "create or edit files inside the project root, and call apply_ml_fixes when the request is about "
+            "ML onboarding fixes. Before changing files, infer the minimal safe change from the user's request. "
+            "Do not delete files, do not move large directory trees, do not modify files outside the selected "
+            "project root, and summarize changed files plus validation steps."
+        )
     elif agent_mode == "Chat":
         apply_policy = (
             "Chat mode: answer directly and concisely. Do not modify files. "
