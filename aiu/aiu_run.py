@@ -673,6 +673,54 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual(Path(path), work_model.resolve())
             self.assertIn("work 디렉토리 모델 프로젝트를 선택했습니다", message)
 
+    def test_beginner_number_one_runs_multiple_samples_without_command(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("1")
+            finally:
+                os.chdir(cwd)
+
+            self.assertTrue(Path(path).exists())
+            self.assertIn("샘플 모델 실행을 완료했습니다", message)
+            self.assertIn("총", message)
+            self.assertIn("성공", message)
+
+    def test_beginner_number_two_runs_local_train_sample_without_command(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("2")
+            finally:
+                os.chdir(cwd)
+
+            self.assertTrue(Path(path).exists())
+            self.assertIn("샘플 모델 실행을 완료했습니다", message)
+            self.assertIn("standard-pytorch", path)
+            self.assertTrue(any((Path(path) / "saved_model").glob("local_model*.pt")))
+
+    def test_beginner_number_six_creates_sora_error_sample_without_command(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("6")
+            finally:
+                os.chdir(cwd)
+
+            sample = Path(path)
+            self.assertTrue(sample.exists())
+            self.assertIn("오류/수정 흐름", message)
+            self.assertTrue((sample / "outputs" / "sora-preview.mp4").exists())
+
     def test_tensorflow_sample_alias_creates_fixable_project(self):
         with TemporaryDirectory() as tmpdir:
             cwd = Path.cwd()
@@ -871,7 +919,7 @@ class BeginnerWizardTest(unittest.TestCase):
     def test_sora_error_korean_alias_is_available_in_intro(self):
         intro = build_beginner_intro()
 
-        self.assertIn("/sample sora-error", intro)
+        self.assertIn("Sora 오류 샘플 생성", intro)
 
     def test_sample_all_creates_multiple_model_projects(self):
         with TemporaryDirectory() as tmpdir:
@@ -923,6 +971,48 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("sora-video-model: 등록 가능", message)
             self.assertIn("issues=0", message)
             self.assertIn("issues=1", message)
+
+    def test_beginner_sample_run_prepares_multiple_models_and_selects_first_success(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                path, message = resolve_beginner_project_input("/sample run --kind all")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIsNotNone(message)
+            self.assertTrue(Path(path).exists())
+            self.assertIn("샘플 모델 실행을 완료했습니다", message)
+            self.assertIn("성공", message)
+            self.assertIn("초급자 Wizard는 첫 번째 성공 샘플 경로", message)
+            self.assertTrue((Path(path) / "saved_model").exists())
+
+    def test_beginner_tui_sample_run_is_available_after_launch_mode_selection(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+                controller.submit("1")
+                output = controller.submit("/sample run --kind tensorflow --register --dry-run")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("Step 1. 프로젝트 선택", output)
+            self.assertIn("샘플 모델 실행을 완료했습니다", controller.latest_message)
+            self.assertIn("tensorflow-model", controller.latest_message)
+            self.assertTrue(Path(controller.project_path).exists())
+
+    def test_beginner_intro_lists_sample_run_commands(self):
+        intro = build_beginner_intro()
+
+        self.assertIn("1. 여러 기본 샘플 모델 생성 후 실행", intro)
+        self.assertIn("2. 로컬 학습 가능한 표준 PyTorch 샘플 실행", intro)
 
     def test_large10_sample_alias_creates_ten_large_model_projects(self):
         with TemporaryDirectory() as tmpdir:
@@ -1170,6 +1260,44 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertTrue((sample / "input_example.json").exists())
             self.assertIn("--register", (sample / "run_model.py").read_text(encoding="utf-8"))
 
+    def test_sample_run_all_prepares_multiple_models(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                output = handle_advanced_input("aiu sample run --kind all --json")
+            finally:
+                os.chdir(cwd)
+
+            payload = json.loads(output)
+
+            self.assertEqual(payload["command"], "sample run")
+            self.assertEqual(payload["status"], "ok")
+            self.assertGreaterEqual(payload["count"], 6)
+            self.assertEqual(payload["pass_count"], payload["count"])
+            self.assertEqual(payload["fail_count"], 0)
+            self.assertTrue(all(result["status"] == "pass" for result in payload["results"]))
+            self.assertTrue(all("local model prepared" in result["stdout"] for result in payload["results"]))
+
+    def test_sample_run_register_dry_run_for_single_model(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                output = handle_advanced_input("aiu sample run --kind tensorflow --register --dry-run --json")
+            finally:
+                os.chdir(cwd)
+
+            payload = json.loads(output)
+            result = payload["results"][0]
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["run_mode"], "register")
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(result["status"], "pass")
+            self.assertIn("--register --dry-run", result["command"])
+            self.assertIn("dry-run register command", result["stdout"])
+
     def test_fix_json_contains_step5_previews(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1256,7 +1384,8 @@ class AdvancedModeTest(unittest.TestCase):
             logging_source = (root / "mlflow_ai_studio_logging.py").read_text(encoding="utf-8")
             generated_run_model = (root / "run_model.py").read_text(encoding="utf-8")
             env_source = (root / "ai_studio.env").read_text(encoding="utf-8")
-            wrapper_source = (root / "aiu_custom" / "model_wrapper.py").read_text(encoding="utf-8")
+            wrapper_source = (root / "aiu_custom" / "predict.py").read_text(encoding="utf-8")
+            wrapper_alias_source = (root / "aiu_custom" / "model_wrapper.py").read_text(encoding="utf-8")
             requirements_text = requirements.read_text(encoding="utf-8")
             self.assertEqual(config["mlflow_tracking_url"], "${MLFLOW_TRACKING_URL}")
             self.assertEqual(config["model"]["source_path"], "")
@@ -1270,10 +1399,18 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("registered_model_name=registered_model_name", logging_source)
             self.assertIn("prepare_local_model", generated_run_model)
             self.assertIn("local model prepared", generated_run_model)
-            self.assertIn("run_mlflow_logging()", generated_run_model)
+            self.assertIn("train_sklearn_diabetes_model", generated_run_model)
+            self.assertIn("load_diabetes", generated_run_model)
+            self.assertIn("ElasticNet(alpha=0.001, l1_ratio=0.5", generated_run_model)
+            self.assertIn("mlflow.data.from_pandas", generated_run_model)
+            self.assertIn("mlflow.pyfunc.log_model", generated_run_model)
+            self.assertIn("from aiu_custom.predict import ModelWrapper", generated_run_model)
             self.assertIn("MLFLOW_TRACKING_URL=", env_source)
             self.assertIn("class ModelWrapper", wrapper_source)
+            self.assertIn("from .predict import ModelWrapper", wrapper_alias_source)
             self.assertIn("cloudpickle", requirements_text)
+            self.assertIn("scikit-learn", requirements_text)
+            self.assertIn("joblib", requirements_text)
             self.assertTrue(any(change["code"] == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD" for change in payload["applied_changes"]))
 
             result = subprocess.run(
@@ -1482,6 +1619,15 @@ class AdvancedModeTest(unittest.TestCase):
             "        if orient == 'records':\n"
             "            return [dict(zip(self.columns, row)) for row in self.data]\n"
             "        return {'data': self.data, 'columns': self.columns}\n",
+            encoding="utf-8",
+        )
+        (root / "joblib.py").write_text(
+            "def dump(model, path):\n"
+            "    open(path, 'w', encoding='utf-8').write('fake joblib model')\n"
+            "def load(path):\n"
+            "    class _Model:\n"
+            "        def predict(self, model_input): return [0 for _ in range(len(model_input))]\n"
+            "    return _Model()\n",
             encoding="utf-8",
         )
         (mlflow_dir / "__init__.py").write_text(
@@ -1737,6 +1883,7 @@ class WindowsSetupTest(unittest.TestCase):
     def test_sample_and_register_subcommands_are_registered(self):
         parser = build_parser()
         sample_args = parser.parse_args(["sample", "create", "--kind", "tensorflow", "--json"])
+        sample_run_args = parser.parse_args(["sample", "run", "--kind", "all", "--register", "--dry-run", "--timeout", "30", "--json"])
         register_args = parser.parse_args(["register", ".", "--dry-run", "--json"])
         verify_args = parser.parse_args(["verify-run", ".", "--skip-serving", "--json"])
 
@@ -1744,6 +1891,11 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertEqual(sample_args.action, "create")
         self.assertEqual(sample_args.kind, "tensorflow")
         self.assertTrue(sample_args.json)
+        self.assertEqual(sample_run_args.action, "run")
+        self.assertEqual(sample_run_args.kind, "all")
+        self.assertTrue(sample_run_args.register)
+        self.assertTrue(sample_run_args.dry_run)
+        self.assertEqual(sample_run_args.timeout, 30)
         self.assertEqual(register_args.command, "register")
         self.assertTrue(register_args.dry_run)
         self.assertEqual(verify_args.command, "verify-run")
@@ -2386,9 +2538,9 @@ class WindowsSetupTest(unittest.TestCase):
                 message = controller.start_sample_selection()
                 self.assertIn("샘플 모델을 선택하세요", message)
                 self.assertIn("TensorFlow", format_sample_choices())
-                self.assertIn("1-9", sample_selection_placeholder())
+                self.assertIn("1-11", sample_selection_placeholder())
 
-                output = controller.select_sample("2")
+                output = controller.select_sample("4")
             finally:
                 os.chdir(cwd)
 

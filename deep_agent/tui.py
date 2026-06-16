@@ -357,6 +357,8 @@ def format_folder_choices(folders: list[Path], current_folder: Path | None = Non
 
 
 SAMPLE_CHOICES = (
+    ("여러 기본 샘플 모델 생성 후 실행", "/sample run --kind all"),
+    ("로컬 학습 가능한 표준 PyTorch 샘플 실행", "/sample run --kind standard --framework pytorch --mode train"),
     ("TensorFlow", "/sample tensorflow"),
     ("PyTorch", "/sample pytorch"),
     ("scikit-learn", "/sample sklearn"),
@@ -383,7 +385,7 @@ def format_sample_choices(
     ]
     for index, (label, command) in enumerate(choices, start=1):
         marker = " (선택)" if index - 1 == selected_index else ""
-        lines.append(f"{index}. {label}  {command}{marker}")
+        lines.append(f"{index}. {label}{marker}")
     lines.append("번호를 입력하거나 Tab/화살표로 이동 후 Enter를 누르세요.")
     return "\n".join(lines)
 

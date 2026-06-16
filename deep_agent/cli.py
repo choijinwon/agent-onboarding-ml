@@ -1204,6 +1204,9 @@ def resolve_existing_work_project(raw: str, roots: list[Path] | None = None) -> 
 
 def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     normalized = raw.strip().lower()
+    menu_command = beginner_project_menu_command(normalized)
+    if menu_command:
+        return resolve_beginner_project_input(menu_command)
     custom_sample = resolve_existing_sample_project(raw)
     if custom_sample:
         return (
@@ -1215,6 +1218,19 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
         return (
             str(work_project),
             f"work 디렉토리 모델 프로젝트를 선택했습니다.\n- 위치: {work_project}\n- 초급자 Wizard가 이 경로로 계속 진행합니다.",
+        )
+    if is_beginner_sample_run_command(normalized):
+        try:
+            payload = run_beginner_sample_run(raw)
+        except ValueError as exc:
+            return raw, f"샘플 실행 명령을 확인하세요.\n- 이유: {exc}"
+        results = [result for result in payload.get("results", []) if isinstance(result, dict)]
+        first_project = next((str(result.get("project")) for result in results if result.get("status") == "pass"), "")
+        if not first_project and results:
+            first_project = str(results[0].get("project") or raw)
+        return (
+            first_project or raw,
+            format_beginner_sample_run_message(payload),
         )
     if normalized in {"/sample matrix", "/samples test", "/샘플 매트릭스", "sample matrix", "샘플 매트릭스"}:
         sample_paths = create_all_model_samples(sample_projects_root())
@@ -1271,6 +1287,79 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
     )
 
 
+def beginner_project_menu_command(normalized: str) -> str:
+    menu = {
+        "1": "/sample run --kind all",
+        "2": "/sample run --kind standard --framework pytorch --mode train",
+        "3": "/sample tensorflow",
+        "4": "/sample pytorch",
+        "5": "/sample large10",
+        "6": "/sample sora-error",
+        "여러모델": "/sample run --kind all",
+        "여러 모델": "/sample run --kind all",
+        "샘플실행": "/sample run --kind all",
+        "샘플 실행": "/sample run --kind all",
+        "로컬학습": "/sample run --kind standard --framework pytorch --mode train",
+        "로컬 학습": "/sample run --kind standard --framework pytorch --mode train",
+        "학습샘플": "/sample run --kind standard --framework pytorch --mode train",
+        "학습 샘플": "/sample run --kind standard --framework pytorch --mode train",
+        "텐서플로우": "/sample tensorflow",
+        "파이토치": "/sample pytorch",
+        "대형": "/sample large10",
+        "오류샘플": "/sample sora-error",
+        "오류 샘플": "/sample sora-error",
+        "소라오류": "/sample sora-error",
+        "소라 오류": "/sample sora-error",
+    }
+    return menu.get(normalized, "")
+
+
+def is_beginner_sample_run_command(normalized: str) -> bool:
+    return (
+        normalized.startswith("/sample run")
+        or normalized.startswith("sample run")
+        or normalized.startswith("/샘플 실행")
+        or normalized.startswith("샘플 실행")
+    )
+
+
+def run_beginner_sample_run(raw: str) -> dict[str, object]:
+    value = raw.strip()
+    lowered = value.lower()
+    if lowered.startswith("/sample "):
+        parts = value.split()[1:]
+    elif lowered.startswith("sample "):
+        parts = value.split()[1:]
+    elif lowered.startswith("/샘플 실행"):
+        parts = ["run", *value.split()[2:]]
+    elif lowered.startswith("샘플 실행"):
+        parts = ["run", *value.split()[2:]]
+    else:
+        parts = ["run", "--kind", "all"]
+    if "--kind" not in parts:
+        parts.extend(["--kind", "all"])
+    return run_sample_projects_command(parts)
+
+
+def format_beginner_sample_run_message(payload: dict[str, object]) -> str:
+    rows = [
+        "샘플 모델 실행을 완료했습니다.",
+        f"- 실행 대상: {payload.get('kind')}",
+        f"- 실행 방식: {payload.get('run_mode')}{' dry-run' if payload.get('dry_run') else ''}",
+        f"- 결과: 총 {payload.get('count')}개 / 성공 {payload.get('pass_count')}개 / 실패 {payload.get('fail_count')}개",
+        "- 실행 결과:",
+    ]
+    for result in payload.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        rows.append(f"  - [{result.get('status')}] {result.get('name')} (exit={result.get('exit_code')})")
+        stderr = str(result.get("stderr") or "").strip()
+        if stderr:
+            rows.append(f"    - 오류: {stderr.splitlines()[0]}")
+    rows.append("- 초급자 Wizard는 첫 번째 성공 샘플 경로로 계속 진행합니다.")
+    return "\n".join(rows)
+
+
 def build_beginner_intro() -> str:
     rows = [
         "초급자 모드가 선택되었습니다.",
@@ -1279,19 +1368,17 @@ def build_beginner_intro() -> str:
         "단계별 안내에 따라 프로젝트를 점검할 수 있습니다.",
         "",
         "먼저 분석할 프로젝트 경로를 입력하세요.",
-        "샘플을 만들거나 기존 샘플을 선택하려면 다음 중 하나를 입력하세요.",
-        "- /sample tensorflow",
-        "- /sample pytorch",
-        "- /sample sklearn",
-        "- /sample onnx",
-        "- /sample sora",
-        "- /sample sora-error",
-        "- /sample heavy",
-        "- /sample large10",
-        "- /sample standard",
-        "- /sample standard pytorch",
-        "- /sample all",
-        "- /sample matrix",
+        "샘플을 사용하려면 번호만 입력하세요.",
+        "",
+        "1. 여러 기본 샘플 모델 생성 후 실행",
+        "2. 로컬 학습 가능한 표준 PyTorch 샘플 실행",
+        "3. TensorFlow 샘플 생성",
+        "4. PyTorch 샘플 생성",
+        "5. 대형 모델 샘플 10개 생성",
+        "6. Sora 오류 샘플 생성",
+        "7. 내 프로젝트 경로 직접 입력",
+        "",
+        "경로를 알고 있다면 그대로 붙여넣어도 됩니다.",
     ]
     existing_samples = list_existing_sample_projects()
     if existing_samples:
@@ -1436,10 +1523,13 @@ def ensure_ai_studio_sample_runtime(root: Path) -> None:
     ensure_read_write_directory(custom_dir)
     init_path = custom_dir / "__init__.py"
     if not init_path.exists():
-        init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
+        init_path.write_text("from .predict import ModelWrapper\n", encoding="utf-8")
+    predict_path = custom_dir / "predict.py"
+    if not predict_path.exists():
+        predict_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
     wrapper_path = custom_dir / "model_wrapper.py"
     if not wrapper_path.exists():
-        wrapper_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+        wrapper_path.write_text("from .predict import ModelWrapper\n", encoding="utf-8")
     logging_path = root / "mlflow_ai_studio_logging.py"
     if not logging_path.exists():
         logging_path.write_text(ai_studio_logging_source(), encoding="utf-8")
@@ -2240,7 +2330,7 @@ def compact_source(text: str) -> str:
 
 
 def find_model_wrapper_source(root: Path) -> tuple[str, str]:
-    candidates = [root / "predict.py", root / "aiu_custom" / "model_wrapper.py"]
+    candidates = [root / "predict.py", root / "aiu_custom" / "predict.py", root / "aiu_custom" / "model_wrapper.py"]
     candidates.extend(path for path in list_project_files(root, {".py"}, limit=120) if path.name not in {"predict.py"})
     for path in candidates:
         text = safe_read_text(path)
@@ -2640,7 +2730,7 @@ def apply_add_mlflow_tracking_snippet(target: Path) -> AppliedChange:
     )
 
 
-AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy"]
+AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy", "scikit-learn", "joblib"]
 
 STANDARD_TEMPLATE_FRAMEWORKS = {
     "generic": {
@@ -2837,8 +2927,9 @@ def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> Ap
         "config.json": json.dumps(default_ai_studio_config(framework), indent=2, ensure_ascii=False) + "\n",
         "ai_studio.env": ai_studio_env_source(),
         "input_example.json": json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n",
-        "aiu_custom/__init__.py": "from .model_wrapper import ModelWrapper\n",
-        "aiu_custom/model_wrapper.py": ai_studio_model_wrapper_source(),
+        "aiu_custom/__init__.py": "from .predict import ModelWrapper\n",
+        "aiu_custom/predict.py": ai_studio_model_wrapper_source(),
+        "aiu_custom/model_wrapper.py": "from .predict import ModelWrapper\n",
         "mlflow_ai_studio_logging.py": ai_studio_logging_source(),
         "run_model.py": run_model_source(),
         "train.py": standard_train_source(framework),
@@ -2917,12 +3008,17 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     ensure_read_write_directory(custom_dir)
     init_path = custom_dir / "__init__.py"
     if not init_path.exists():
-        init_path.write_text("from .model_wrapper import ModelWrapper\n", encoding="utf-8")
+        init_path.write_text("from .predict import ModelWrapper\n", encoding="utf-8")
         created.append("aiu_custom/__init__.py")
+
+    predict_path = custom_dir / "predict.py"
+    if not predict_path.exists():
+        predict_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+        created.append("aiu_custom/predict.py")
 
     wrapper_path = custom_dir / "model_wrapper.py"
     if not wrapper_path.exists():
-        wrapper_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+        wrapper_path.write_text("from .predict import ModelWrapper\n", encoding="utf-8")
         created.append("aiu_custom/model_wrapper.py")
 
     logging_path = root / "mlflow_ai_studio_logging.py"
@@ -3050,23 +3146,29 @@ def ai_studio_model_wrapper_source() -> str:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import joblib
 import mlflow.pyfunc
 import pandas as pd
 
 
 class ModelWrapper(mlflow.pyfunc.PythonModel):
-    """Replace predict() with the real inference logic for your model."""
+    """Load a joblib/sklearn model artifact and serve predictions."""
 
     def load_context(self, context):
         self.model_path = Path(context.artifacts["model"])
         self.config_path = Path(context.artifacts["config"])
+        self.model = joblib.load(self.model_path)
+        self.config = {}
+        if self.config_path.exists():
+            self.config = json.loads(self.config_path.read_text(encoding="utf-8"))
 
     def predict(self, context, model_input):
-        if isinstance(model_input, pd.DataFrame):
-            return model_input.to_dict(orient="records")
-        return model_input
+        if not isinstance(model_input, pd.DataFrame):
+            model_input = pd.DataFrame(model_input)
+        return self.model.predict(model_input)
 '''
 
 
@@ -3233,6 +3335,7 @@ def run_model_source() -> str:
 This runner supports two safe onboarding flows:
 - pretrained: copy an existing model artifact into saved_model/
 - train: run train.py locally, then use the generated artifact
+- sample: when no artifact is provided, train a local sklearn diabetes model
 
 Usage:
   python run_model.py
@@ -3244,7 +3347,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -3264,6 +3369,19 @@ MODEL_SUFFIXES = {
 }
 IGNORED_DIRS = {".aiu", ".git", ".venv", "__pycache__", "registration_packages", "saved_model"}
 LOCAL_MLFLOW_TRACKING_URI = "file:./mlruns"
+logging.getLogger("mlflow").setLevel(logging.ERROR)
+
+
+def configure_utf8_stdout() -> None:
+    if hasattr(sys.stdout, "buffer"):
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+        except Exception:
+            pass
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parent
 
 
 def load_env_file(path: Path) -> None:
@@ -3309,7 +3427,7 @@ def ensure_read_write_directory(path: Path) -> Path:
 
 
 def ensure_local_mlflow_store() -> Path:
-    mlruns = ensure_read_write_directory(Path.cwd() / "mlruns")
+    mlruns = ensure_read_write_directory(project_root() / "mlruns")
     tracking_url = os.environ.get("MLFLOW_TRACKING_URL", "").strip()
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "").strip()
     if tracking_url:
@@ -3317,6 +3435,106 @@ def ensure_local_mlflow_store() -> Path:
     elif not tracking_uri:
         os.environ["MLFLOW_TRACKING_URI"] = LOCAL_MLFLOW_TRACKING_URI
     return mlruns
+
+
+def configure_mlflow_environment() -> None:
+    tracking_url = os.environ.get("MLFLOW_TRACKING_URL", "").strip()
+    tracking_username = os.environ.get("MLFLOW_TRACKING_USERNAME", "").strip()
+    tracking_password = os.environ.get("MLFLOW_TRACKING_PASSWORD", "").strip()
+    os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "TRUE"
+    if tracking_username:
+        os.environ["MLFLOW_TRACKING_USERNAME"] = tracking_username
+    if tracking_password:
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = tracking_password
+    if tracking_url:
+        os.environ["MLFLOW_TRACKING_URI"] = tracking_url
+    else:
+        os.environ.setdefault("MLFLOW_TRACKING_URI", LOCAL_MLFLOW_TRACKING_URI)
+
+
+def compute_metrics(actual, predicted):
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+    try:
+        from sklearn.metrics import root_mean_squared_error
+
+        rmse = root_mean_squared_error(actual, predicted)
+    except Exception:
+        rmse = mean_squared_error(actual, predicted, squared=False)
+    mae = mean_absolute_error(actual, predicted)
+    r2 = r2_score(actual, predicted)
+    return rmse, mae, r2
+
+
+def train_sklearn_diabetes_model(config: dict):
+    import joblib
+    from sklearn.datasets import load_diabetes
+    from sklearn.linear_model import ElasticNet
+    from sklearn.model_selection import train_test_split
+
+    diabetes = load_diabetes(as_frame=True)
+    diabetes_df = diabetes.frame
+    train_df, test_df = train_test_split(diabetes_df, test_size=0.2, random_state=42)
+    train_x = train_df.drop(["target"], axis=1)
+    train_y = train_df["target"]
+    test_x = test_df.drop(["target"], axis=1)
+    test_y = test_df["target"]
+
+    model = ElasticNet(alpha=0.001, l1_ratio=0.5, random_state=42)
+    model.fit(train_x, train_y.values.ravel())
+    prediction = model.predict(test_x)
+    rmse, mae, r2 = compute_metrics(test_y, prediction)
+
+    model_dir = ensure_read_write_directory(Path(str(config.get("model", {}).get("save_path", "saved_model"))))
+    model_path = model_dir / "model.pkl"
+    joblib.dump(model, model_path)
+    return model_path.resolve(), train_df, test_df, test_x, {"rmse": rmse, "mae": mae, "r2": r2}
+
+
+def write_input_example(test_x, batch_size: int = 10) -> dict:
+    sample_data = test_x.head(batch_size).to_numpy()
+    input_example = {
+        "input": [
+            {
+                "name": "diabetes_example",
+                "shape": list(sample_data.shape),
+                "datatype": type(sample_data).__name__,
+                "data": sample_data.tolist(),
+            }
+        ]
+    }
+    Path("input_example.json").write_text(json.dumps(input_example, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return input_example
+
+
+def default_input_example() -> dict:
+    input_example = {
+        "input": [
+            {
+                "name": "sample_input",
+                "shape": [1, 1],
+                "datatype": "ndarray",
+                "data": [[0.0]],
+            }
+        ]
+    }
+    Path("input_example.json").write_text(json.dumps(input_example, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return input_example
+
+
+def input_example_to_dataframe(input_example: dict):
+    import pandas as pd
+
+    payload = input_example.get("input", [{}])[0]
+    data = payload.get("data") or [[0.0]]
+    return pd.DataFrame(data)
+
+
+def write_training_config(params: dict) -> Path:
+    config_dir = ensure_read_write_directory(Path("config"))
+    config_path = config_dir / "config.json"
+    config_path.write_text(json.dumps(params, indent=4, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return config_path
 
 
 def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
@@ -3332,7 +3550,7 @@ def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
         if resolved.exists():
             return resolved
 
-    root = Path.cwd()
+    root = project_root()
     model_files: list[Path] = []
     for path in root.rglob("*"):
         if any(part in IGNORED_DIRS for part in path.relative_to(root).parts):
@@ -3344,6 +3562,13 @@ def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
     raise FileNotFoundError(
         "로컬 모델 파일을 찾지 못했습니다. --model <경로>를 지정하거나 config.json의 model.source_path를 설정하세요."
     )
+
+
+def try_resolve_model_source(config: dict, explicit_model: str = "") -> Path | None:
+    try:
+        return resolve_model_source(config, explicit_model)
+    except FileNotFoundError:
+        return None
 
 
 def unique_target_path(target: Path) -> Path:
@@ -3388,7 +3613,7 @@ def resolve_train_output(config: dict, framework: str = "") -> Path:
         output_path = str(save_root / f"{safe_framework}_trained_model.bin")
     output = Path(output_path)
     if not output.is_absolute():
-        output = Path.cwd() / output
+        output = project_root() / output
     return output
 
 
@@ -3430,7 +3655,94 @@ def run_training(config: dict, framework: str = "") -> Path:
     raise FileNotFoundError(f"학습 산출물을 찾지 못했습니다: {output_path}")
 
 
+def import_model_wrapper():
+    try:
+        from aiu_custom.predict import ModelWrapper
+    except Exception:
+        from aiu_custom import ModelWrapper
+    return ModelWrapper
+
+
+def resolve_experiment_name(config: dict) -> str:
+    return (
+        os.environ.get("MLFLOW_EXPERIMENT_NAME")
+        or str(config.get("mlflow_experiment_name") or "").strip()
+        or "ai-studio-onboarding"
+    )
+
+
+def resolve_registered_model_name(config: dict) -> str:
+    return (
+        os.environ.get("MLFLOW_REGISTER_MODEL_NAME")
+        or str(config.get("mlflow_register_model_name") or "").strip()
+        or "ai-studio-model"
+    )
+
+
+def run_mlflow_registration(
+    model_path: Path,
+    config_path: Path,
+    config: dict,
+    train_df=None,
+    test_df=None,
+    test_x=None,
+    metrics: dict | None = None,
+) -> None:
+    import mlflow
+
+    ModelWrapper = import_model_wrapper()
+    configure_mlflow_environment()
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", LOCAL_MLFLOW_TRACKING_URI)
+    mlflow.set_tracking_uri(tracking_uri)
+    experiment_name = resolve_experiment_name(config)
+    registered_model_name = resolve_registered_model_name(config)
+    mlflow.set_experiment(experiment_name)
+
+    params = {"alpha": 0.001, "l1_ratio": 0.5, "random_state": 42}
+    generated_config_path = write_training_config(params)
+    if test_x is not None:
+        input_example = write_input_example(test_x)
+        model_input_example = test_x.head(10)
+    else:
+        input_example = default_input_example()
+        model_input_example = input_example_to_dataframe(input_example)
+
+    with mlflow.start_run() as run:
+        if train_df is not None and hasattr(mlflow, "data"):
+            train_dataset = mlflow.data.from_pandas(train_df, name="Train", targets="target")
+            mlflow.log_input(train_dataset, context="training")
+        if test_df is not None and hasattr(mlflow, "data"):
+            test_dataset = mlflow.data.from_pandas(test_df, name="Test", targets="target")
+            mlflow.log_input(test_dataset, context="test")
+        if hasattr(mlflow, "set_tag"):
+            mlflow.set_tag("data.name", "diabetes(sklearn)" if train_df is not None else "local-artifact")
+        mlflow.log_params(params)
+        if metrics:
+            mlflow.log_metrics(metrics=metrics)
+        if hasattr(mlflow, "log_artifact"):
+            mlflow.log_artifact(str(generated_config_path))
+
+        mlflow.pyfunc.log_model(
+            python_model=ModelWrapper(),
+            artifact_path=str(config.get("model", {}).get("artifact_path") or "ai_studio"),
+            code_path=["aiu_custom"],
+            artifacts={
+                "model": str(model_path).replace("\\\\", "/"),
+                "config": str(generated_config_path).replace("\\\\", "/"),
+            },
+            input_example=model_input_example,
+            registered_model_name=registered_model_name,
+            pip_requirements="requirements.txt",
+        )
+
+    run_id = getattr(getattr(run, "info", None), "run_id", "")
+    print(f"mlflow run created: {run_id or 'created'}")
+    print(f"mlflow tracking uri: {tracking_uri}")
+    print(f"registered model name: {registered_model_name}")
+
+
 def main() -> None:
+    configure_utf8_stdout()
     parser = argparse.ArgumentParser(description="Prepare local model and run AI Studio MLflow logging.")
     parser.add_argument("--mode", choices=["pretrained", "train"], default="pretrained", help="Model flow to run")
     parser.add_argument("--framework", default="", help="Framework label for train mode")
@@ -3447,11 +3759,18 @@ def main() -> None:
     config_path = Path(args.config)
     config = load_config(config_path)
     os.environ["AI_STUDIO_CONFIG_PATH"] = str(config_path)
+    train_df = None
+    test_df = None
+    test_x = None
+    metrics = None
 
     if args.mode == "train":
         source_model = run_training(config, args.framework)
     else:
-        source_model = resolve_model_source(config, args.model)
+        source_model = try_resolve_model_source(config, args.model)
+        if source_model is None:
+            print("local model artifact not found; creating sklearn diabetes sample model.")
+            source_model, train_df, test_df, test_x, metrics = train_sklearn_diabetes_model(config)
     local_model = prepare_local_model(source_model, config)
     os.environ["AI_STUDIO_LOCAL_MODEL_PATH"] = str(local_model)
     print(f"local model prepared: {local_model}")
@@ -3463,9 +3782,8 @@ def main() -> None:
         print(f"mlflow tracking default: {LOCAL_MLFLOW_TRACKING_URI} when MLFLOW_TRACKING_URL is empty")
         print(f"local mlruns directory: {local_mlflow_store}")
         return
-    from mlflow_ai_studio_logging import main as run_mlflow_logging
 
-    run_mlflow_logging()
+    run_mlflow_registration(local_model, config_path, config, train_df, test_df, test_x, metrics)
 
 
 if __name__ == "__main__":
@@ -4010,7 +4328,163 @@ def handle_sample_command(parts: list[str]) -> str:
         if as_json:
             return json.dumps(payload, ensure_ascii=False, indent=2)
         return "sample projects created\n" + "\n".join(f"- {path}" for path in paths)
-    return "unknown sample action. available: list, create"
+    if action == "run":
+        try:
+            payload = run_sample_projects_command(parts)
+        except ValueError as exc:
+            payload = {
+                "status": "error",
+                "message": str(exc),
+                "available_kinds": sorted(SAMPLE_MODEL_SPECS) + ["all", "large10", "standard"],
+            }
+        if as_json:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        if payload.get("status") == "error":
+            return str(payload["message"])
+        return format_sample_run_result(payload)
+    return "unknown sample action. available: list, create, run"
+
+
+def run_sample_projects_command(parts: list[str]) -> dict[str, object]:
+    kind = option_value(parts, "--kind") or "all"
+    framework = option_value(parts, "--framework") or option_value(parts, "-f") or "generic"
+    register = "--register" in parts
+    dry_run = "--dry-run" in parts
+    train_mode = "--mode" in parts and option_value(parts, "--mode") == "train"
+    timeout = parse_int_option(parts, "--timeout", default=120)
+    paths = resolve_sample_run_paths(kind, framework)
+    results = [
+        run_single_sample_project(path, register=register, dry_run=dry_run, train_mode=train_mode, timeout=timeout)
+        for path in paths
+    ]
+    pass_count = sum(1 for result in results if result["status"] == "pass")
+    fail_count = len(results) - pass_count
+    return {
+        "status": "ok" if fail_count == 0 else "needs_action",
+        "command": "sample run",
+        "kind": kind,
+        "mode": "train" if train_mode else "pretrained",
+        "run_mode": "register" if register else "prepare-only",
+        "dry_run": dry_run,
+        "sample_root": str(sample_projects_root()),
+        "count": len(results),
+        "pass_count": pass_count,
+        "fail_count": fail_count,
+        "results": results,
+    }
+
+
+def parse_int_option(parts: list[str], option: str, default: int) -> int:
+    value = option_value(parts, option)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def resolve_sample_run_paths(kind: str, framework: str = "generic") -> list[Path]:
+    root = sample_projects_root()
+    if kind in {"all", "matrix"}:
+        return create_all_model_samples(root)
+    if kind in {"large10", "big10", "heavy10"}:
+        return create_large_model_samples(root)
+    if kind in {"standard", "template", "ml-dl-template"}:
+        return [create_standard_template_sample(root, framework)]
+    if kind in SAMPLE_MODEL_SPECS:
+        spec = SAMPLE_MODEL_SPECS[kind]
+        return [create_model_sample(root / spec.directory, spec)]
+    existing = resolve_existing_sample_project(f"/sample {kind}", root)
+    if existing:
+        return [existing]
+    raise ValueError(f"unknown sample kind: {kind}")
+
+
+def run_single_sample_project(
+    path: Path,
+    register: bool = False,
+    dry_run: bool = False,
+    train_mode: bool = False,
+    timeout: int = 120,
+) -> dict[str, object]:
+    run_model_path = path / "run_model.py"
+    if not run_model_path.exists():
+        return {
+            "project": str(path),
+            "name": path.name,
+            "status": "fail",
+            "exit_code": 2,
+            "command": "run_model.py missing",
+            "stdout": "",
+            "stderr": "run_model.py 없음",
+        }
+    command = [sys.executable, "run_model.py", "--env-file", "ai_studio.env"]
+    if train_mode:
+        command.extend(["--mode", "train"])
+    if register:
+        command.append("--register")
+        if dry_run:
+            command.append("--dry-run")
+    else:
+        command.append("--prepare-only")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=path,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        status = "pass" if result.returncode == 0 else "fail"
+        analysis = analyze_project(str(path))
+        return {
+            "project": str(path),
+            "name": path.name,
+            "status": status,
+            "exit_code": result.returncode,
+            "command": " ".join(command),
+            "registration_status": analysis.registration_status,
+            "artifact_count": len(analysis.scan.model_artifacts),
+            "stdout": truncate_output(result.stdout),
+            "stderr": truncate_output(result.stderr),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "project": str(path),
+            "name": path.name,
+            "status": "fail",
+            "exit_code": 124,
+            "command": " ".join(command),
+            "stdout": truncate_output(exc.stdout or ""),
+            "stderr": f"timeout after {timeout}s",
+        }
+
+
+def truncate_output(text: str, limit: int = 1200) -> str:
+    value = text.strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "\n...<truncated>"
+
+
+def format_sample_run_result(payload: dict[str, object]) -> str:
+    rows = [
+        "Sample model run result",
+        f"- kind: {payload['kind']}",
+        f"- mode: {payload['mode']}",
+        f"- run: {payload['run_mode']}{' dry-run' if payload['dry_run'] else ''}",
+        f"- total: {payload['count']}, pass: {payload['pass_count']}, fail: {payload['fail_count']}",
+    ]
+    for result in payload["results"]:
+        rows.append(
+            f"- [{result['status']}] {result['name']} "
+            f"(exit={result['exit_code']}, artifacts={result.get('artifact_count', 0)})"
+        )
+        if result.get("stderr"):
+            rows.append(f"  stderr: {result['stderr']}")
+    return "\n".join(rows)
 
 
 def sample_catalog_as_dict() -> dict[str, object]:
@@ -4056,6 +4530,8 @@ def format_sample_catalog(payload: dict[str, object]) -> str:
         "- create one: aiu sample create --kind tensorflow",
         "- create large10: aiu sample create --kind large10",
         "- create standard: aiu sample create --kind standard --framework pytorch",
+        "- run all prepare: aiu sample run --kind all",
+        "- run all register dry-run: aiu sample run --kind all --register --dry-run",
         "",
         "Standard templates:",
     ]
@@ -4490,7 +4966,11 @@ def load_logged_model_and_predict(root: Path, mlflow_result: dict[str, object]) 
         input_path = root / "input_example.json"
         if input_path.exists():
             payload = json.loads(input_path.read_text(encoding="utf-8"))
-        model_input = pd.DataFrame(payload["data"], columns=payload["columns"])
+        if "input" in payload:
+            input_item = payload.get("input", [{}])[0]
+            model_input = pd.DataFrame(input_item.get("data") or [[0.0]])
+        else:
+            model_input = pd.DataFrame(payload["data"], columns=payload["columns"])
         prediction = model.predict(model_input)
         return {
             "status": "pass",
@@ -4693,8 +5173,13 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--skip-serving", action="store_true")
 
     sample_parser = subparsers.add_parser("sample")
-    sample_parser.add_argument("action", nargs="?", default="list", choices=["list", "create"])
+    sample_parser.add_argument("action", nargs="?", default="list", choices=["list", "create", "run"])
     sample_parser.add_argument("--kind", default="all")
+    sample_parser.add_argument("--framework", "-f", default="generic")
+    sample_parser.add_argument("--mode", choices=["pretrained", "train"], default="pretrained")
+    sample_parser.add_argument("--register", action="store_true")
+    sample_parser.add_argument("--dry-run", action="store_true")
+    sample_parser.add_argument("--timeout", type=int)
     sample_parser.add_argument("--json", action="store_true")
     subparsers.add_parser("chat")
     subparsers.add_parser("tui")
@@ -4755,6 +5240,16 @@ def main(argv: list[str] | None = None) -> int:
         parts = [args.action]
         if args.kind:
             parts.extend(["--kind", args.kind])
+        if args.framework:
+            parts.extend(["--framework", args.framework])
+        if args.mode:
+            parts.extend(["--mode", args.mode])
+        if args.register:
+            parts.append("--register")
+        if args.dry_run:
+            parts.append("--dry-run")
+        if args.timeout is not None:
+            parts.extend(["--timeout", str(args.timeout)])
         if args.json:
             parts.append("--json")
         print(handle_sample_command(parts))
