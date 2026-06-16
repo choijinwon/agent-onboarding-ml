@@ -14,7 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from deep_agent.app_config import AppConfig, ensure_read_write_directory, ensure_runtime_layout, format_config_summary
+from deep_agent.app_config import (
+    AppConfig,
+    ensure_local_file_access,
+    ensure_read_write_directory,
+    ensure_runtime_layout,
+    format_config_summary,
+)
 from deep_agent.path_utils import resolve_filesystem_path
 from deep_agent.profile import build_ml_platform_profile, format_profile
 from deep_agent.libs import deepagents_libs_as_dict, format_deepagents_libs
@@ -1666,6 +1672,8 @@ def render_agent_switcher(index: int) -> str:
 
 def analyze_project(project_path: str) -> ProjectAnalysis:
     target = resolve_filesystem_path(project_path or ".")
+    if target.exists():
+        ensure_local_file_access(target)
     display_path = str(target)
     scan = scan_project(target)
 
@@ -2494,7 +2502,9 @@ def build_approval_options(analysis: ProjectAnalysis) -> list[ApprovalOption]:
 
 
 def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[AppliedChange]:
-    root = Path(project_path or ".").resolve()
+    root = resolve_filesystem_path(project_path or ".")
+    if root.exists():
+        ensure_local_file_access(root)
     if not root.exists() or not root.is_dir():
         return [
             AppliedChange(
@@ -2539,7 +2549,7 @@ def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[Ap
 
 
 def ai_studio_scaffold_missing(project_path: str) -> bool:
-    root = Path(project_path or ".")
+    root = resolve_filesystem_path(project_path or ".")
     if not root.exists() or not root.is_dir():
         return False
     required_paths = [

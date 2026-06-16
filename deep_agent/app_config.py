@@ -513,6 +513,15 @@ def ensure_read_write_directory(directory: Path) -> Path:
     return directory
 
 
+def ensure_local_file_access(path: Path) -> Path:
+    target = path.expanduser()
+    if not target.exists():
+        return target
+    directory = target if target.is_dir() else target.parent
+    ensure_read_write_directory(directory)
+    return target
+
+
 def grant_windows_read_write(directory: Path) -> bool:
     username = os.environ.get("USERNAME") or os.environ.get("USER")
     if not username:

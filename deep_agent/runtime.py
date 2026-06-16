@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from deep_agent.app_config import AppConfig
+from deep_agent.app_config import AppConfig, ensure_local_file_access
 from deep_agent.cli import (
     analyze_project,
     apply_fix_previews,
@@ -16,6 +16,7 @@ from deep_agent.cli import (
     format_beginner_apply_result,
     format_beginner_fix_preview,
 )
+from deep_agent.path_utils import resolve_filesystem_path
 from deep_agent.qwen_chat import QwenChatConfig
 
 
@@ -70,8 +71,14 @@ class DeepAgentsRuntime:
 
     def _create_agent(self, *, project_path: str, agent_mode: str):
         use_cache = agent_mode != "Chat"
+        resolved_project = resolve_filesystem_path(project_path) if project_path else None
+        if resolved_project is not None and resolved_project.exists():
+            ensure_local_file_access(resolved_project)
+            if resolved_project.is_file():
+                resolved_project = resolved_project.parent
+        resolved_project_path = str(resolved_project) if resolved_project is not None else ""
         cache_key = (
-            str(Path(project_path).expanduser()) if project_path else "",
+            resolved_project_path,
             agent_mode,
             self.qwen_config.model,
             self.qwen_config.base_url.rstrip("/"),
@@ -81,6 +88,8 @@ class DeepAgentsRuntime:
 
         _ensure_local_deepagents_on_path()
         from deepagents import create_deep_agent  # type: ignore
+        from deepagents.backends import FilesystemBackend  # type: ignore
+        from deepagents.middleware.filesystem import FilesystemPermission  # type: ignore
         from langchain_openai import ChatOpenAI  # type: ignore
 
         model = ChatOpenAI(
@@ -91,10 +100,21 @@ class DeepAgentsRuntime:
             timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT", default=120),
         )
         tools = [] if agent_mode == "Chat" else [analyze_ml_project, preview_ml_fixes, apply_ml_fixes]
+        backend = None
+        permissions = None
+        if resolved_project is not None and resolved_project.exists() and resolved_project.is_dir():
+            backend = FilesystemBackend(root_dir=str(resolved_project), virtual_mode=True)
+            write_mode = "allow" if agent_mode in {"Build", "AutoFix"} else "deny"
+            permissions = [
+                FilesystemPermission(operations=["read"], paths=["/**"], mode="allow"),
+                FilesystemPermission(operations=["write"], paths=["/**"], mode=write_mode),
+            ]
         agent = create_deep_agent(
             model=model,
             tools=tools,
-            system_prompt=build_deepagents_system_prompt(project_path, agent_mode),
+            system_prompt=build_deepagents_system_prompt(resolved_project_path or project_path, agent_mode),
+            backend=backend,
+            permissions=permissions,
             name="ai-ml-onboarding-deepagent",
         )
         if use_cache:

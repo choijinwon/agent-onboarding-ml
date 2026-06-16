@@ -11,9 +11,17 @@ import unittest
 import zipfile
 
 from deep_agent import cli as ml_agent
-from deep_agent.app_config import AppConfig, DEFAULT_SKILLS, ensure_read_write_directory, ensure_runtime_layout, grant_windows_read_write
+from deep_agent.app_config import (
+    AppConfig,
+    DEFAULT_SKILLS,
+    ensure_local_file_access,
+    ensure_read_write_directory,
+    ensure_runtime_layout,
+    grant_windows_read_write,
+)
 from deep_agent.profile import build_ml_platform_profile, format_profile
 from deep_agent.libs import deepagents_libs_as_dict
+from deep_agent.path_utils import filesystem_path_candidates, is_windows_absolute_path, resolve_filesystem_path
 from deep_agent.runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
 from deep_agent.stores.chat_session_store import append_chat_session_event, mask_sensitive_text
 from deep_agent.stores.error_log_store import analyze_error_log, list_error_logs, save_error_log
@@ -53,6 +61,8 @@ from deep_agent.tui import (
     BeginnerTuiController,
     command_placeholder_for_mode,
     discover_selectable_folders,
+    extract_agent_response_choices,
+    format_agent_response_choices,
     folder_selection_placeholder,
     format_agent_mode_selector,
     format_folder_choices,
@@ -66,6 +76,7 @@ from deep_agent.tui import (
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
+    agent_response_choice_placeholder,
     sample_selection_placeholder,
     normalize_input_path,
     normalize_pasted_input,
@@ -139,6 +150,15 @@ class DeepAgentsRuntimeTest(unittest.TestCase):
         self.assertIn('if use_cache and cache_key in self._agent_cache:', source)
         self.assertIn('if use_cache:', source)
         self.assertIn('timeout=self.app_config.get_int("DEV_COMMAND_TIMEOUT", default=120)', source)
+
+    def test_deepagents_runtime_configures_local_filesystem_backend_and_permissions(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn("ensure_local_file_access(resolved_project)", source)
+        self.assertIn("FilesystemBackend(root_dir=str(resolved_project), virtual_mode=True)", source)
+        self.assertIn('write_mode = "allow" if agent_mode in {"Build", "AutoFix"} else "deny"', source)
+        self.assertIn('FilesystemPermission(operations=["read"], paths=["/**"], mode="allow")', source)
+        self.assertIn('FilesystemPermission(operations=["write"], paths=["/**"], mode=write_mode)', source)
 
 
 class ModeParsingTest(unittest.TestCase):
@@ -1731,6 +1751,18 @@ class WindowsSetupTest(unittest.TestCase):
             probe.write_text("ok", encoding="utf-8")
             self.assertEqual(probe.read_text(encoding="utf-8"), "ok")
 
+    def test_local_file_access_helper_keeps_existing_folder_writable(self):
+        with TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "project"
+            target.mkdir()
+
+            result = ensure_local_file_access(target)
+
+            self.assertEqual(result, target)
+            probe = target / "access-check.txt"
+            probe.write_text("ok", encoding="utf-8")
+            self.assertEqual(probe.read_text(encoding="utf-8"), "ok")
+
     def test_windows_read_write_permission_uses_icacls_for_current_user(self):
         with TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "runtime"
@@ -1881,6 +1913,70 @@ class WindowsSetupTest(unittest.TestCase):
 
             self.assertIn("중급자 Chatbot 응답", output)
             self.assertEqual(fake.calls[-1], ("프로젝트 분석해줘", str(root), "AutoFix"))
+
+    def test_tui_extracts_agent_response_numbered_choices(self):
+        response = "다음 중 선택하세요.\n1. MLflow 설정 점검\n2) run_model.py 생성\n- [3] 로컬 서빙 테스트"
+
+        choices = extract_agent_response_choices(response)
+
+        self.assertEqual(choices, ["MLflow 설정 점검", "run_model.py 생성", "로컬 서빙 테스트"])
+        self.assertIn("1. MLflow 설정 점검", format_agent_response_choices(choices))
+        self.assertIn("1-3", agent_response_choice_placeholder(choices))
+
+    def test_tui_chatbot_allows_selecting_agent_response_choice(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                if len(self.calls) == 1:
+                    return DeepAgentsRunResult("선택하세요.\n1. MLflow 설정 점검\n2. run_model.py 생성", True)
+                return DeepAgentsRunResult("선택 항목 실행 완료", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                (root / "requirements.txt").write_text("mlflow\n")
+                (root / "train.py").write_text("import mlflow\n")
+                (root / "model.onnx").write_text("sample")
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+
+                first = controller.submit("검증 항목 보여줘")
+                second = controller.submit("2")
+            finally:
+                os.chdir(cwd)
+
+        self.assertIn("선택하세요", first)
+        self.assertTrue(controller.awaiting_agent_response_choice is False)
+        self.assertIn("선택 항목 실행 완료", second)
+        self.assertIn("선택 항목: run_model.py 생성", fake.calls[-1][0])
+        self.assertIn("Agent 응답 선택", controller.render_log())
+
+    def test_tui_chatbot_direct_message_clears_agent_response_choice(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                if len(self.calls) == 1:
+                    return DeepAgentsRunResult("1. A안\n2. B안", True)
+                return DeepAgentsRunResult("다시 요청 처리", True)
+
+        controller = self.beginner_tui("", deepagents_runtime=FakeRuntime())
+        controller.select_agent_mode("Chatbot")
+
+        controller.submit("선택지 줘")
+        output = controller.submit("원하는 항목이 없어서 다른 방식으로 해줘")
+
+        self.assertIn("다시 요청 처리", output)
+        self.assertFalse(controller.awaiting_agent_response_choice)
 
     def test_tui_direct_agent_mode_words_switch_modes(self):
         controller = self.beginner_tui("")
@@ -2417,6 +2513,12 @@ class WindowsSetupTest(unittest.TestCase):
             normalize_path_text("file:///C:/Users/choi/AI%20ML/model"),
             "C:/Users/choi/AI ML/model",
         )
+        self.assertEqual(
+            normalize_path_text(r"\\?\C:\Users\choi\AI ML\model"),
+            r"C:\Users\choi\AI ML\model",
+        )
+        self.assertTrue(is_windows_absolute_path(r"C:\Users\choi\AI ML\model"))
+        self.assertTrue(is_windows_absolute_path(r"\\mlserver\models\team-a\model"))
 
     def test_tui_expands_windows_env_path_variants(self):
         old_value = os.environ.get("AIU_TEST_HOME")
@@ -2452,6 +2554,30 @@ class WindowsSetupTest(unittest.TestCase):
                     os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
                 else:
                     os.environ["AIU_WINDOWS_DRIVE_C"] = old_value
+
+    def test_tui_resolves_windows_absolute_path_with_drive_root_mapping(self):
+        old_drive = os.environ.get("AIU_WINDOWS_DRIVE_C")
+        old_root = os.environ.get("AIU_WINDOWS_DRIVE_ROOT")
+        with TemporaryDirectory() as tmpdir:
+            drives_root = Path(tmpdir) / "drives"
+            project = drives_root / "C" / "Users" / "choi" / "AI ML" / "model"
+            project.mkdir(parents=True)
+            (project / "requirements.txt").write_text("mlflow\n")
+            os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+            os.environ["AIU_WINDOWS_DRIVE_ROOT"] = str(drives_root)
+            try:
+                self.assertIn(project, filesystem_path_candidates(r"C:\Users\choi\AI ML\model"))
+                self.assertEqual(normalize_input_path(r"C:\Users\choi\AI ML\model"), project.resolve())
+                self.assertEqual(resolve_filesystem_path(r"\\?\C:\Users\choi\AI ML\model"), project.resolve())
+            finally:
+                if old_drive is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_C", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_C"] = old_drive
+                if old_root is None:
+                    os.environ.pop("AIU_WINDOWS_DRIVE_ROOT", None)
+                else:
+                    os.environ["AIU_WINDOWS_DRIVE_ROOT"] = old_root
 
     def test_tui_resolves_windows_unc_path_with_share_mapping(self):
         old_root = os.environ.get("AIU_UNC_ROOT")

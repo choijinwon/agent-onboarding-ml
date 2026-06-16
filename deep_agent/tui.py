@@ -82,6 +82,7 @@ AI_STUDIO_ENV_FIELDS = [
 ]
 PASTE_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
 PASTE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+AGENT_RESPONSE_CHOICE_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\[(\d+)\]|(\d+)[.)]|(\d+)\s*[-:])\s+(.+?)\s*$")
 
 
 class LogView:
@@ -349,6 +350,40 @@ def format_sample_choices(
         lines.append(f"{index}. {label}  {command}{marker}")
     lines.append("번호를 입력하거나 Tab/화살표로 이동 후 Enter를 누르세요.")
     return "\n".join(lines)
+
+
+def extract_agent_response_choices(text: str, limit: int = 9) -> list[str]:
+    choices: list[str] = []
+    for line in text.splitlines():
+        match = AGENT_RESPONSE_CHOICE_RE.match(line)
+        if not match:
+            continue
+        label = match.group(4).strip()
+        if not label:
+            continue
+        choices.append(label)
+        if len(choices) >= limit:
+            break
+    return choices
+
+
+def format_agent_response_choices(choices: list[str], current_index: int = 0) -> str:
+    lines = [
+        "Agent 응답 선택",
+        "- 번호를 입력하면 해당 항목을 실행합니다.",
+        "- 원하는 항목이 없으면 직접 다시 메시지를 입력하세요.",
+        "",
+    ]
+    for index, choice in enumerate(choices, start=1):
+        marker = " (선택)" if index - 1 == current_index else ""
+        lines.append(f"{index}. {choice}{marker}")
+    return "\n".join(lines)
+
+
+def agent_response_choice_placeholder(choices: list[str]) -> str:
+    if not choices:
+        return "원하는 내용을 다시 입력하세요"
+    return f"[Agent Choices] 1-{len(choices)} 번호 선택, 또는 직접 질문 입력"
 
 
 def format_tui_launch_mode_screen(message: str = "") -> str:
@@ -726,6 +761,10 @@ class BeginnerTuiController:
     folder_options: list[Path] = field(default_factory=list)
     awaiting_sample_selection: bool = False
     sample_selection_index: int = 0
+    awaiting_agent_response_choice: bool = False
+    agent_response_choice_index: int = 0
+    agent_response_choices: list[str] = field(default_factory=list)
+    last_agent_response: str = ""
     awaiting_ai_studio_env: bool = False
     ai_studio_env_index: int = 0
     ai_studio_env_values: dict[str, str] = field(default_factory=dict)
@@ -1003,6 +1042,52 @@ class BeginnerTuiController:
         return self.current_screen()
 
     @property
+    def highlighted_agent_response_choice(self) -> str:
+        if not self.agent_response_choices:
+            return ""
+        self.agent_response_choice_index %= len(self.agent_response_choices)
+        return self.agent_response_choices[self.agent_response_choice_index]
+
+    def cycle_agent_response_choice(self, delta: int = 1) -> str:
+        self.awaiting_agent_response_choice = True
+        if self.agent_response_choices:
+            self.agent_response_choice_index = (self.agent_response_choice_index + delta) % len(self.agent_response_choices)
+        return self.highlighted_agent_response_choice
+
+    def _capture_agent_response_choices(self, agent_response: str) -> None:
+        choices = extract_agent_response_choices(agent_response)
+        self.last_agent_response = agent_response
+        self.agent_response_choices = choices
+        self.agent_response_choice_index = 0
+        self.awaiting_agent_response_choice = bool(choices)
+        if choices:
+            message = format_agent_response_choices(choices, self.agent_response_choice_index)
+            self.latest_message = f"{agent_response}\n\n{message}"
+            self.log_lines.append(message)
+
+    def select_agent_response_choice(self, value: str) -> str:
+        candidate = value.strip()
+        if not self.agent_response_choices:
+            self.awaiting_agent_response_choice = False
+            return self.handle_chat_message(candidate)
+        if not candidate:
+            choice = self.highlighted_agent_response_choice
+        elif candidate.isdigit() and 1 <= int(candidate) <= len(self.agent_response_choices):
+            choice = self.agent_response_choices[int(candidate) - 1]
+        else:
+            self.awaiting_agent_response_choice = False
+            self.agent_response_choices = []
+            return self.handle_chat_message(candidate)
+        self.awaiting_agent_response_choice = False
+        self.agent_response_choices = []
+        followup = (
+            "아래 Agent 응답 선택지를 실행해줘.\n"
+            f"선택 항목: {choice}\n\n"
+            f"이전 Agent 응답:\n{self.last_agent_response}"
+        )
+        return self.handle_chat_message(followup)
+
+    @property
     def ai_studio_env_path(self) -> Path:
         return Path(self.project_path) / "ai_studio.env"
 
@@ -1083,6 +1168,8 @@ class BeginnerTuiController:
             return self.select_folder("")
         if not command and self.awaiting_sample_selection:
             return self.select_sample("")
+        if not command and self.awaiting_agent_response_choice:
+            return self.select_agent_response_choice("")
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command:
@@ -1113,6 +1200,8 @@ class BeginnerTuiController:
             return self.select_model(model)
         if self.awaiting_model_selection:
             return self.select_model(command)
+        if self.awaiting_agent_response_choice and command.isdigit():
+            return self.select_agent_response_choice(command)
 
         folder_base = parse_folder_command(command)
         if folder_base is not None:
@@ -1121,6 +1210,8 @@ class BeginnerTuiController:
             return self.select_folder(command)
         if self.awaiting_sample_selection:
             return self.select_sample(command)
+        if self.awaiting_agent_response_choice:
+            return self.select_agent_response_choice(command)
 
         path_value, is_path_command = strip_path_command(command)
         if is_path_command and not path_value:
@@ -1177,6 +1268,9 @@ class BeginnerTuiController:
             self.select_agent_mode(agent_mode)
             return self.current_screen()
         if self.agent_mode == "Chatbot":
+            if self.awaiting_agent_response_choice:
+                response = self.select_agent_response_choice(command)
+                return self.render_log() if response else response
             response = self.handle_chat_message(command)
             return self.render_log() if response else response
         if is_greeting(command):
@@ -1208,6 +1302,9 @@ class BeginnerTuiController:
             self.select_agent_mode(agent_mode)
             return self.current_screen()
         if self.agent_mode == "Chatbot":
+            if self.awaiting_agent_response_choice:
+                response = self.select_agent_response_choice(command)
+                return self.render_log() if response else response
             response = self.handle_chat_message(command)
             return self.render_log() if response else response
         self.latest_message = handle_advanced_input(command)
@@ -1237,6 +1334,7 @@ class BeginnerTuiController:
             self._append_or_replace_chat_log(command, response, applied_changes)
             self._save_chat_session(command, response, applied_changes, final_analysis)
             self._save_used_prompt(command, response, agent_mode=runtime_mode)
+            self._capture_agent_response_choices(response)
             return response
         if result.used_deepagents:
             response = result.content
@@ -1244,12 +1342,14 @@ class BeginnerTuiController:
             self._append_or_replace_chat_log(command, response, applied_changes)
             self._save_chat_session(command, response, applied_changes, None)
             self._save_used_prompt(command, response, agent_mode=runtime_mode)
+            self._capture_agent_response_choices(response)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
         self.latest_message = response
         self._append_or_replace_chat_log(command, response, applied_changes)
         self._save_chat_session(command, response, applied_changes, analyze_project(self.project_path) if use_autofix else None)
         self._save_used_prompt(command, response, agent_mode=runtime_mode)
+        self._capture_agent_response_choices(response)
         return response
 
     def _handle_non_chatbot_text(self, command: str) -> str:
@@ -1915,6 +2015,14 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh(force_sample_value=True)
                 self._focus_command()
                 return
+            if self.controller.awaiting_agent_response_choice and event.key in {"up", "left", "shift+tab"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_agent_response_choice(-1)
+                self._refresh(force_agent_choice_value=True)
+                self._focus_command()
+                return
             if self.controller.awaiting_folder_selection and event.key in {"down", "right"}:
                 event.stop()
                 if hasattr(event, "prevent_default"):
@@ -1929,6 +2037,14 @@ def run_tui(project_path: str = "") -> int:
                     event.prevent_default()
                 self.controller.cycle_sample_selection(1)
                 self._refresh(force_sample_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_agent_response_choice and event.key in {"down", "right"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_agent_response_choice(1)
+                self._refresh(force_agent_choice_value=True)
                 self._focus_command()
                 return
             if event.key == "ctrl+space":
@@ -2054,6 +2170,7 @@ def run_tui(project_path: str = "") -> int:
             force_model_value: bool = False,
             force_folder_value: bool = False,
             force_sample_value: bool = False,
+            force_agent_choice_value: bool = False,
         ) -> None:
             command = self.query_one(CommandInput)
             if self.controller.awaiting_model_selection:
@@ -2072,8 +2189,13 @@ def run_tui(project_path: str = "") -> int:
                 if force_sample_value or not command.value:
                     command.value = self.controller.highlighted_sample_command
                     command.cursor_position = len(command.value)
+            elif self.controller.awaiting_agent_response_choice:
+                command.placeholder = agent_response_choice_placeholder(self.controller.agent_response_choices)
+                if force_agent_choice_value or not command.value:
+                    command.value = str(self.controller.agent_response_choice_index + 1)
+                    command.cursor_position = len(command.value)
             else:
-                command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
+                command.placeholder = command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
             command.set_class(self.controller.agent_mode == "Build", "build")
             command.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             send = self.query_one(SendButton)
@@ -2109,13 +2231,16 @@ __all__ = [
     "AIOnboardingTuiApp",
     "AGENT_MODES",
     "BeginnerTuiController",
+    "agent_response_choice_placeholder",
     "available_models_from_config",
     "CommandInput",
     "CancelButton",
     "FileButton",
     "SampleButton",
     "discover_selectable_folders",
+    "extract_agent_response_choices",
     "folder_selection_placeholder",
+    "format_agent_response_choices",
     "format_folder_choices",
     "format_sample_choices",
     "ModeSelector",

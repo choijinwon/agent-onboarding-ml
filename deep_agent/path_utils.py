@@ -3,17 +3,52 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote, urlparse
 
 
-WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?([A-Za-z]):[\\/](.*)")
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^/?([A-Za-z]):(?:[\\/](.*))?$")
+WINDOWS_EXTENDED_DRIVE_RE = re.compile(r"^\\\\\?\\([A-Za-z]):\\?(.*)$")
+WINDOWS_EXTENDED_UNC_RE = re.compile(r"^\\\\\?\\UNC\\(.+)$", re.IGNORECASE)
 WINDOWS_ENV_RE = re.compile(r"%([^%]+)%")
 POWERSHELL_ENV_RE = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 
 
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
+
+
 def is_windows_style_path(value: str) -> bool:
-    return bool(WINDOWS_DRIVE_PATH_RE.match(value)) or value.startswith(("\\\\", "//"))
+    return (
+        bool(WINDOWS_DRIVE_PATH_RE.match(value))
+        or bool(WINDOWS_EXTENDED_DRIVE_RE.match(value))
+        or bool(WINDOWS_EXTENDED_UNC_RE.match(value))
+        or value.startswith(("\\\\", "//"))
+    )
+
+
+def is_windows_absolute_path(value: str) -> bool:
+    normalized = normalize_windows_namespace(value.strip().strip('"').strip("'"))
+    return bool(WINDOWS_DRIVE_PATH_RE.match(normalized)) or normalized.startswith(("\\\\", "//"))
+
+
+def normalize_windows_namespace(value: str) -> str:
+    drive_match = WINDOWS_EXTENDED_DRIVE_RE.match(value)
+    if drive_match:
+        drive, rest = drive_match.groups()
+        return f"{drive}:\\{rest}".rstrip("\\")
+    unc_match = WINDOWS_EXTENDED_UNC_RE.match(value)
+    if unc_match:
+        return "\\\\" + unc_match.group(1)
+    return value
 
 
 def expand_cross_platform_vars(value: str) -> str:
@@ -32,9 +67,13 @@ def normalize_path_text(value: str) -> str:
     normalized = value.strip().strip('"').strip("'")
     if normalized.startswith("file://"):
         parsed = urlparse(normalized)
-        normalized = unquote(parsed.path or normalized.removeprefix("file://"))
+        if parsed.netloc and parsed.netloc not in ("localhost", ""):
+            normalized = f"//{parsed.netloc}{unquote(parsed.path)}"
+        else:
+            normalized = unquote(parsed.path or normalized.removeprefix("file://"))
     else:
         normalized = unquote(normalized)
+    normalized = normalize_windows_namespace(normalized)
     if WINDOWS_DRIVE_PATH_RE.match(normalized):
         normalized = normalized.lstrip("/")
     normalized = expand_cross_platform_vars(normalized)
@@ -53,13 +92,22 @@ def windows_drive_candidates(value: str) -> list[Path]:
     if not match:
         return []
     drive = match.group(1).upper()
-    rest = match.group(2).replace("\\", "/")
+    rest = (match.group(2) or "").replace("\\", "/")
+    rest_parts = [part for part in rest.split("/") if part]
     env_root = os.environ.get(f"AIU_WINDOWS_DRIVE_{drive}") or os.environ.get("AIU_WINDOWS_DRIVE_ROOT")
     candidates: list[Path] = []
     if env_root:
-        candidates.append(Path(env_root).expanduser() / rest)
-    candidates.extend([Path(f"/mnt/{drive.lower()}") / rest, Path(f"/{drive.lower()}") / rest])
-    return candidates
+        root = Path(env_root).expanduser()
+        candidates.append(root / Path(*rest_parts))
+        candidates.append(root / drive / Path(*rest_parts))
+    candidates.extend(
+        [
+            Path(f"/mnt/{drive.lower()}") / Path(*rest_parts),
+            Path(f"/{drive.lower()}") / Path(*rest_parts),
+            Path(f"/{drive}") / Path(*rest_parts),
+        ]
+    )
+    return _dedupe_paths(candidates)
 
 
 def windows_unc_candidates(value: str) -> list[Path]:
@@ -78,19 +126,32 @@ def windows_unc_candidates(value: str) -> list[Path]:
         candidates.append(Path(env_specific).expanduser() / tail)
     if env_root:
         candidates.append(Path(env_root).expanduser() / server / share / tail)
-    candidates.extend([Path("/mnt") / server / share / tail, Path("/Volumes") / share / tail])
-    return candidates
+    candidates.extend(
+        [
+            Path("/mnt") / server / share / tail,
+            Path("/Volumes") / share / tail,
+            Path("//") / server / share / tail,
+        ]
+    )
+    return _dedupe_paths(candidates)
+
+
+def native_windows_path(value: str) -> Path:
+    pure = PureWindowsPath(value)
+    return Path(str(pure))
 
 
 def filesystem_path_candidates(value: str) -> list[Path]:
     normalized = normalize_path_text(value)
     if not normalized:
         return []
+    if os.name == "nt" and is_windows_style_path(normalized):
+        return [native_windows_path(normalized).expanduser()]
     candidates = [Path(normalized).expanduser()]
     if os.name != "nt":
         candidates.extend(windows_drive_candidates(normalized))
         candidates.extend(windows_unc_candidates(normalized))
-    return candidates
+    return _dedupe_paths(candidates)
 
 
 def resolve_filesystem_path(value: str) -> Path:
@@ -114,6 +175,7 @@ __all__ = [
     "existing_filesystem_path",
     "expand_cross_platform_vars",
     "filesystem_path_candidates",
+    "is_windows_absolute_path",
     "is_windows_style_path",
     "normalize_path_text",
     "resolve_filesystem_path",
