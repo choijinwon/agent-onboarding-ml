@@ -38,8 +38,10 @@ from deep_agent.cli import (
     format_model_parameters,
     handle_advanced_input,
     handle_intermediate_request,
+    ensure_standard_ml_dl_template,
     list_existing_work_projects,
     copy_text_to_clipboard,
+    normalize_standard_framework,
     normalize_clipboard_text,
     parse_mode,
     parse_mode_command,
@@ -103,6 +105,10 @@ class SendButton:
 
 
 class FileButton:
+    pass
+
+
+class SampleButton:
     pass
 
 
@@ -220,6 +226,7 @@ def format_tui_help_screen(
         "         /agent                 현재 Agent 모드 표시",
         "",
         "  PROJECT",
+        "         SAMPLE 버튼           샘플 모델 목록에서 선택",
         "         /path <경로>           프로젝트 경로 직접 입력",
         "         /open [상위경로]       파일/폴더 열기",
         "         /folder [상위경로]     폴더 목록에서 선택",
@@ -309,6 +316,38 @@ def format_folder_choices(folders: list[Path], current_folder: Path | None = Non
         marker = " (선택)" if current_folder is not None and folder == current_folder else ""
         lines.append(f"{index}. {folder}{marker}")
     lines.append("번호를 입력하거나 /open <기준경로>로 후보를 다시 불러올 수 있습니다.")
+    return "\n".join(lines)
+
+
+SAMPLE_CHOICES = (
+    ("TensorFlow", "/sample tensorflow"),
+    ("PyTorch", "/sample pytorch"),
+    ("scikit-learn", "/sample sklearn"),
+    ("ONNX", "/sample onnx"),
+    ("Sora", "/sample sora"),
+    ("Standard PyTorch", "/sample standard pytorch"),
+    ("Standard TensorFlow", "/sample standard tensorflow"),
+    ("Large 10", "/sample large10"),
+    ("All Basic", "/sample all"),
+)
+
+
+def sample_selection_placeholder(choices: tuple[tuple[str, str], ...] = SAMPLE_CHOICES) -> str:
+    return f"[Sample Select] Tab/화살표 선택, Enter 확정, 1-{len(choices)} 번호 가능"
+
+
+def format_sample_choices(
+    choices: tuple[tuple[str, str], ...] = SAMPLE_CHOICES,
+    selected_index: int = 0,
+) -> str:
+    lines = [
+        "샘플 모델을 선택하세요.",
+        "선택한 샘플은 자동 생성되고 Step 1 프로젝트 경로로 설정됩니다.",
+    ]
+    for index, (label, command) in enumerate(choices, start=1):
+        marker = " (선택)" if index - 1 == selected_index else ""
+        lines.append(f"{index}. {label}  {command}{marker}")
+    lines.append("번호를 입력하거나 Tab/화살표로 이동 후 Enter를 누르세요.")
     return "\n".join(lines)
 
 
@@ -449,7 +488,48 @@ def is_chat_apply_approved(command: str) -> bool:
         "approved",
         "go ahead",
     )
-    return is_fix_request(command) and any(keyword in lowered for keyword in approval_keywords)
+    approved = any(keyword in lowered for keyword in approval_keywords)
+    return approved and (is_fix_request(command) or is_standard_template_request(command))
+
+
+def is_standard_template_request(command: str) -> bool:
+    lowered = command.lower()
+    keywords = (
+        "표준 템플릿",
+        "학습 템플릿",
+        "템플릿 만들어",
+        "템플릿 생성",
+        "ml/dl",
+        "ml dl",
+        "framework template",
+        "training template",
+    )
+    return any(keyword in lowered for keyword in keywords)
+
+
+def extract_template_framework(command: str) -> str:
+    lowered = command.lower()
+    candidates = (
+        "tensorflow",
+        "텐서플로우",
+        "pytorch",
+        "파이토치",
+        "sklearn",
+        "사이킷런",
+        "xgboost",
+        "onnx",
+        "huggingface",
+        "hf",
+        "sora",
+        "소라",
+        "llm",
+        "vision",
+        "비전",
+    )
+    for candidate in candidates:
+        if candidate in lowered:
+            return normalize_standard_framework(candidate)
+    return "generic"
 
 
 def is_greeting(command: str) -> bool:
@@ -644,6 +724,8 @@ class BeginnerTuiController:
     awaiting_folder_selection: bool = False
     folder_selection_index: int = 0
     folder_options: list[Path] = field(default_factory=list)
+    awaiting_sample_selection: bool = False
+    sample_selection_index: int = 0
     awaiting_ai_studio_env: bool = False
     ai_studio_env_index: int = 0
     ai_studio_env_values: dict[str, str] = field(default_factory=dict)
@@ -739,6 +821,7 @@ class BeginnerTuiController:
             or command in EXIT_COMMANDS
             or command in HELP_COMMANDS
             or self.awaiting_model_selection
+            or self.awaiting_sample_selection
             or self.awaiting_ai_studio_env
         ):
             return False
@@ -880,6 +963,46 @@ class BeginnerTuiController:
         return self.select_project_path(selected)
 
     @property
+    def highlighted_sample_command(self) -> str:
+        self.sample_selection_index %= len(SAMPLE_CHOICES)
+        return SAMPLE_CHOICES[self.sample_selection_index][1]
+
+    def start_sample_selection(self) -> str:
+        self.awaiting_sample_selection = True
+        self.sample_selection_index = 0
+        message = format_sample_choices(SAMPLE_CHOICES, self.sample_selection_index)
+        self.latest_message = message
+        return message
+
+    def cycle_sample_selection(self, delta: int = 1) -> str:
+        self.awaiting_sample_selection = True
+        self.sample_selection_index = (self.sample_selection_index + delta) % len(SAMPLE_CHOICES)
+        message = format_sample_choices(SAMPLE_CHOICES, self.sample_selection_index)
+        self.latest_message = message
+        return self.highlighted_sample_command
+
+    def select_sample(self, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            command = self.highlighted_sample_command
+        elif candidate.isdigit() and 1 <= int(candidate) <= len(SAMPLE_CHOICES):
+            command = SAMPLE_CHOICES[int(candidate) - 1][1]
+        elif candidate.startswith("/sample ") or candidate.startswith("/샘플 "):
+            command = candidate
+        else:
+            lowered = candidate.lower()
+            matched = next((sample_command for label, sample_command in SAMPLE_CHOICES if lowered in label.lower()), "")
+            if not matched:
+                message = "샘플을 선택하지 못했습니다. 번호를 입력하거나 SAMPLE 버튼으로 다시 선택하세요."
+                self.latest_message = message
+                return message
+            command = matched
+        self.awaiting_sample_selection = False
+        self.set_project(command)
+        self.latest_message = self.sample_message or ""
+        return self.current_screen()
+
+    @property
     def ai_studio_env_path(self) -> Path:
         return Path(self.project_path) / "ai_studio.env"
 
@@ -958,6 +1081,8 @@ class BeginnerTuiController:
             return self.continue_ai_studio_env_setup(raw)
         if not command and self.awaiting_folder_selection:
             return self.select_folder("")
+        if not command and self.awaiting_sample_selection:
+            return self.select_sample("")
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command:
@@ -994,6 +1119,8 @@ class BeginnerTuiController:
             return self.start_folder_selection(folder_base)
         if self.awaiting_folder_selection:
             return self.select_folder(command)
+        if self.awaiting_sample_selection:
+            return self.select_sample(command)
 
         path_value, is_path_command = strip_path_command(command)
         if is_path_command and not path_value:
@@ -1095,12 +1222,15 @@ class BeginnerTuiController:
             self._save_used_prompt(command, response, agent_mode="Chat")
             return response
         chat_apply_approved = is_chat_apply_approved(command)
+        template_requested = is_standard_template_request(command)
         use_autofix = should_use_autofix_chat(command) or chat_apply_approved
         runtime_mode = "Build" if chat_apply_approved else ("AutoFix" if use_autofix else "Chat")
         result = self._invoke_deepagents(command, agent_mode=runtime_mode)
         applied_changes: list[AppliedChange] = []
+        if template_requested and chat_apply_approved:
+            applied_changes.append(ensure_standard_ml_dl_template(Path(self.project_path), extract_template_framework(command)))
         if (result.used_deepagents and use_autofix) or (chat_apply_approved and not result.used_deepagents):
-            applied_changes = self._apply_fixable_issues_after_chat()
+            applied_changes.extend(self._apply_fixable_issues_after_chat())
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
             self.latest_message = response
@@ -1331,7 +1461,7 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CancelButton, CommandInput, FileButton, LogView, ModeSelector, SendButton, StatusBar
+    global AIOnboardingTuiApp, CancelButton, CommandInput, FileButton, LogView, ModeSelector, SampleButton, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
@@ -1430,6 +1560,9 @@ def run_tui(project_path: str = "") -> int:
     class FileButton(Button):
         pass
 
+    class SampleButton(Button):
+        pass
+
     class CancelButton(Button):
         pass
 
@@ -1517,7 +1650,7 @@ def run_tui(project_path: str = "") -> int:
             margin-top: 0;
         }
         #file {
-            width: 18;
+            width: 14;
             height: 3;
             margin-right: 1;
             background: #2d333b;
@@ -1530,8 +1663,22 @@ def run_tui(project_path: str = "") -> int:
         #file.chatbot {
             background: #223a2b;
         }
-        #cancel {
+        #sample {
             width: 18;
+            height: 3;
+            margin-right: 1;
+            background: #273447;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #sample.build {
+            background: #4a3720;
+        }
+        #sample.chatbot {
+            background: #223a2b;
+        }
+        #cancel {
+            width: 14;
             height: 3;
             margin-right: 1;
             background: #5f1d1d;
@@ -1581,6 +1728,7 @@ def run_tui(project_path: str = "") -> int:
                     yield CommandInput(id="command")
                     with Horizontal(id="actions"):
                         yield FileButton("FILE", id="file")
+                        yield SampleButton("SAMPLE", id="sample")
                         yield CancelButton("CANCEL", id="cancel", disabled=True)
                         yield SendButton("SEND  Enter", id="send")
                 yield StatusBar("", id="status")
@@ -1605,6 +1753,11 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh(force_folder_value=True)
                 self._focus_command()
                 return
+            if self.controller.awaiting_sample_selection:
+                self.controller.cycle_sample_selection(1)
+                self._refresh(force_sample_value=True)
+                self._focus_command()
+                return
             self.controller.toggle_agent()
             self._refresh()
             self._focus_command()
@@ -1623,6 +1776,11 @@ def run_tui(project_path: str = "") -> int:
             if self.controller.awaiting_folder_selection:
                 self.controller.cycle_folder_selection(-1)
                 self._refresh(force_folder_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_sample_selection:
+                self.controller.cycle_sample_selection(-1)
+                self._refresh(force_sample_value=True)
                 self._focus_command()
                 return
             self.controller.previous_agent()
@@ -1647,6 +1805,10 @@ def run_tui(project_path: str = "") -> int:
             if event.button.id == "file":
                 event.stop()
                 self._open_folder_picker()
+                return
+            if event.button.id == "sample":
+                event.stop()
+                self._open_sample_picker()
                 return
             if event.button.id == "cancel":
                 event.stop()
@@ -1684,6 +1846,18 @@ def run_tui(project_path: str = "") -> int:
                 return
             self.controller.start_folder_selection(base)
             self._refresh(force_folder_value=True)
+            self._focus_command()
+
+        def _open_sample_picker(self) -> None:
+            command = self.query_one(CommandInput)
+            command.value = ""
+            if self.controller.selected_launch_mode is None:
+                self.controller.latest_message = "먼저 모드를 선택하세요. 1=초급자, 2=중급자, 3=고급자"
+                self._refresh()
+                self._focus_command()
+                return
+            self.controller.start_sample_selection()
+            self._refresh(force_sample_value=True)
             self._focus_command()
 
         def on_click(self) -> None:
@@ -1733,12 +1907,28 @@ def run_tui(project_path: str = "") -> int:
                 self._refresh(force_folder_value=True)
                 self._focus_command()
                 return
+            if self.controller.awaiting_sample_selection and event.key in {"up", "left", "shift+tab"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_sample_selection(-1)
+                self._refresh(force_sample_value=True)
+                self._focus_command()
+                return
             if self.controller.awaiting_folder_selection and event.key in {"down", "right"}:
                 event.stop()
                 if hasattr(event, "prevent_default"):
                     event.prevent_default()
                 self.controller.cycle_folder_selection(1)
                 self._refresh(force_folder_value=True)
+                self._focus_command()
+                return
+            if self.controller.awaiting_sample_selection and event.key in {"down", "right"}:
+                event.stop()
+                if hasattr(event, "prevent_default"):
+                    event.prevent_default()
+                self.controller.cycle_sample_selection(1)
+                self._refresh(force_sample_value=True)
                 self._focus_command()
                 return
             if event.key == "ctrl+space":
@@ -1859,7 +2049,12 @@ def run_tui(project_path: str = "") -> int:
             self._refresh()
             self._focus_command()
 
-        def _refresh(self, force_model_value: bool = False, force_folder_value: bool = False) -> None:
+        def _refresh(
+            self,
+            force_model_value: bool = False,
+            force_folder_value: bool = False,
+            force_sample_value: bool = False,
+        ) -> None:
             command = self.query_one(CommandInput)
             if self.controller.awaiting_model_selection:
                 command.placeholder = model_selection_placeholder(self.controller.available_models)
@@ -1871,6 +2066,11 @@ def run_tui(project_path: str = "") -> int:
                 highlighted = self.controller.highlighted_folder
                 if highlighted is not None and (force_folder_value or not command.value):
                     command.value = str(highlighted)
+                    command.cursor_position = len(command.value)
+            elif self.controller.awaiting_sample_selection:
+                command.placeholder = sample_selection_placeholder(SAMPLE_CHOICES)
+                if force_sample_value or not command.value:
+                    command.value = self.controller.highlighted_sample_command
                     command.cursor_position = len(command.value)
             else:
                 command_placeholder_for_mode(self.controller.agent_mode, self.controller.qwen_model)
@@ -1884,6 +2084,9 @@ def run_tui(project_path: str = "") -> int:
             file_button = self.query_one(FileButton)
             file_button.set_class(self.controller.agent_mode == "Build", "build")
             file_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            sample_button = self.query_one(SampleButton)
+            sample_button.set_class(self.controller.agent_mode == "Build", "build")
+            sample_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).replace_text(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
@@ -1910,9 +2113,11 @@ __all__ = [
     "CommandInput",
     "CancelButton",
     "FileButton",
+    "SampleButton",
     "discover_selectable_folders",
     "folder_selection_placeholder",
     "format_folder_choices",
+    "format_sample_choices",
     "ModeSelector",
     "SendButton",
     "LogView",
@@ -1928,6 +2133,7 @@ __all__ = [
     "is_right_click_event",
     "is_wizard_navigation",
     "model_selection_placeholder",
+    "sample_selection_placeholder",
     "normalize_input_path",
     "normalize_pasted_input",
     "normalize_path_text",

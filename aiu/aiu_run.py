@@ -33,6 +33,7 @@ from deep_agent.cli import (
     create_heavy_model_sample,
     create_large_model_samples,
     ensure_ai_studio_sample_runtime,
+    ensure_standard_ml_dl_template,
     format_beginner_tab,
     handle_logo_command,
     handle_advanced_input,
@@ -57,6 +58,7 @@ from deep_agent.tui import (
     format_folder_choices,
     format_chat_card,
     format_model_choices,
+    format_sample_choices,
     format_tui_chatbot_screen,
     format_tui_help_screen,
     format_tui_model_info,
@@ -64,6 +66,7 @@ from deep_agent.tui import (
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
+    sample_selection_placeholder,
     normalize_input_path,
     normalize_pasted_input,
     normalize_path_text,
@@ -1241,6 +1244,56 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertTrue((root / "saved_model" / "local_model.onnx").exists())
             self.assertEqual((root / "saved_model" / "local_model.onnx").read_text(encoding="utf-8"), "model")
 
+    def test_standard_ml_dl_template_creates_expected_structure(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+
+            change = ensure_standard_ml_dl_template(root, "pytorch")
+
+            self.assertEqual(change.status, "applied")
+            self.assertTrue((root / "aiu_custom" / "model_wrapper.py").exists())
+            self.assertTrue((root / "config" / "model_config.json").exists())
+            self.assertTrue((root / "config" / "train_config.json").exists())
+            self.assertTrue((root / "config" / "mlflow_config.json").exists())
+            self.assertTrue((root / "saved_model").is_dir())
+            self.assertTrue((root / "run_model.py").exists())
+            self.assertTrue((root / "train.py").exists())
+            self.assertIn("torch", (root / "requirements.txt").read_text(encoding="utf-8"))
+
+    def test_run_model_source_supports_train_mode_prepare_only(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_standard_ml_dl_template(root, "sklearn")
+
+            result = subprocess.run(
+                [sys.executable, "run_model.py", "--mode", "train", "--prepare-only"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("trained model artifact", result.stdout)
+            self.assertIn("local model prepared", result.stdout)
+            self.assertTrue(any((root / "saved_model").glob("local_model*.joblib")))
+
+    def test_sample_create_standard_template_json(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                output = handle_advanced_input("aiu sample create --kind standard --framework onnx --json")
+            finally:
+                os.chdir(cwd)
+
+            payload = json.loads(output)
+            created = Path(payload["created"][0])
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue((created / "run_model.py").exists())
+            self.assertTrue((created / "config" / "model_config.json").exists())
+            self.assertIn("onnx", (created / "requirements.txt").read_text(encoding="utf-8"))
+
     def test_apply_creates_requirements_when_missing(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1895,6 +1948,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('SendButton("SEND  Enter", id="send")', source)
         self.assertIn("FileButton", source)
         self.assertIn('FileButton("FILE", id="file")', source)
+        self.assertIn("SampleButton", source)
+        self.assertIn('SampleButton("SAMPLE", id="sample")', source)
         self.assertIn("CancelButton", source)
         self.assertIn('CancelButton("CANCEL", id="cancel"', source)
         self.assertIn('Vertical(id="input-area")', source)
@@ -1904,10 +1959,34 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('event.button.id == "file"', source)
         self.assertIn("self._open_folder_picker()", source)
         self.assertIn("self.controller.start_folder_selection(base)", source)
+        self.assertIn('event.button.id == "sample"', source)
+        self.assertIn("self._open_sample_picker()", source)
+        self.assertIn("self.controller.start_sample_selection()", source)
         self.assertIn('event.button.id == "cancel"', source)
         self.assertIn("self._cancel_chatbot_request()", source)
         self.assertIn('event.button.id != "send"', source)
         self.assertNotIn("Input.Submitted", source)
+
+    def test_tui_sample_button_selection_creates_selected_sample(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = self.beginner_tui("")
+                controller.submit("1")
+
+                message = controller.start_sample_selection()
+                self.assertIn("샘플 모델을 선택하세요", message)
+                self.assertIn("TensorFlow", format_sample_choices())
+                self.assertIn("1-9", sample_selection_placeholder())
+
+                output = controller.select_sample("2")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("pytorch-model", controller.project_path)
+            self.assertIn("Step 1", output)
+            self.assertTrue((Path(controller.project_path) / "model" / "pytorch-sample.pt").exists())
 
     def test_tui_chatbot_cancel_button_ignores_late_response(self):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
@@ -2568,6 +2647,31 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
+
+    def test_tui_chat_approved_standard_template_creates_ml_dl_structure(self):
+        class FakeRuntime:
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                return DeepAgentsRunResult("표준 템플릿 생성을 진행합니다.", False, error="offline")
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                controller = self.beginner_tui(str(root), deepagents_runtime=FakeRuntime())
+                controller.select_agent_mode("Chatbot")
+
+                output = controller.submit("승인하고 pytorch 표준 템플릿 만들어줘")
+            finally:
+                os.chdir(cwd)
+
+            self.assertIn("표준 템플릿", output)
+            self.assertTrue((root / "aiu_custom" / "model_wrapper.py").exists())
+            self.assertTrue((root / "config" / "train_config.json").exists())
+            self.assertTrue((root / "run_model.py").exists())
+            self.assertTrue((root / "train.py").exists())
+            self.assertIn("torch", (root / "requirements.txt").read_text(encoding="utf-8"))
 
     def test_tui_chat_autofix_leaves_manual_sora_artifact_issue(self):
         class FakeRuntime:

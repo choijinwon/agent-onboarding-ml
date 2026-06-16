@@ -1225,6 +1225,17 @@ def resolve_beginner_project_input(raw: str) -> tuple[str, str | None]:
                 title="대형 모델 테스트 샘플 10개를 생성하고 Step 1 검증을 완료했습니다.",
             ),
         )
+    if normalized.startswith("/sample standard") or normalized.startswith("sample standard") or normalized.startswith("/샘플 표준"):
+        parts = normalized.split()
+        framework = parts[-1] if len(parts) > 2 else "generic"
+        sample_path = create_standard_template_sample(sample_projects_root(), framework)
+        return (
+            str(sample_path),
+            "표준 ML/DL 템플릿 샘플을 생성했습니다.\n"
+            f"- 위치: {sample_path}\n"
+            "- 지원 흐름: pre-trained 모델 등록 / 직접 학습 후 모델 생성\n"
+            "- 초급자 Wizard가 이 경로로 계속 진행합니다.",
+        )
     if normalized in {"/sample all", "/samples", "/샘플 전체", "sample all", "samples", "샘플 전체"}:
         sample_paths = create_all_model_samples(sample_projects_root())
         first_path = sample_paths[0]
@@ -1271,6 +1282,8 @@ def build_beginner_intro() -> str:
         "- /sample sora-error",
         "- /sample heavy",
         "- /sample large10",
+        "- /sample standard",
+        "- /sample standard pytorch",
         "- /sample all",
         "- /sample matrix",
     ]
@@ -1405,6 +1418,8 @@ def ensure_ai_studio_sample_runtime(root: Path) -> None:
     config_path = root / "config.json"
     if not config_path.exists():
         config_path.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    ensure_standard_config_files(root)
+    ensure_read_write_directory(root / "saved_model")
     env_path = root / "ai_studio.env"
     if not env_path.exists():
         env_path.write_text(ai_studio_env_source(), encoding="utf-8")
@@ -2416,6 +2431,254 @@ def apply_add_mlflow_tracking_snippet(target: Path) -> AppliedChange:
 
 AI_STUDIO_REQUIREMENTS = ["mlflow", "cloudpickle", "pandas", "numpy"]
 
+STANDARD_TEMPLATE_FRAMEWORKS = {
+    "generic": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy"],
+        "artifact": "saved_model/local_model.bin",
+    },
+    "tensorflow": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "tensorflow"],
+        "artifact": "saved_model/tensorflow_model.keras",
+    },
+    "pytorch": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "torch"],
+        "artifact": "saved_model/pytorch_model.pt",
+    },
+    "sklearn": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "scikit-learn", "joblib"],
+        "artifact": "saved_model/sklearn_model.joblib",
+    },
+    "xgboost": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "xgboost"],
+        "artifact": "saved_model/xgboost_model.json",
+    },
+    "onnx": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "onnx", "onnxruntime"],
+        "artifact": "saved_model/onnx_model.onnx",
+    },
+    "huggingface": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "transformers", "safetensors"],
+        "artifact": "saved_model/huggingface_model.safetensors",
+    },
+    "sora": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "torch", "opencv-python"],
+        "artifact": "saved_model/sora_style_video_model.onnx",
+    },
+    "llm": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "transformers", "safetensors"],
+        "artifact": "saved_model/llm_adapter.safetensors",
+    },
+    "vision": {
+        "requirements": ["mlflow", "cloudpickle", "pandas", "numpy", "torch", "opencv-python"],
+        "artifact": "saved_model/vision_embedding.pt",
+    },
+}
+
+STANDARD_TEMPLATE_ALIASES = {
+    "tf": "tensorflow",
+    "텐서플로우": "tensorflow",
+    "torch": "pytorch",
+    "파이토치": "pytorch",
+    "사이킷런": "sklearn",
+    "scikit-learn": "sklearn",
+    "소라": "sora",
+    "hf": "huggingface",
+    "llm_adapter": "llm",
+    "비전": "vision",
+}
+
+
+def normalize_standard_framework(value: str | None) -> str:
+    normalized = (value or "generic").strip().lower()
+    normalized = STANDARD_TEMPLATE_ALIASES.get(normalized, normalized)
+    if normalized in STANDARD_TEMPLATE_FRAMEWORKS:
+        return normalized
+    return "generic"
+
+
+def standard_model_config(framework: str = "generic") -> dict[str, object]:
+    framework = normalize_standard_framework(framework)
+    spec = STANDARD_TEMPLATE_FRAMEWORKS[framework]
+    return {
+        "framework": framework,
+        "model_flow": "pretrained_or_train",
+        "pretrained": {
+            "description": "Use this when the user already has a model artifact.",
+            "source_path": "",
+        },
+        "direct_train": {
+            "description": "Use this when train.py creates the model artifact locally.",
+            "entrypoint": "train.py",
+            "output_path": spec["artifact"],
+        },
+        "save_path": "saved_model",
+        "artifact_path": "ai_studio",
+        "code_path": ["aiu_custom"],
+        "requirements": "requirements.txt",
+    }
+
+
+def standard_train_config(framework: str = "generic") -> dict[str, object]:
+    return {
+        "framework": normalize_standard_framework(framework),
+        "data": {
+            "train_path": "data/train",
+            "test_path": "data/test",
+            "input_example_path": "input_example.json",
+        },
+        "params": {
+            "epochs": 10,
+            "learning_rate": 0.001,
+            "batch_size": 64,
+            "optimizer": "SGD",
+            "loss_function": "LossFunction",
+            "metric_function": "MetricFunction",
+        },
+    }
+
+
+def standard_mlflow_config() -> dict[str, object]:
+    return {
+        "tracking_url": "${MLFLOW_TRACKING_URL}",
+        "tracking_username": "${MLFLOW_TRACKING_USERNAME}",
+        "tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
+        "experiment_name": "${MLFLOW_EXPERIMENT_NAME}",
+        "registered_model_name": "${MLFLOW_REGISTER_MODEL_NAME}",
+        "local_default_tracking_uri": "file:./mlruns",
+    }
+
+
+def ensure_standard_config_files(root: Path, framework: str = "generic") -> list[str]:
+    created: list[str] = []
+    config_dir = root / "config"
+    ensure_read_write_directory(config_dir)
+    files = {
+        "config/model_config.json": standard_model_config(framework),
+        "config/train_config.json": standard_train_config(framework),
+        "config/mlflow_config.json": standard_mlflow_config(),
+    }
+    for relative, payload in files.items():
+        path = root / relative
+        if not path.exists():
+            path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            created.append(relative)
+    return created
+
+
+def standard_train_source(framework: str = "generic") -> str:
+    framework = normalize_standard_framework(framework)
+    artifact = STANDARD_TEMPLATE_FRAMEWORKS[framework]["artifact"]
+    return f'''"""Standard AIU training entrypoint.
+
+This file is safe for local POC testing. Replace the dummy training logic with
+your TensorFlow/PyTorch/scikit-learn/etc. code when moving to a real model.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+
+def ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def main() -> None:
+    framework = os.getenv("AIU_FRAMEWORK", "{framework}")
+    output_dir = ensure_dir(Path(os.getenv("AIU_TRAIN_OUTPUT_DIR", "saved_model")))
+    artifact_path = Path(os.getenv("AIU_TRAIN_ARTIFACT_PATH", "{artifact}"))
+    if not artifact_path.is_absolute():
+        artifact_path = Path.cwd() / artifact_path
+    ensure_dir(artifact_path.parent)
+    artifact_path.write_text(
+        "AIU dummy model artifact\\n"
+        f"framework={{framework}}\\n",
+        encoding="utf-8",
+    )
+    summary = {{
+        "framework": framework,
+        "output_dir": str(output_dir),
+        "artifact_path": str(artifact_path),
+        "mode": "direct_train",
+    }}
+    (output_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"trained model artifact: {{artifact_path}}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> AppliedChange:
+    framework = normalize_standard_framework(framework)
+    created: list[str] = []
+    updated: list[str] = []
+    ensure_read_write_directory(root)
+    ensure_read_write_directory(root / "aiu_custom")
+    ensure_read_write_directory(root / "saved_model")
+    created.extend(ensure_standard_config_files(root, framework))
+
+    files = {
+        "config.json": json.dumps(default_ai_studio_config(framework), indent=2, ensure_ascii=False) + "\n",
+        "ai_studio.env": ai_studio_env_source(),
+        "input_example.json": json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n",
+        "aiu_custom/__init__.py": "from .model_wrapper import ModelWrapper\n",
+        "aiu_custom/model_wrapper.py": ai_studio_model_wrapper_source(),
+        "mlflow_ai_studio_logging.py": ai_studio_logging_source(),
+        "run_model.py": run_model_source(),
+        "train.py": standard_train_source(framework),
+    }
+    for relative, content in files.items():
+        path = root / relative
+        if not path.exists():
+            path.write_text(content, encoding="utf-8")
+            created.append(relative)
+        elif relative == "run_model.py" and is_managed_run_model(path) and "--mode" not in safe_read_text(path):
+            path.write_text(content, encoding="utf-8")
+            updated.append(relative)
+
+    requirements = list(STANDARD_TEMPLATE_FRAMEWORKS[framework]["requirements"])
+    if ensure_requirement_lines(root / "requirements.txt", requirements):
+        updated.append("requirements.txt")
+
+    if not created and not updated:
+        return AppliedChange(
+            code="CREATE_STANDARD_ML_DL_TEMPLATE",
+            target=str(root),
+            status="skipped",
+            message=f"{framework} 표준 템플릿이 이미 준비되어 있습니다.",
+        )
+    parts = []
+    if created:
+        parts.append("생성: " + ", ".join(created))
+    if updated:
+        parts.append("수정: " + ", ".join(updated))
+    return AppliedChange(
+        code="CREATE_STANDARD_ML_DL_TEMPLATE",
+        target=str(root),
+        status="applied",
+        message=f"{framework} 표준 ML/DL 템플릿을 준비했습니다. " + " / ".join(parts),
+    )
+
+
+def create_standard_template_sample(root: Path, framework: str = "generic") -> Path:
+    framework = normalize_standard_framework(framework)
+    target = root / f"standard-{framework}-template"
+    ensure_standard_ml_dl_template(target, framework)
+    (target / "README.md").write_text(
+        f"# AIU Standard {framework} Template\n\n"
+        "This sample supports both flows:\n\n"
+        "- `python run_model.py --mode pretrained --model <artifact> --prepare-only`\n"
+        "- `python run_model.py --mode train --prepare-only`\n"
+        "- `python run_model.py --mode train --register --dry-run`\n",
+        encoding="utf-8",
+    )
+    return target
+
 
 def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     created: list[str] = []
@@ -2425,6 +2688,9 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     if not config_path.exists():
         config_path.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         created.append("config.json")
+    for item in ensure_standard_config_files(root):
+        created.append(item)
+    ensure_read_write_directory(root / "saved_model")
 
     env_path = root / "ai_studio.env"
     if not env_path.exists():
@@ -2510,8 +2776,14 @@ def is_managed_ai_studio_logging(path: Path) -> bool:
     return "AI Studio MLflow logging template." in content
 
 
-def default_ai_studio_config() -> dict[str, object]:
+def default_ai_studio_config(framework: str = "generic") -> dict[str, object]:
+    framework = normalize_standard_framework(framework)
     return {
+        "template": {
+            "version": "standard-v1",
+            "framework": framework,
+            "model_flow": "pretrained_or_train",
+        },
         "mlflow_tracking_url": "${MLFLOW_TRACKING_URL}",
         "mlflow_tracking_username": "${MLFLOW_TRACKING_USERNAME}",
         "mlflow_tracking_password": "${MLFLOW_TRACKING_PASSWORD}",
@@ -2528,10 +2800,12 @@ def default_ai_studio_config() -> dict[str, object]:
             "artifact_path": "ai_studio",
             "code_path": ["aiu_custom"],
             "requirements": "requirements.txt",
+            "config_path": "config/model_config.json",
         },
         "execution": {
             "entrypoint": "run_model.py",
             "blocked_entrypoints": ["train.py"],
+            "supported_modes": ["pretrained", "train"],
         },
         "training": {
             "epochs": 10,
@@ -2743,10 +3017,15 @@ if __name__ == "__main__":
 
 
 def run_model_source() -> str:
-    return '''"""Prepare a local model artifact, then run AI Studio MLflow logging.
+    return '''"""Run AI Studio MLflow model logging with an environment file.
+
+This runner supports two safe onboarding flows:
+- pretrained: copy an existing model artifact into saved_model/
+- train: run train.py locally, then use the generated artifact
 
 Usage:
   python run_model.py
+  python run_model.py --mode train --prepare-only
   python run_model.py --model ./model/my-model.onnx
   python run_model.py --env-file ai_studio.env --config config.json --register
 """
@@ -2758,6 +3037,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -2843,25 +3123,94 @@ def resolve_model_source(config: dict, explicit_model: str = "") -> Path:
     )
 
 
+def unique_target_path(target: Path) -> Path:
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    for index in range(2, 1000):
+        candidate = parent / f"{stem}_{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"저장 대상 경로를 만들 수 없습니다: {target}")
+
+
 def prepare_local_model(source: Path, config: dict) -> Path:
     config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
     save_root = Path(str(config_model.get("save_path") or "saved_model"))
     ensure_read_write_directory(save_root)
     if source.is_dir():
-        target = save_root / "local_model"
-        if target.exists():
-            shutil.rmtree(target)
+        target = unique_target_path(save_root / "local_model")
         shutil.copytree(source, target)
         return target.resolve()
 
     suffix = source.suffix or ".bin"
-    target = save_root / f"local_model{suffix}"
+    target = unique_target_path(save_root / f"local_model{suffix}")
     shutil.copy2(source, target)
     return target.resolve()
 
 
+def resolve_train_output(config: dict, framework: str = "") -> Path:
+    config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
+    save_root = Path(str(config_model.get("save_path") or "saved_model"))
+    model_config_path = Path(str(config_model.get("config_path") or "config/model_config.json"))
+    output_path = ""
+    if model_config_path.exists():
+        model_config = load_config(model_config_path)
+        direct_train = model_config.get("direct_train", {}) if isinstance(model_config.get("direct_train", {}), dict) else {}
+        output_path = str(direct_train.get("output_path") or "")
+    if not output_path:
+        safe_framework = framework or "generic"
+        output_path = str(save_root / f"{safe_framework}_trained_model.bin")
+    output = Path(output_path)
+    if not output.is_absolute():
+        output = Path.cwd() / output
+    return output
+
+
+def run_training(config: dict, framework: str = "") -> Path:
+    train_path = Path("train.py")
+    if not train_path.exists():
+        raise FileNotFoundError("train.py가 없습니다. 직접 학습 모드는 train.py가 필요합니다.")
+    config_model = config.get("model", {}) if isinstance(config.get("model", {}), dict) else {}
+    save_root = Path(str(config_model.get("save_path") or "saved_model"))
+    ensure_read_write_directory(save_root)
+    output_path = resolve_train_output(config, framework)
+    ensure_read_write_directory(output_path.parent)
+    env = os.environ.copy()
+    env["AIU_TRAIN_OUTPUT_DIR"] = str(save_root)
+    env["AIU_FRAMEWORK"] = framework or env.get("AIU_FRAMEWORK", "generic")
+    env["AIU_TRAIN_ARTIFACT_PATH"] = str(output_path)
+    result = subprocess.run(
+        [sys.executable, str(train_path)],
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print(result.stderr.strip(), file=sys.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(f"train.py 실행 실패: exit={result.returncode}")
+    if output_path.exists():
+        return output_path.resolve()
+    model_files = [
+        path
+        for path in save_root.rglob("*")
+        if path.is_file() and path.suffix.lower() in MODEL_SUFFIXES
+    ]
+    if model_files:
+        return sorted(model_files, key=lambda item: item.stat().st_mtime, reverse=True)[0].resolve()
+    raise FileNotFoundError(f"학습 산출물을 찾지 못했습니다: {output_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare local model and run AI Studio MLflow logging.")
+    parser.add_argument("--mode", choices=["pretrained", "train"], default="pretrained", help="Model flow to run")
+    parser.add_argument("--framework", default="", help="Framework label for train mode")
     parser.add_argument("--env-file", default="ai_studio.env", help="AI Studio environment file path")
     parser.add_argument("--config", default="config.json", help="AI Studio config file path")
     parser.add_argument("--model", default="", help="Existing local model file or directory path")
@@ -2875,7 +3224,10 @@ def main() -> None:
     config = load_config(config_path)
     os.environ["AI_STUDIO_CONFIG_PATH"] = str(config_path)
 
-    source_model = resolve_model_source(config, args.model)
+    if args.mode == "train":
+        source_model = run_training(config, args.framework)
+    else:
+        source_model = resolve_model_source(config, args.model)
     local_model = prepare_local_model(source_model, config)
     os.environ["AI_STUDIO_LOCAL_MODEL_PATH"] = str(local_model)
     print(f"local model prepared: {local_model}")
@@ -3410,16 +3762,19 @@ def handle_sample_command(parts: list[str]) -> str:
         return format_sample_catalog(payload)
     if action == "create":
         kind = option_value(parts, "--kind") or "all"
+        framework = option_value(parts, "--framework") or option_value(parts, "-f") or "generic"
         if kind in {"all", "matrix"}:
             paths = create_all_model_samples(root)
         elif kind in {"large10", "big10", "heavy10"}:
             paths = create_large_model_samples(root)
+        elif kind in {"standard", "template", "ml-dl-template"}:
+            paths = [create_standard_template_sample(root, framework)]
         elif kind in SAMPLE_MODEL_SPECS:
             paths = [create_model_sample(root / SAMPLE_MODEL_SPECS[kind].directory, SAMPLE_MODEL_SPECS[kind])]
         else:
             message = f"unknown sample kind: {kind}"
             if as_json:
-                return json.dumps({"status": "error", "message": message, "available_kinds": sorted(SAMPLE_MODEL_SPECS)}, ensure_ascii=False, indent=2)
+                return json.dumps({"status": "error", "message": message, "available_kinds": sorted(SAMPLE_MODEL_SPECS) + ["standard", "large10"]}, ensure_ascii=False, indent=2)
             return message
         payload = {"status": "ok", "created": [str(path) for path in paths], "count": len(paths)}
         if as_json:
@@ -3431,6 +3786,15 @@ def handle_sample_command(parts: list[str]) -> str:
 def sample_catalog_as_dict() -> dict[str, object]:
     return {
         "sample_root": str(sample_projects_root()),
+        "standard_templates": [
+            {
+                "kind": "standard",
+                "framework": framework,
+                "artifact_path": str(spec["artifact"]),
+                "command": f"aiu sample create --kind standard --framework {framework}",
+            }
+            for framework, spec in STANDARD_TEMPLATE_FRAMEWORKS.items()
+        ],
         "basic": [
             {
                 "kind": spec.kind,
@@ -3461,9 +3825,18 @@ def format_sample_catalog(payload: dict[str, object]) -> str:
         "- create all: aiu sample create --kind all",
         "- create one: aiu sample create --kind tensorflow",
         "- create large10: aiu sample create --kind large10",
+        "- create standard: aiu sample create --kind standard --framework pytorch",
+        "",
+        "Standard templates:",
+    ]
+    rows.extend(
+        f"- {item['framework']}: {item['command']}"
+        for item in payload.get("standard_templates", [])
+    )
+    rows.extend([
         "",
         "Basic samples:",
-    ]
+    ])
     for item in payload["basic"]:
         rows.append(f"- {item['kind']}: {item['title']} ({item['artifact_path']}, {item['artifact_size']})")
     rows.append("")
