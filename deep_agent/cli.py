@@ -224,7 +224,7 @@ SAMPLE_MODEL_SPECS = {
         kind="heavy",
         title="대형 ONNX 모델",
         directory="heavy-model",
-        artifact_path="model/heavy-model.onnx",
+        artifact_path="saved_model/heavy-model.onnx",
         artifact_size_bytes=DEFAULT_HEAVY_SAMPLE_BYTES,
         requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "pandas==2.2.3"],
         train_body=(
@@ -232,7 +232,7 @@ SAMPLE_MODEL_SPECS = {
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/heavy-model.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/heavy-model.onnx')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('model_path', args.model_path)\n"
@@ -246,7 +246,7 @@ SAMPLE_MODEL_SPECS = {
         kind="tensorflow",
         title="TensorFlow Keras 모델",
         directory="tensorflow-model",
-        artifact_path="model/tensorflow-sample.keras",
+        artifact_path="saved_model/tensorflow-sample.keras",
         artifact_size_bytes=24 * 1024 * 1024,
         requirements=["tensorflow==2.17.0", "numpy==1.26.4"],
         train_body=(
@@ -255,7 +255,7 @@ SAMPLE_MODEL_SPECS = {
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
             "    parser.add_argument('--epochs', type=int, default=1)\n"
-            "    parser.add_argument('--model-path', default='model/tensorflow-sample.keras')\n"
+            "    parser.add_argument('--model-path', default='saved_model/tensorflow-sample.keras')\n"
             "    args = parser.parse_args()\n"
             "    print(f'TensorFlow sample model: {args.model_path}, epochs={args.epochs}')\n\n"
             "if __name__ == '__main__':\n"
@@ -266,7 +266,7 @@ SAMPLE_MODEL_SPECS = {
         kind="pytorch",
         title="PyTorch 모델",
         directory="pytorch-model",
-        artifact_path="model/pytorch-sample.pt",
+        artifact_path="saved_model/pytorch-sample.pt",
         artifact_size_bytes=32 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "torch==2.5.1", "numpy==1.26.4"],
         train_body=(
@@ -275,7 +275,7 @@ SAMPLE_MODEL_SPECS = {
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
             "    parser.add_argument('--batch-size', type=int, default=8)\n"
-            "    parser.add_argument('--model-path', default='model/pytorch-sample.pt')\n"
+            "    parser.add_argument('--model-path', default='saved_model/pytorch-sample.pt')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'pytorch')\n"
@@ -289,7 +289,7 @@ SAMPLE_MODEL_SPECS = {
         kind="sklearn",
         title="scikit-learn Joblib 모델",
         directory="sklearn-model",
-        artifact_path="model/sklearn-sample.joblib",
+        artifact_path="saved_model/sklearn-sample.joblib",
         artifact_size_bytes=4 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "joblib==1.4.2"],
         train_body=(
@@ -297,7 +297,7 @@ SAMPLE_MODEL_SPECS = {
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/sklearn-sample.joblib')\n"
+            "    parser.add_argument('--model-path', default='saved_model/sklearn-sample.joblib')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'scikit-learn')\n"
@@ -311,7 +311,7 @@ SAMPLE_MODEL_SPECS = {
         kind="onnx",
         title="ONNX 모델",
         directory="onnx-model",
-        artifact_path="model/onnx-sample.onnx",
+        artifact_path="saved_model/onnx-sample.onnx",
         artifact_size_bytes=16 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "onnx==1.17.0", "onnxruntime==1.20.1"],
         train_body=(
@@ -319,7 +319,7 @@ SAMPLE_MODEL_SPECS = {
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/onnx-sample.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/onnx-sample.onnx')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'onnx')\n"
@@ -332,7 +332,7 @@ SAMPLE_MODEL_SPECS = {
         kind="sora",
         title="Sora 스타일 비디오 생성 모델",
         directory="sora-video-model",
-        artifact_path="model/sora-video-sample.onnx",
+        artifact_path="saved_model/sora-video-sample.onnx",
         artifact_size_bytes=64 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "torch==2.5.1", "opencv-python==4.10.0.84"],
         train_body=(
@@ -342,7 +342,7 @@ SAMPLE_MODEL_SPECS = {
             "    parser = argparse.ArgumentParser()\n"
             "    parser.add_argument('--prompt', default='a cinematic product demo')\n"
             "    parser.add_argument('--duration-seconds', type=int, default=4)\n"
-            "    parser.add_argument('--model-path', default='model/sora-video-sample.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/sora-video-sample.onnx')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('model_family', 'sora-style-video-generation')\n"
@@ -382,7 +382,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_tensorflow",
         title="대형 TensorFlow Keras 모델",
         directory="large-tensorflow-model",
-        artifact_path="model/large-tensorflow.keras",
+        artifact_path="saved_model/large-tensorflow.keras",
         artifact_size_bytes=96 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "tensorflow==2.17.0", "numpy==1.26.4"],
         train_body=(
@@ -390,7 +390,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/large-tensorflow.keras')\n"
+            "    parser.add_argument('--model-path', default='saved_model/large-tensorflow.keras')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'tensorflow')\n"
@@ -403,7 +403,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_pytorch",
         title="대형 PyTorch 체크포인트",
         directory="large-pytorch-checkpoint",
-        artifact_path="model/large-pytorch.pt",
+        artifact_path="saved_model/large-pytorch.pt",
         artifact_size_bytes=128 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "torch==2.5.1", "numpy==1.26.4"],
         train_body=(
@@ -411,7 +411,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/large-pytorch.pt')\n"
+            "    parser.add_argument('--model-path', default='saved_model/large-pytorch.pt')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'pytorch')\n"
@@ -424,7 +424,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_onnx_transformer",
         title="대형 ONNX Transformer 모델",
         directory="large-onnx-transformer",
-        artifact_path="model/large-transformer.onnx",
+        artifact_path="saved_model/large-transformer.onnx",
         artifact_size_bytes=192 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "onnx==1.17.0", "onnxruntime==1.20.1"],
         train_body=(
@@ -432,7 +432,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/large-transformer.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/large-transformer.onnx')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('architecture', 'transformer')\n"
@@ -445,7 +445,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_sklearn_bundle",
         title="대형 scikit-learn 번들",
         directory="large-sklearn-bundle",
-        artifact_path="model/large-sklearn.joblib",
+        artifact_path="saved_model/large-sklearn.joblib",
         artifact_size_bytes=72 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "joblib==1.4.2"],
         train_body=(
@@ -453,7 +453,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/large-sklearn.joblib')\n"
+            "    parser.add_argument('--model-path', default='saved_model/large-sklearn.joblib')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('framework', 'scikit-learn')\n"
@@ -466,7 +466,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_sora_video",
         title="대형 Sora 스타일 비디오 모델",
         directory="large-sora-video-model",
-        artifact_path="model/large-sora-video.onnx",
+        artifact_path="saved_model/large-sora-video.onnx",
         artifact_size_bytes=256 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "torch==2.5.1", "opencv-python==4.10.0.84"],
         train_body=(
@@ -474,7 +474,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/large-sora-video.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/large-sora-video.onnx')\n"
             "    parser.add_argument('--duration-seconds', type=int, default=8)\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
@@ -489,7 +489,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_vision_embedding",
         title="대형 Vision Embedding 모델",
         directory="large-vision-embedding",
-        artifact_path="model/vision-embedding.pt",
+        artifact_path="saved_model/vision-embedding.pt",
         artifact_size_bytes=144 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "torch==2.5.1", "pillow==11.0.0"],
         train_body=(
@@ -497,7 +497,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/vision-embedding.pt')\n"
+            "    parser.add_argument('--model-path', default='saved_model/vision-embedding.pt')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('task', 'vision-embedding')\n"
@@ -510,7 +510,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_llm_adapter",
         title="대형 LLM Adapter 모델",
         directory="large-llm-adapter",
-        artifact_path="model/llm-adapter.safetensors",
+        artifact_path="saved_model/llm-adapter.safetensors",
         artifact_size_bytes=160 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "transformers==4.46.3", "safetensors==0.4.5"],
         train_body=(
@@ -518,7 +518,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/llm-adapter.safetensors')\n"
+            "    parser.add_argument('--model-path', default='saved_model/llm-adapter.safetensors')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('task', 'llm-adapter')\n"
@@ -531,7 +531,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_recommender",
         title="대형 추천 모델",
         directory="large-recommender-model",
-        artifact_path="model/recommender.pkl",
+        artifact_path="saved_model/recommender.pkl",
         artifact_size_bytes=80 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "scikit-learn==1.5.2", "pandas==2.2.3"],
         train_body=(
@@ -539,7 +539,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/recommender.pkl')\n"
+            "    parser.add_argument('--model-path', default='saved_model/recommender.pkl')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('task', 'recommender')\n"
@@ -552,7 +552,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_timeseries",
         title="대형 시계열 예측 모델",
         directory="large-timeseries-forecast",
-        artifact_path="model/timeseries-forecast.onnx",
+        artifact_path="saved_model/timeseries-forecast.onnx",
         artifact_size_bytes=112 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "onnx==1.17.0", "pandas==2.2.3"],
         train_body=(
@@ -560,7 +560,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/timeseries-forecast.onnx')\n"
+            "    parser.add_argument('--model-path', default='saved_model/timeseries-forecast.onnx')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('task', 'time-series-forecasting')\n"
@@ -573,7 +573,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
         kind="large_tabular_ensemble",
         title="대형 Tabular Ensemble 모델",
         directory="large-tabular-ensemble",
-        artifact_path="model/tabular-ensemble.joblib",
+        artifact_path="saved_model/tabular-ensemble.joblib",
         artifact_size_bytes=88 * 1024 * 1024,
         requirements=["mlflow==2.17.0", "xgboost==2.1.2", "joblib==1.4.2"],
         train_body=(
@@ -581,7 +581,7 @@ LARGE_MODEL_SAMPLE_SPECS = (
             "import mlflow\n\n"
             "def main() -> None:\n"
             "    parser = argparse.ArgumentParser()\n"
-            "    parser.add_argument('--model-path', default='model/tabular-ensemble.joblib')\n"
+            "    parser.add_argument('--model-path', default='saved_model/tabular-ensemble.joblib')\n"
             "    args = parser.parse_args()\n"
             "    with mlflow.start_run():\n"
             "        mlflow.log_param('task', 'tabular-ensemble')\n"
@@ -1536,6 +1536,7 @@ def create_model_sample(root: Path, spec: SampleModelSpec) -> Path:
         encoding="utf-8",
     )
     ensure_sparse_file(artifact, spec.artifact_size_bytes)
+    ensure_sample_project_layout(root, spec.kind, spec.artifact_path)
     return root
 
 
@@ -1568,9 +1569,34 @@ def ensure_ai_studio_sample_runtime(root: Path) -> None:
     run_model_path = root / "run_model.py"
     if not run_model_path.exists():
         run_model_path.write_text(run_model_source(), encoding="utf-8")
-    serving_path = root / "serving_app.py"
+    ensure_sample_project_layout(root)
+
+
+def ensure_sample_project_layout(root: Path, framework: str = "generic", artifact_path: str = "saved_model/local_model.bin") -> list[str]:
+    created: list[str] = []
+    for directory in ("aiu_custom", "config", "local_serving", "saved_model"):
+        path = root / directory
+        if not path.exists():
+            created.append(directory + "/")
+        ensure_read_write_directory(path)
+
+    serving_path = root / "local_serving" / "serving_app.py"
     if not serving_path.exists():
         serving_path.write_text(serving_app_source(), encoding="utf-8")
+        created.append("local_serving/serving_app.py")
+    serving_readme = root / "local_serving" / "README.md"
+    if not serving_readme.exists():
+        serving_readme.write_text(local_serving_readme_source(), encoding="utf-8")
+        created.append("local_serving/README.md")
+    get_pip_path = root / "get-pip.py"
+    if not get_pip_path.exists():
+        get_pip_path.write_text(get_pip_placeholder_source(), encoding="utf-8")
+        created.append("get-pip.py")
+    summary_path = root / "model_summary.txt"
+    if not summary_path.exists():
+        summary_path.write_text(model_summary_source(framework, artifact_path), encoding="utf-8")
+        created.append("model_summary.txt")
+    return created
 
 
 def ensure_sparse_file(path: Path, size_bytes: int) -> None:
@@ -2452,6 +2478,13 @@ def format_model_artifact_detail(model_artifacts: list[str], scan: ProjectScan) 
     return f"{first} ({format_bytes(size)}) 외 {len(model_artifacts) - 1}개"
 
 
+def find_serving_app_path(root: Path) -> Path | None:
+    for candidate in (root / "local_serving" / "serving_app.py", root / "serving_app.py"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def build_local_serving_plan(
     project_path: str,
     exists: bool,
@@ -2463,7 +2496,8 @@ def build_local_serving_plan(
     host = "127.0.0.1"
     port = 8000
     root = resolve_filesystem_path(project_path or ".")
-    serving_app_exists = root.is_dir() and (root / "serving_app.py").exists()
+    serving_app_path = find_serving_app_path(root)
+    serving_app_exists = serving_app_path is not None
     checks: list[RegistrationCheck] = []
     notes = [
         "기본 방식은 FastAPI 호환 로컬 서버 기준입니다.",
@@ -2505,7 +2539,7 @@ def build_local_serving_plan(
             "serving_app",
             "로컬 서빙 앱",
             "pass" if serving_app_exists else "warn",
-            "serving_app.py 확인" if serving_app_exists else "serve 명령 또는 적용 단계에서 serving_app.py 생성 필요",
+            str(serving_app_path.relative_to(root)) if serving_app_path else "serve 명령 또는 적용 단계에서 local_serving/serving_app.py 생성 필요",
         )
     )
     checks.append(RegistrationCheck("serving_port", "로컬 포트", "pass", f"{host}:{port} 사용 예정"))
@@ -2648,13 +2682,13 @@ def build_serving_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
             )
         )
 
-    if not (root / "serving_app.py").exists():
+    if find_serving_app_path(root) is None:
         previews.append(
             FixPreview(
                 code="CREATE_LOCAL_SERVING_APP",
                 title="로컬 서빙 앱 생성",
-                target="serving_app.py",
-                action="FastAPI 기반 serving_app.py 템플릿을 생성합니다.",
+                target="local_serving/serving_app.py",
+                action="FastAPI 기반 local_serving/serving_app.py 템플릿을 생성합니다.",
                 preview_lines=["+ FastAPI app", "+ GET /health", "+ POST /predict"],
             )
         )
@@ -2853,6 +2887,9 @@ def ai_studio_scaffold_missing(project_path: str) -> bool:
         root / "input_example.json",
         root / "aiu_custom" / "model_wrapper.py",
         root / "mlflow_ai_studio_logging.py",
+        root / "local_serving" / "serving_app.py",
+        root / "get-pip.py",
+        root / "model_summary.txt",
         root / "run_model.py",
     ]
     return any(not path.exists() for path in required_paths)
@@ -3185,6 +3222,7 @@ def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> Ap
     ensure_read_write_directory(root / "aiu_custom")
     ensure_read_write_directory(root / "saved_model")
     created.extend(ensure_standard_config_files(root, framework))
+    created.extend(ensure_sample_project_layout(root, framework, str(STANDARD_TEMPLATE_FRAMEWORKS[framework]["artifact"])))
 
     files = {
         "config.json": json.dumps(default_ai_studio_config(framework), indent=2, ensure_ascii=False) + "\n",
@@ -3195,7 +3233,6 @@ def ensure_standard_ml_dl_template(root: Path, framework: str = "generic") -> Ap
         "aiu_custom/model_wrapper.py": "from .predict import ModelWrapper\n",
         "mlflow_ai_studio_logging.py": ai_studio_logging_source(),
         "run_model.py": run_model_source(),
-        "serving_app.py": serving_app_source(),
         "train.py": standard_train_source(framework),
     }
     for relative, content in files.items():
@@ -3257,6 +3294,7 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
     for item in ensure_standard_config_files(root):
         created.append(item)
     ensure_read_write_directory(root / "saved_model")
+    created.extend(ensure_sample_project_layout(root))
 
     env_path = root / "ai_studio.env"
     if not env_path.exists():
@@ -3301,11 +3339,6 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
         run_model_path.write_text(run_model_source(), encoding="utf-8")
         updated.append("run_model.py")
 
-    serving_path = root / "serving_app.py"
-    if not serving_path.exists():
-        serving_path.write_text(serving_app_source(), encoding="utf-8")
-        created.append("serving_app.py")
-
     requirements_path = root / "requirements.txt"
     changed_requirements = ensure_requirement_lines(requirements_path, AI_STUDIO_REQUIREMENTS)
     if changed_requirements:
@@ -3332,20 +3365,25 @@ def apply_create_ai_studio_mlflow_scaffold(root: Path) -> AppliedChange:
 
 
 def ensure_serving_app(root: Path) -> AppliedChange:
-    serving_path = root / "serving_app.py"
-    if serving_path.exists():
+    existing = find_serving_app_path(root)
+    if existing is not None:
         return AppliedChange(
             code="CREATE_LOCAL_SERVING_APP",
-            target=str(serving_path),
+            target=str(existing),
             status="skipped",
-            message="serving_app.py가 이미 있습니다.",
+            message=f"{existing.relative_to(root)}가 이미 있습니다.",
         )
-    serving_path.write_text(serving_app_source(), encoding="utf-8")
+    created = ensure_sample_project_layout(root)
+    serving_path = root / "local_serving" / "serving_app.py"
     return AppliedChange(
         code="CREATE_LOCAL_SERVING_APP",
         target=str(serving_path),
-        status="applied",
-        message="로컬 서빙용 FastAPI 앱을 생성했습니다.",
+        status="applied" if "local_serving/serving_app.py" in created else "skipped",
+        message=(
+            "local_serving/serving_app.py 로컬 서빙용 FastAPI 앱을 생성했습니다."
+            if "local_serving/serving_app.py" in created
+            else "local_serving/serving_app.py가 이미 있습니다."
+        ),
     )
 
 
@@ -3399,6 +3437,7 @@ def default_ai_studio_config(framework: str = "generic") -> dict[str, object]:
         },
         "execution": {
             "entrypoint": "run_model.py",
+            "serving_entrypoint": "local_serving/serving_app.py",
             "blocked_entrypoints": ["train.py"],
             "supported_modes": ["pretrained", "train"],
         },
@@ -3462,11 +3501,65 @@ class ModelWrapper(mlflow.pyfunc.PythonModel):
 '''
 
 
+def local_serving_readme_source() -> str:
+    return """# Local Serving
+
+로컬 모델 서빙 테스트용 폴더입니다.
+
+실행 예시:
+
+```bash
+python -m uvicorn local_serving.serving_app:app --host 127.0.0.1 --port 8000
+```
+
+엔드포인트:
+- `GET /health`
+- `GET /metadata`
+- `POST /predict`
+"""
+
+
+def get_pip_placeholder_source() -> str:
+    return '''"""Offline placeholder for get-pip.py.
+
+This sample is generated for closed-network AI Studio onboarding.
+Replace this file with your approved internal get-pip.py artifact when a
+Windows 10/11 environment needs local pip bootstrapping.
+"""
+
+from __future__ import annotations
+
+
+def main() -> int:
+    print("This is a placeholder. Replace it with an approved internal get-pip.py before use.")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def model_summary_source(framework: str = "generic", artifact_path: str = "saved_model/local_model.bin") -> str:
+    framework = normalize_standard_framework(framework)
+    return (
+        "AIU Model Summary\n"
+        f"- framework: {framework}\n"
+        "- model_flow: pretrained_or_train\n"
+        f"- artifact_path: {artifact_path}\n"
+        "- input_example: input_example.json\n"
+        "- runtime_entrypoint: run_model.py\n"
+        "- serving_entrypoint: local_serving/serving_app.py\n"
+        "- mlflow_artifact_path: ai_studio\n"
+        "- params: epochs=10, learning_rate=0.001, batch_size=64, optimizer=SGD\n"
+    )
+
+
 def serving_app_source() -> str:
     return '''"""Local FastAPI serving app for AI Studio onboarding samples.
 
 Run:
-  python -m uvicorn serving_app:app --host 127.0.0.1 --port 8000
+  python -m uvicorn local_serving.serving_app:app --host 127.0.0.1 --port 8000
 """
 
 from __future__ import annotations
@@ -3479,7 +3572,8 @@ from fastapi import FastAPI
 
 
 app = FastAPI(title="AIU Local Model Serving")
-PROJECT_ROOT = Path(__file__).resolve().parent
+APP_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = APP_ROOT.parent if APP_ROOT.name == "local_serving" else APP_ROOT
 MODEL_DIR = PROJECT_ROOT / "saved_model"
 INPUT_EXAMPLE_PATH = PROJECT_ROOT / "input_example.json"
 
@@ -4928,9 +5022,12 @@ def run_single_sample_project(
             "stdout": "",
             "stderr": "run_model.py 없음",
         }
+    analysis_before_run = analyze_project(str(path))
     command = [sys.executable, "run_model.py", "--env-file", "ai_studio.env"]
     if train_mode:
         command.extend(["--mode", "train"])
+    elif analysis_before_run.model_artifacts:
+        command.extend(["--model", analysis_before_run.model_artifacts[0]])
     if register:
         command.append("--register")
         if dry_run:
@@ -5681,15 +5778,18 @@ def run_local_serving_smoke_test(root: Path) -> dict[str, object]:
         from fastapi.testclient import TestClient  # type: ignore
     except Exception as exc:
         return {"status": "skipped", "reason": f"fastapi serving dependency missing: {exc}"}
-    serving_app_path = root / "serving_app.py"
-    if not serving_app_path.exists():
+    serving_app_path = find_serving_app_path(root)
+    if serving_app_path is None:
         ensure_serving_app(root)
+        serving_app_path = find_serving_app_path(root)
+    if serving_app_path is None:
+        return {"status": "error", "reason": "local_serving/serving_app.py 생성 실패"}
     try:
         import importlib.util
 
-        spec = importlib.util.spec_from_file_location("aiu_project_serving_app", root / "serving_app.py")
+        spec = importlib.util.spec_from_file_location("aiu_project_serving_app", serving_app_path)
         if spec is None or spec.loader is None:
-            return {"status": "error", "reason": "serving_app.py import spec 생성 실패"}
+            return {"status": "error", "reason": f"{serving_app_path.relative_to(root)} import spec 생성 실패"}
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = module.app

@@ -186,11 +186,12 @@ pip install ".[deepagents,tui]"
 CLI에서는 `aiu sample list`, `aiu sample create --kind tensorflow`, `aiu sample create --kind large10`으로 같은 샘플을 만들 수 있습니다.
 
 사용자가 직접 만든 모델 프로젝트는 `work/<프로젝트명>/`에 넣으면 초급자 Step 1에서 자동으로 표시됩니다.
-예: `work/my-model/requirements.txt`, `work/my-model/train.py`, `work/my-model/model/model.pkl`
+예: `work/my-model/requirements.txt`, `work/my-model/train.py`, `work/my-model/saved_model/model.pkl`
 TUI input에는 `/work my-model` 또는 `my-model`만 입력하면 됩니다.
 
 AI Studio 등록용 MLflow 스캐폴드는 승인 후 적용 시 자동 생성됩니다.
-생성 항목은 `ai_studio.env`, `config.json`, `input_example.json`, `aiu_custom/model_wrapper.py`, `mlflow_ai_studio_logging.py`, `run_model.py`이며 `requirements.txt`에는 `mlflow`, `cloudpickle`, `pandas`, `numpy`를 확인해 추가합니다.
+생성 항목은 `aiu_custom/`, `config/`, `local_serving/`, `saved_model/`, `get-pip.py`, `input_example.json`, `model_summary.txt`, `ai_studio.env`, `config.json`, `mlflow_ai_studio_logging.py`, `run_model.py`이며 `requirements.txt`에는 `mlflow`, `cloudpickle`, `pandas`, `numpy`를 확인해 추가합니다.
+로컬 서빙 앱은 `local_serving/serving_app.py`에 생성됩니다.
 `config.json`에는 `mlflow_tracking_url`, `mlflow_tracking_username`, `mlflow_tracking_password`, `mlflow_experiment_name`, `mlflow_register_model_name`과 데이터/모델 저장 경로가 들어갑니다.
 AI Studio 값은 `ai_studio.env`에 입력한 뒤 `python run_model.py --env-file ai_studio.env --register`로 실행합니다.
 `MLFLOW_TRACKING_URL`이 비어 있으면 로컬 `file:./mlruns` 저장소로 등록 테스트를 진행합니다.

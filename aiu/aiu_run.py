@@ -455,7 +455,10 @@ class BeginnerWizardTest(unittest.TestCase):
             assistant.run_beginner_mode()
 
             self.assertIn("선택 번호 > ", prompts)
-            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "README.md").exists())
+            self.assertTrue((root / "get-pip.py").exists())
+            self.assertTrue((root / "model_summary.txt").exists())
             self.assertTrue((root / "job_template.yml").exists())
             requirements_text = requirements.read_text(encoding="utf-8").lower()
             self.assertIn("fastapi", requirements_text)
@@ -585,20 +588,14 @@ class BeginnerWizardTest(unittest.TestCase):
     def test_beginner_wizard_disables_apply_without_preview(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\nfastapi\nuvicorn\n")
             (root / "train.py").write_text(
                 "import mlflow\n"
                 "if __name__ == \"__main__\":\n"
                 "    mlflow.log_param('x', 1)\n"
             )
             (root / "model.onnx").write_text("sample")
-            (root / "config.json").write_text("{}\n")
-            (root / "ai_studio.env").write_text("MLFLOW_TRACKING_URL=\n")
-            (root / "input_example.json").write_text("{}\n")
-            (root / "mlflow_ai_studio_logging.py").write_text("import mlflow\n")
-            (root / "run_model.py").write_text("from mlflow_ai_studio_logging import main\n")
-            (root / "aiu_custom").mkdir()
-            (root / "aiu_custom" / "model_wrapper.py").write_text("class ModelWrapper: pass\n")
 
             output = build_beginner_wizard(str(root))
 
@@ -699,7 +696,7 @@ class BeginnerWizardTest(unittest.TestCase):
             changes = apply_serving_fix_previews(str(root), previews)
 
             self.assertTrue(any(change.status == "applied" for change in changes))
-            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
             self.assertTrue((root / "input_example.json").exists())
             self.assertTrue((root / "config.json").exists())
             self.assertTrue((root / "aiu_custom" / "predict.py").exists())
@@ -753,7 +750,7 @@ class BeginnerWizardTest(unittest.TestCase):
             analysis = analyze_project(str(sample))
             output = build_beginner_wizard(str(sample))
 
-            self.assertEqual((sample / "model" / "heavy-model.onnx").stat().st_size, 1024)
+            self.assertEqual((sample / "saved_model" / "heavy-model.onnx").stat().st_size, 1024)
             self.assertEqual(analysis.registration_status, "등록 가능")
             self.assertIn("등록 상태: 등록 가능", output)
             self.assertIn("heavy-model.onnx", output)
@@ -773,7 +770,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIsNotNone(message)
             self.assertTrue(Path(path).exists())
-            self.assertTrue((Path(path) / "model" / "heavy-model.onnx").exists())
+            self.assertTrue((Path(path) / "saved_model" / "heavy-model.onnx").exists())
 
     def test_beginner_intro_lists_existing_sample_projects(self):
         with TemporaryDirectory() as tmpdir:
@@ -889,7 +886,13 @@ class BeginnerWizardTest(unittest.TestCase):
             analysis = analyze_project(str(sample))
 
             self.assertIsNotNone(message)
-            self.assertTrue((sample / "model" / "tensorflow-sample.keras").exists())
+            self.assertTrue((sample / "saved_model" / "tensorflow-sample.keras").exists())
+            self.assertTrue((sample / "aiu_custom" / "predict.py").exists())
+            self.assertTrue((sample / "config" / "model_config.json").exists())
+            self.assertTrue((sample / "local_serving" / "serving_app.py").exists())
+            self.assertTrue((sample / "get-pip.py").exists())
+            self.assertTrue((sample / "model_summary.txt").exists())
+            self.assertIn("serving_entrypoint: local_serving/serving_app.py", (sample / "model_summary.txt").read_text(encoding="utf-8"))
             self.assertIn("tensorflow", (sample / "requirements.txt").read_text())
             self.assertNotIn("mlflow", (sample / "requirements.txt").read_text().lower())
             self.assertEqual(analysis.registration_status, "보완 필요")
@@ -927,7 +930,7 @@ class BeginnerWizardTest(unittest.TestCase):
             analysis = analyze_project(str(sample))
 
             self.assertIsNotNone(message)
-            self.assertTrue((sample / "model" / "pytorch-sample.pt").exists())
+            self.assertTrue((sample / "saved_model" / "pytorch-sample.pt").exists())
             self.assertIn("torch", (sample / "requirements.txt").read_text())
             self.assertEqual(analysis.registration_status, "등록 가능")
 
@@ -947,7 +950,7 @@ class BeginnerWizardTest(unittest.TestCase):
             output = build_beginner_wizard(str(sample))
 
             self.assertIsNotNone(message)
-            self.assertTrue((sample / "model" / "sora-video-sample.onnx").exists())
+            self.assertTrue((sample / "saved_model" / "sora-video-sample.onnx").exists())
             self.assertIn("opencv-python", (sample / "requirements.txt").read_text())
             self.assertIn("sora-style-video-generation", (sample / "train.py").read_text())
             self.assertEqual(analysis.registration_status, "등록 가능")
@@ -969,7 +972,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Sora model sample ready", result.stdout)
-            self.assertTrue((target / "model" / "sora-video-sample.onnx").exists())
+            self.assertTrue((target / "saved_model" / "sora-video-sample.onnx").exists())
             self.assertTrue((target / "run_model.py").exists())
             self.assertTrue((target / "ai_studio.env").exists())
             self.assertTrue((target / "config.json").exists())
@@ -1064,7 +1067,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual(analysis.registration_status, "보완 필요")
             issue_codes = {issue.code for issue in analysis.issue_details}
             self.assertIn("MLFLOW_DEPENDENCY_MISSING", issue_codes)
-            self.assertIn("MLFLOW_CODE_MISSING", issue_codes)
+            self.assertIn("ENTRYPOINT_MISSING", issue_codes)
             self.assertIn("MODEL_ARTIFACT_MISSING", issue_codes)
             self.assertIn("sora-preview.mp4", (sample / "train.py").read_text())
             self.assertIn("모델 파일 후보 없음", output)
@@ -1184,8 +1187,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIsNotNone(message)
             self.assertEqual(len(projects), 10)
             self.assertEqual(Path(path).resolve(), (root / "large-tensorflow-model").resolve())
-            self.assertTrue((root / "large-sora-video-model" / "model" / "large-sora-video.onnx").exists())
-            self.assertTrue((root / "large-llm-adapter" / "model" / "llm-adapter.safetensors").exists())
+            self.assertTrue((root / "large-sora-video-model" / "saved_model" / "large-sora-video.onnx").exists())
+            self.assertTrue((root / "large-llm-adapter" / "saved_model" / "llm-adapter.safetensors").exists())
             self.assertIn("대형 모델 테스트 샘플 10개", message)
             self.assertIn("large-sora-video-model: 등록 가능", message)
 
@@ -1369,7 +1372,7 @@ class AdvancedModeTest(unittest.TestCase):
             output = handle_advanced_input(f"ml-agent validate {sample} --json")
             payload = json.loads(output)
 
-            self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["path"], "model/heavy-model.onnx")
+            self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["path"], "saved_model/heavy-model.onnx")
             self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size_bytes"], 2048)
             self.assertEqual(payload["analysis"]["scan"]["model_artifacts"][0]["size"], "2.0 KiB")
             artifact_check = [
@@ -1570,8 +1573,8 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertIn("joblib", requirements_text)
             self.assertIn("fastapi", requirements_text)
             self.assertIn("uvicorn", requirements_text)
-            self.assertTrue((root / "serving_app.py").exists())
-            self.assertIn("FastAPI", (root / "serving_app.py").read_text(encoding="utf-8"))
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
+            self.assertIn("FastAPI", (root / "local_serving" / "serving_app.py").read_text(encoding="utf-8"))
             self.assertTrue(any(change["code"] == "CREATE_AI_STUDIO_MLFLOW_SCAFFOLD" for change in payload["applied_changes"]))
 
             result = subprocess.run(
@@ -1909,7 +1912,7 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(serving["health_endpoint"], "http://127.0.0.1:8000/health")
             self.assertEqual(serving["predict_endpoint"], "http://127.0.0.1:8000/predict")
             self.assertIn("local_serving=준비 가능", payload["details"])
-            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
 
     def test_serve_command_writes_job_template_yml_with_serving_values(self):
         with TemporaryDirectory() as tmpdir:
@@ -1946,14 +1949,14 @@ class AdvancedModeTest(unittest.TestCase):
             (root / "requirements.txt").write_text("mlflow\nfastapi\nuvicorn\n")
             (root / "train.py").write_text("import mlflow\n")
             ensure_ai_studio_sample_runtime(root)
-            (root / "serving_app.py").unlink()
+            (root / "local_serving" / "serving_app.py").unlink()
             (root / "model.onnx").write_text("sample")
 
             output = handle_advanced_input(f"aiu serve {root} --json")
             payload = json.loads(output)
 
             self.assertEqual(payload["status"], "ok")
-            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
             self.assertIn("serving_app=applied", payload["details"])
             checks = {check["code"]: check for check in payload["analysis"]["local_serving"]["checks"]}
             self.assertEqual(checks["serving_app"]["status"], "pass")
@@ -2876,7 +2879,7 @@ class WindowsSetupTest(unittest.TestCase):
 
             self.assertIn("pytorch-model", controller.project_path)
             self.assertIn("Step 1", output)
-            self.assertTrue((Path(controller.project_path) / "model" / "pytorch-sample.pt").exists())
+            self.assertTrue((Path(controller.project_path) / "saved_model" / "pytorch-sample.pt").exists())
 
     def test_tui_chatbot_cancel_button_ignores_late_response(self):
         source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
@@ -4049,7 +4052,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 8)
             self.assertIn("Current: Tab 9/10", output)
             self.assertIn("Build에서 Step 9 보완 적용 후 Plan으로 자동 전환", controller.latest_message)
-            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "local_serving" / "serving_app.py").exists())
             self.assertTrue((root / "job_template.yml").exists())
             self.assertIn("fastapi", requirements.read_text(encoding="utf-8").lower())
             self.assertIn("uvicorn", requirements.read_text(encoding="utf-8").lower())
