@@ -65,6 +65,7 @@ from deep_agent.cli import (
     resolve_existing_work_project,
     resolve_beginner_project_input,
     run_beginner_mlflow_verification,
+    run_mlflow_verification,
     run_model_source,
     sample_projects_root,
 )
@@ -1766,10 +1767,44 @@ class AdvancedModeTest(unittest.TestCase):
             report = json.loads((root / "mlflow-run-verification.json").read_text(encoding="utf-8"))
 
             self.assertEqual(payload["command"], "verify-run")
-            self.assertEqual(payload["status"], "error")
-            self.assertEqual(report["status"], "error")
+            self.assertEqual(payload["status"], "needs_action")
+            self.assertEqual(report["status"], "needs_action")
             self.assertEqual(report["run_model"]["exit_code"], 1)
             self.assertIn("run_model.py 실행 실패", report["errors"])
+            self.assertTrue(report["mlflow_run"]["fallback_local_run"])
+            self.assertGreaterEqual(len(list((root / "mlruns").glob("0/*/meta.yaml"))), 1)
+
+    def test_verify_run_remote_mlflow_failure_creates_local_fallback_run(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ensure_ai_studio_sample_runtime(root)
+            (root / "requirements.txt").write_text("mlflow\ncloudpickle\npandas\n", encoding="utf-8")
+            (root / "model.onnx").write_text("sample", encoding="utf-8")
+            (root / "ai_studio.env").write_text(
+                "MLFLOW_TRACKING_URL=http://mlflow.local:5000\n"
+                "MLFLOW_EXPERIMENT_NAME=ai-studio-onboarding\n"
+                "MLFLOW_REGISTER_MODEL_NAME=ai-studio-model\n",
+                encoding="utf-8",
+            )
+
+            with patch("deep_agent.cli.execute_run_model") as execute_mock:
+                execute_mock.return_value = {
+                    "status": "error",
+                    "exit_code": 1,
+                    "command": "python run_model.py --env-file ai_studio.env --register",
+                    "stdout": "[4/6] Resolve and prepare local model\nlocal model prepared",
+                    "stderr": "rest_utils.py endpoint expected_status=200 actual_status=500",
+                }
+                report = run_mlflow_verification(root, skip_serving=True)
+
+            self.assertEqual(report["status"], "needs_action")
+            self.assertEqual(report["run_model"]["exit_code"], 1)
+            self.assertTrue(report["mlflow_run"]["fallback_local_run"])
+            self.assertTrue((root / "mlflow-run-result.json").exists())
+            self.assertGreaterEqual(len(list((root / "mlruns").glob("0/*/meta.yaml"))), 1)
+            self.assertTrue((root / "mlruns" / "0" / report["mlflow_run"]["run_id"] / "artifacts" / "fallback_run.json").exists())
+            self.assertIn("fallback_local_run=true", report["details"])
+            self.assertTrue(any("원격 MLflow 등록은 확인이 필요" in error for error in report["errors"]))
 
     def test_verify_run_with_fake_mlflow_confirms_run_and_prediction(self):
         with TemporaryDirectory() as tmpdir:

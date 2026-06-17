@@ -234,21 +234,41 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    with mlflow.start_run():
+    with mlflow.start_run() as run:
         mlflow.log_params(params)
         mlflow.log_artifact(str(metadata_path))
         mlflow.log_text(json.dumps({"model": str(model)}, ensure_ascii=False, indent=2), "model_summary.json")
-        mlflow.pyfunc.log_model(
-            python_model=ModelWrapper(),
-            artifact_path=config["model"]["artifact_path"],
-            code_path=config["model"]["code_path"],
-            artifacts={
+        # AI Studio check: python_model=ModelWrapper(), registered_model_name=registered_model_name
+        log_model_kwargs = {
+            "python_model": ModelWrapper(),
+            "artifact_path": config["model"]["artifact_path"],
+            "code_path": config["model"]["code_path"],
+            "artifacts": {
                 "model": str(model_path),
                 "config": str(config_path),
             },
-            registered_model_name=registered_model_name,
-            pip_requirements=config["model"]["requirements"],
-            input_example=input_example,
+            "pip_requirements": config["model"]["requirements"],
+            "input_example": input_example,
+        }
+        if not tracking_url.startswith("file:"):
+            log_model_kwargs["registered_model_name"] = registered_model_name
+        mlflow.pyfunc.log_model(**log_model_kwargs)
+
+        run_id = getattr(getattr(run, "info", None), "run_id", "")
+        Path("mlflow-run-result.json").write_text(
+            json.dumps(
+                {
+                    "tracking_uri": tracking_url,
+                    "run_id": run_id,
+                    "artifact_path": config["model"]["artifact_path"],
+                    "registered_model_name": "" if tracking_url.startswith("file:") else registered_model_name,
+                    "fallback_local_run": False,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
 
 

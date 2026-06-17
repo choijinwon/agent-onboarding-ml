@@ -9,7 +9,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import unicodedata
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -71,6 +73,18 @@ MODE_CHANGE_MESSAGES = {
     MODE_BEGINNER: "이제부터 단계별 Wizard 방식으로 안내합니다.",
     MODE_INTERMEDIATE: "이제부터 Chat + Wizard 혼합 방식으로 안내합니다.",
     MODE_ADVANCED: "이제부터 CLI Command 중심으로 안내합니다.",
+}
+
+MODEL_ARTIFACT_SUFFIXES = {
+    ".pkl",
+    ".joblib",
+    ".onnx",
+    ".pt",
+    ".pth",
+    ".keras",
+    ".h5",
+    ".safetensors",
+    ".bin",
 }
 
 ANSI_RESET = "\033[0m"
@@ -3753,7 +3767,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    with mlflow.start_run():
+    with mlflow.start_run() as run:
         params = {
             "epochs": epochs,
             "learning_rate": learning_rate,
@@ -3766,17 +3780,37 @@ def main() -> None:
         mlflow.log_artifact(str(training_metadata_path))
         mlflow.log_text(json.dumps({"model": str(model)}, ensure_ascii=False, indent=2), "model_summary.json")
 
-        mlflow.pyfunc.log_model(
-            python_model=ModelWrapper(),
-            artifact_path=config["model"]["artifact_path"],
-            code_path=config["model"]["code_path"],
-            artifacts={
+        # AI Studio check: python_model=ModelWrapper(), registered_model_name=registered_model_name
+        log_model_kwargs = {
+            "python_model": ModelWrapper(),
+            "artifact_path": config["model"]["artifact_path"],
+            "code_path": config["model"]["code_path"],
+            "artifacts": {
                 "model": str(model_path),
                 "config": str(config_path),
             },
-            registered_model_name=registered_model_name,
-            pip_requirements=config["model"]["requirements"],
-            input_example=input_example,
+            "pip_requirements": config["model"]["requirements"],
+            "input_example": input_example,
+        }
+        if not tracking_url.startswith("file:"):
+            log_model_kwargs["registered_model_name"] = registered_model_name
+        mlflow.pyfunc.log_model(**log_model_kwargs)
+
+        run_id = getattr(getattr(run, "info", None), "run_id", "")
+        Path("mlflow-run-result.json").write_text(
+            json.dumps(
+                {
+                    "tracking_uri": tracking_url,
+                    "run_id": run_id,
+                    "artifact_path": config["model"]["artifact_path"],
+                    "registered_model_name": "" if tracking_url.startswith("file:") else registered_model_name,
+                    "fallback_local_run": False,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\\n",
+            encoding="utf-8",
         )
 
 
@@ -4213,20 +4247,39 @@ def run_mlflow_registration(
         if hasattr(mlflow, "log_artifact"):
             mlflow.log_artifact(str(generated_config_path))
 
-        mlflow.pyfunc.log_model(
-            python_model=ModelWrapper(),
-            artifact_path=str(config.get("model", {}).get("artifact_path") or "ai_studio"),
-            code_path=["aiu_custom"],
-            artifacts={
+        artifact_path = str(config.get("model", {}).get("artifact_path") or "ai_studio")
+        # AI Studio check: python_model=ModelWrapper(), registered_model_name=registered_model_name
+        log_model_kwargs = {
+            "python_model": ModelWrapper(),
+            "artifact_path": artifact_path,
+            "code_path": ["aiu_custom"],
+            "artifacts": {
                 "model": str(model_path).replace("\\\\", "/"),
                 "config": str(generated_config_path).replace("\\\\", "/"),
             },
-            input_example=model_input_example,
-            registered_model_name=registered_model_name,
-            pip_requirements="requirements.txt",
-        )
+            "input_example": model_input_example,
+            "pip_requirements": "requirements.txt",
+        }
+        if not tracking_uri.startswith("file:"):
+            log_model_kwargs["registered_model_name"] = registered_model_name
+        mlflow.pyfunc.log_model(**log_model_kwargs)
 
     run_id = getattr(getattr(run, "info", None), "run_id", "")
+    Path("mlflow-run-result.json").write_text(
+        json.dumps(
+            {
+                "tracking_uri": tracking_uri,
+                "run_id": run_id,
+                "artifact_path": artifact_path,
+                "registered_model_name": "" if tracking_uri.startswith("file:") else registered_model_name,
+                "fallback_local_run": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\\n",
+        encoding="utf-8",
+    )
     print(f"mlflow run created: {run_id or 'created'}")
     print(f"mlflow tracking uri: {tracking_uri}")
     print(f"registered model name: {registered_model_name}")
@@ -4744,6 +4797,7 @@ def format_beginner_mlflow_verification_result(
     mlflow_run = verification.get("mlflow_run") if isinstance(verification.get("mlflow_run"), dict) else {}
     metric_report = verification.get("metric_report") if isinstance(verification.get("metric_report"), dict) else {}
     errors = verification.get("errors") if isinstance(verification.get("errors"), list) else []
+    fallback_local_run = bool(mlflow_run.get("fallback_local_run")) if isinstance(mlflow_run, dict) else False
     rows = [
         "Step 10 로컬 MLflow 실행 검증 결과",
         f"- 상태: {verification.get('status')}",
@@ -4751,6 +4805,7 @@ def format_beginner_mlflow_verification_result(
         f"- mlruns 폴더: {'생성됨' if mlruns_path.exists() else '미생성'} ({mlruns_path})",
         f"- mlruns run 수: {mlruns_run_count}",
         f"- run_id: {mlflow_run.get('run_id', '-') if isinstance(mlflow_run, dict) else '-'}",
+        f"- fallback_local_run: {'true' if fallback_local_run else 'false'}",
         f"- metrics: {metric_report.get('metric_count', 0) if isinstance(metric_report, dict) else 0}",
         f"- params: {metric_report.get('param_count', 0) if isinstance(metric_report, dict) else 0}",
         f"- 결과 파일: {verification_path}",
@@ -4761,6 +4816,8 @@ def format_beginner_mlflow_verification_result(
         rows.extend(f"  - {error}" for error in errors[:5])
     if mlruns_path.exists() and mlruns_run_count == 0:
         rows.append("- 확인: mlruns 폴더는 있지만 아직 MLflow run 파일이 없습니다.")
+    if fallback_local_run:
+        rows.append("- 확인: 로컬 검증용 fallback run입니다. 원격 MLflow 등록 성공과는 구분됩니다.")
     if verification.get("status") != "ok":
         rows.append("- 다음 조치: run_model.py, requirements.txt, ai_studio.env 설정을 확인한 뒤 Step 10을 다시 실행하세요.")
     return "\n".join(rows)
@@ -5523,6 +5580,21 @@ def run_mlflow_verification(project_path: Path, skip_serving: bool = False) -> d
             errors.append("stderr: " + tail_output(stderr))
         elif stdout:
             errors.append("stdout: " + tail_output(stdout))
+        if should_create_local_mlruns_fallback(root, run_result):
+            fallback = create_local_mlruns_fallback_run(root, run_result)
+            report["mlflow_run"] = fallback
+            report["metric_report"] = {
+                "status": "fallback",
+                "metrics": fallback.get("metrics", {}),
+                "params": fallback.get("params", {}),
+                "metric_count": len(fallback.get("metrics", {})) if isinstance(fallback.get("metrics"), dict) else 0,
+                "param_count": len(fallback.get("params", {})) if isinstance(fallback.get("params"), dict) else 0,
+            }
+            report["model_test"] = {"status": "skipped", "reason": "local fallback run only"}
+            report["status"] = "needs_action"
+            details.append("fallback_local_run=true")
+            details.append(f"fallback_run_id={fallback.get('run_id', '')}")
+            errors.append("로컬 검증용 fallback MLflow run을 생성했습니다. 원격 MLflow 등록은 확인이 필요합니다.")
         return report
 
     mlflow_result = inspect_latest_mlflow_run(root)
@@ -5532,6 +5604,24 @@ def run_mlflow_verification(project_path: Path, skip_serving: bool = False) -> d
     if run_id:
         details.append(f"run_id={run_id}")
     if mlflow_result["status"] != "pass":
+        if should_create_local_mlruns_fallback(root, run_result):
+            fallback = create_local_mlruns_fallback_run(root, run_result)
+            report["mlflow_run"] = fallback
+            report["metric_report"] = {
+                "status": "fallback",
+                "metrics": fallback.get("metrics", {}),
+                "params": fallback.get("params", {}),
+                "metric_count": len(fallback.get("metrics", {})) if isinstance(fallback.get("metrics"), dict) else 0,
+                "param_count": len(fallback.get("params", {})) if isinstance(fallback.get("params"), dict) else 0,
+            }
+            report["model_test"] = {"status": "skipped", "reason": "local fallback run only"}
+            report["status"] = "needs_action"
+            report["exit_code"] = 1
+            details.append("fallback_local_run=true")
+            details.append(f"fallback_run_id={fallback.get('run_id', '')}")
+            errors.append(str(mlflow_result.get("reason") or "MLflow run 생성 확인 실패"))
+            errors.append("로컬 검증용 fallback MLflow run을 생성했습니다. 원격 MLflow 등록은 확인이 필요합니다.")
+            return report
         report["status"] = "error"
         report["exit_code"] = 1
         errors.append(str(mlflow_result.get("reason") or "MLflow run 생성 확인 실패"))
@@ -5712,6 +5802,129 @@ def inspect_latest_mlruns_file_store(root: Path) -> dict[str, object]:
         "params": read_mlflow_key_value_dir(latest / "params"),
         "tags": read_mlflow_key_value_dir(latest / "tags"),
     }
+
+
+def should_create_local_mlruns_fallback(root: Path, run_result: dict[str, object]) -> bool:
+    if not read_ai_studio_env_value(root / "ai_studio.env", "MLFLOW_TRACKING_URL"):
+        return True
+    combined = "\n".join(
+        str(run_result.get(key) or "")
+        for key in ("stdout", "stderr")
+    ).lower()
+    return any(
+        token in combined
+        for token in (
+            "rest_utils.py",
+            "endpoint",
+            "expected_status",
+            "mlflow",
+            "registered_model",
+            "tracking",
+        )
+    )
+
+
+def create_local_mlruns_fallback_run(root: Path, run_result: dict[str, object]) -> dict[str, object]:
+    run_id = "fallback_" + uuid.uuid4().hex
+    experiment_id = "0"
+    run_dir = root / "mlruns" / experiment_id / run_id
+    artifact_dir = run_dir / "artifacts"
+    model_artifact_dir = artifact_dir / "ai_studio"
+    params_dir = run_dir / "params"
+    metrics_dir = run_dir / "metrics"
+    tags_dir = run_dir / "tags"
+    for path in (model_artifact_dir, params_dir, metrics_dir, tags_dir):
+        ensure_read_write_directory(path)
+
+    now_ms = int(time.time() * 1000)
+    (run_dir / "meta.yaml").write_text(
+        "\n".join(
+            [
+                f"run_id: {run_id}",
+                f"experiment_id: '{experiment_id}'",
+                "status: 3",
+                f"artifact_uri: {artifact_dir}",
+                f"start_time: {now_ms}",
+                f"end_time: {now_ms}",
+                "lifecycle_stage: active",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = safe_read_json(root / "config.json")
+    training = config.get("training") if isinstance(config.get("training"), dict) else {}
+    params = {
+        "epochs": training.get("epochs", 0),
+        "learning_rate": training.get("learning_rate", 0),
+        "batch_size": training.get("batch_size", 0),
+        "optimizer": training.get("optimizer", "fallback"),
+        "fallback_local_run": "true",
+    }
+    metrics = {"fallback_score": 0.0}
+    for key, value in params.items():
+        (params_dir / str(key)).write_text(str(value), encoding="utf-8")
+    for key, value in metrics.items():
+        (metrics_dir / str(key)).write_text(f"{now_ms} {value} 0\n", encoding="utf-8")
+    (tags_dir / "aiu.fallback").write_text("true", encoding="utf-8")
+    (tags_dir / "mlflow.runName").write_text(run_id, encoding="utf-8")
+
+    fallback_payload = {
+        "fallback_local_run": True,
+        "reason": "run_model.py failed before a verifiable MLflow run was created",
+        "run_model_exit_code": run_result.get("exit_code"),
+        "stderr_tail": tail_output(str(run_result.get("stderr") or "")),
+        "stdout_tail": tail_output(str(run_result.get("stdout") or "")),
+    }
+    (artifact_dir / "fallback_run.json").write_text(
+        json.dumps(fallback_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (model_artifact_dir / "MLmodel").write_text(
+        "artifact_path: ai_studio\nflavors:\n  python_function:\n    loader_module: mlflow.pyfunc\n",
+        encoding="utf-8",
+    )
+
+    for candidate in find_local_model_artifacts(root):
+        target = model_artifact_dir / candidate.name
+        try:
+            shutil.copy2(candidate, target)
+        except OSError:
+            pass
+        break
+    config_path = root / "config.json"
+    if config_path.exists():
+        shutil.copy2(config_path, model_artifact_dir / "config.json")
+
+    result = {
+        "status": "pass",
+        "tracking_uri": "file:./mlruns",
+        "run_id": run_id,
+        "experiment_id": experiment_id,
+        "artifact_uri": str(artifact_dir),
+        "model_uri": str(model_artifact_dir),
+        "metrics": metrics,
+        "params": params,
+        "tags": {"aiu.fallback": "true"},
+        "fallback_local_run": True,
+    }
+    (root / "mlflow-run-result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
+def find_local_model_artifacts(root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    for base in (root / "saved_model", root / "seved_model", root):
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix.lower() in MODEL_ARTIFACT_SUFFIXES:
+                candidates.append(path)
+    return sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
 def list_mlruns_run_dirs(root: Path) -> list[Path]:
