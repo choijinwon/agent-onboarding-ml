@@ -35,9 +35,11 @@ from deep_agent.cli import (
     MODE_BEGINNER,
     MODE_INTERMEDIATE,
     analyze_project,
+    apply_serving_fix_previews,
     build_beginner_intro,
     build_beginner_step_tabs,
     build_beginner_wizard,
+    build_serving_fix_previews,
     build_parser,
     create_heavy_model_sample,
     create_large_model_samples,
@@ -425,6 +427,31 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertEqual((root / "requirements.txt").read_text(), "tensorflow==2.17.0\n")
             self.assertTrue(any("Current: Tab 5/10" in output for output in outputs[6:]))
 
+    def test_beginner_console_step9_approval_repairs_serving(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            inputs = iter([str(root), "9", "1", "종료"])
+            outputs: list[str] = []
+            prompts: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: prompts.append(prompt) or next(inputs),
+                output_fn=outputs.append,
+                clear_fn=lambda: None,
+            )
+
+            assistant.run_beginner_mode()
+
+            self.assertIn("선택 번호 > ", prompts)
+            self.assertTrue((root / "serving_app.py").exists())
+            requirements_text = requirements.read_text(encoding="utf-8").lower()
+            self.assertIn("fastapi", requirements_text)
+            self.assertIn("uvicorn", requirements_text)
+            self.assertTrue(any("Step 9 로컬 서빙 보완을 승인했습니다" in output for output in outputs))
+
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
 
@@ -614,6 +641,42 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("FastAPI 기본 서버", output)
             self.assertIn("ml-agent serve", output)
             self.assertIn("/predict", output)
+
+    def test_beginner_wizard_step9_shows_autofix_choices_when_serving_needs_action(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            steps = build_beginner_step_tabs(str(root))
+            output = steps[8]
+
+            self.assertIn("Step 9. 로컬 서빙 테스트", output)
+            self.assertIn("자동 보완 가능 항목", output)
+            self.assertIn("1. 승인 후 Step 9 자동 보완", output)
+            self.assertIn("serving_app.py", output)
+
+    def test_serving_fix_previews_apply_safe_step9_files(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+
+            analysis = analyze_project(str(root))
+            previews = build_serving_fix_previews(analysis)
+            changes = apply_serving_fix_previews(str(root), previews)
+
+            self.assertTrue(any(change.status == "applied" for change in changes))
+            self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "input_example.json").exists())
+            self.assertTrue((root / "config.json").exists())
+            self.assertTrue((root / "aiu_custom" / "predict.py").exists())
+            requirements_text = requirements.read_text(encoding="utf-8").lower()
+            self.assertIn("fastapi", requirements_text)
+            self.assertIn("uvicorn", requirements_text)
 
     def test_beginner_wizard_shows_step10_report_summary(self):
         with TemporaryDirectory() as tmpdir:
@@ -3850,6 +3913,26 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("mlflow", requirements.read_text().lower())
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
+
+    def test_tui_beginner_step9_approval_repairs_serving_then_returns_to_plan(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            controller.submit("9")
+
+            output = controller.submit("1")
+
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertEqual(controller.index, 8)
+            self.assertIn("Current: Tab 9/10", output)
+            self.assertIn("Build에서 Step 9 보완 적용 후 Plan으로 자동 전환", controller.latest_message)
+            self.assertTrue((root / "serving_app.py").exists())
+            self.assertIn("fastapi", requirements.read_text(encoding="utf-8").lower())
+            self.assertIn("uvicorn", requirements.read_text(encoding="utf-8").lower())
 
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
         controller = self.beginner_tui("")

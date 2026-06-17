@@ -1036,7 +1036,7 @@ class ConsoleAssistant:
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
             if index == len(steps) - 1:
                 return
-            prompt = "선택 번호 > " if index in {3, 5} else "다음 > "
+            prompt = "선택 번호 > " if index in {3, 5, 8} else "다음 > "
             raw = self.input_fn(prompt).strip()
             if self.change_mode(raw):
                 self.run_current_mode()
@@ -1076,6 +1076,29 @@ class ConsoleAssistant:
                     self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
                     return
                 self.output_fn("번호로 선택하세요. 1=적용, 2=다시 보기, 3=취소")
+                continue
+            if index == 8:
+                if raw in {"q", "quit", "exit", "종료", "취소"}:
+                    self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
+                    return
+                if raw == "1":
+                    analysis = analyze_project(project_path)
+                    previews = build_serving_fix_previews(analysis)
+                    if not previews:
+                        self.output_fn("Step 9에서 자동 보완할 항목이 없습니다. 다음 단계로 이동합니다.")
+                        index += 1
+                        continue
+                    applied_serving_changes = apply_serving_fix_previews(project_path, previews)
+                    steps = build_beginner_step_tabs(project_path, applied_changes=applied_changes)
+                    self.output_fn(format_serving_apply_result(applied_serving_changes, analyze_project(project_path)))
+                    continue
+                if raw == "2":
+                    index += 1
+                    continue
+                if raw == "":
+                    index += 1
+                    continue
+                self.output_fn("번호로 선택하세요. 1=Step 9 자동 보완, 2=다음 단계")
                 continue
             if raw in {"", "n", "next", "다음"}:
                 index += 1
@@ -2578,6 +2601,87 @@ def build_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
     return previews
 
 
+def build_serving_fix_previews(analysis: ProjectAnalysis) -> list[FixPreview]:
+    if analysis.registration_status == "불가":
+        return []
+
+    root = resolve_filesystem_path(analysis.path or ".")
+    if not root.exists() or not root.is_dir():
+        return []
+
+    previews: list[FixPreview] = []
+    requirements_target = analysis.requirements_files[0] if analysis.requirements_files else "requirements.txt"
+    requirements_text = "\n".join(safe_read_text(root / path) for path in analysis.requirements_files)
+    missing_requirements: list[str] = []
+    if not has_requirement_token(requirements_text, "mlflow"):
+        missing_requirements.append("mlflow")
+    for token in SERVING_REQUIREMENT_TOKENS:
+        if not has_requirement_token(requirements_text, token):
+            missing_requirements.append(token)
+    if not analysis.requirements_files:
+        previews.append(
+            FixPreview(
+                code="CREATE_SERVING_REQUIREMENTS",
+                title="서빙 requirements.txt 생성",
+                target=requirements_target,
+                action="로컬 서빙에 필요한 패키지 목록을 생성합니다.",
+                preview_lines=["+ mlflow", "+ fastapi", "+ uvicorn", "+ scikit-learn"],
+            )
+        )
+    elif missing_requirements:
+        previews.append(
+            FixPreview(
+                code="ADD_SERVING_DEPENDENCIES",
+                title="서빙 의존성 추가",
+                target=requirements_target,
+                action="requirements.txt에 로컬 서빙 패키지를 추가합니다.",
+                preview_lines=[f"+ {requirement}" for requirement in missing_requirements],
+            )
+        )
+
+    if not (root / "serving_app.py").exists():
+        previews.append(
+            FixPreview(
+                code="CREATE_LOCAL_SERVING_APP",
+                title="로컬 서빙 앱 생성",
+                target="serving_app.py",
+                action="FastAPI 기반 serving_app.py 템플릿을 생성합니다.",
+                preview_lines=["+ FastAPI app", "+ GET /health", "+ POST /predict"],
+            )
+        )
+    if not (root / "input_example.json").exists():
+        previews.append(
+            FixPreview(
+                code="CREATE_INPUT_EXAMPLE",
+                title="input_example.json 생성",
+                target="input_example.json",
+                action="로컬 predict 테스트용 입력 예시를 생성합니다.",
+                preview_lines=["+ columns", "+ data"],
+            )
+        )
+    if not (root / "config.json").exists():
+        previews.append(
+            FixPreview(
+                code="CREATE_CONFIG_JSON",
+                title="config.json 생성",
+                target="config.json",
+                action="AI Studio 기본 설정 파일을 생성합니다.",
+                preview_lines=["+ mlflow 설정", "+ model 설정", "+ execution 설정"],
+            )
+        )
+    if not (root / "aiu_custom" / "predict.py").exists():
+        previews.append(
+            FixPreview(
+                code="CREATE_MODEL_WRAPPER",
+                title="ModelWrapper 템플릿 생성",
+                target="aiu_custom/predict.py",
+                action="MLflow pyfunc 호환 ModelWrapper 템플릿을 생성합니다.",
+                preview_lines=["+ class ModelWrapper", "+ load_context", "+ predict"],
+            )
+        )
+    return previews
+
+
 def build_approval_options(analysis: ProjectAnalysis) -> list[ApprovalOption]:
     previews = build_fix_previews(analysis)
     can_apply = bool(previews) and analysis.registration_status != "불가"
@@ -2651,6 +2755,67 @@ def apply_fix_previews(project_path: str, previews: list[FixPreview]) -> list[Ap
     return changes
 
 
+def apply_serving_fix_previews(project_path: str, previews: list[FixPreview]) -> list[AppliedChange]:
+    root = resolve_filesystem_path(project_path or ".")
+    if root.exists():
+        ensure_local_file_access(root)
+    if not root.exists() or not root.is_dir():
+        return [
+            AppliedChange(
+                code="SERVING_APPLY_BLOCKED",
+                target=str(root),
+                status="skipped",
+                message="프로젝트 폴더가 없어 Step 9 보완을 적용하지 않았습니다.",
+            )
+        ]
+
+    changes: list[AppliedChange] = []
+    for preview in previews:
+        target = safe_project_path(root, preview.target)
+        if target is None:
+            changes.append(
+                AppliedChange(
+                    code=preview.code,
+                    target=preview.target,
+                    status="skipped",
+                    message="프로젝트 폴더 밖의 경로라 Step 9 보완을 적용하지 않았습니다.",
+                )
+            )
+            continue
+        if preview.code == "CREATE_SERVING_REQUIREMENTS":
+            changes.append(apply_create_requirements(target))
+            ensure_requirement_lines(target, ["fastapi", "uvicorn"])
+        elif preview.code == "ADD_SERVING_DEPENDENCIES":
+            requirements = [line.removeprefix("+").strip() for line in preview.preview_lines if line.strip().startswith("+")]
+            changed = ensure_requirement_lines(target, requirements)
+            changes.append(
+                AppliedChange(
+                    code=preview.code,
+                    target=str(target),
+                    status="applied" if changed else "skipped",
+                    message="서빙 패키지를 requirements.txt에 추가했습니다." if changed else "서빙 패키지가 이미 포함되어 있습니다.",
+                )
+            )
+        elif preview.code == "CREATE_LOCAL_SERVING_APP":
+            changes.append(ensure_serving_app(root))
+        elif preview.code == "CREATE_INPUT_EXAMPLE":
+            changes.append(apply_create_input_example(target))
+        elif preview.code == "CREATE_CONFIG_JSON":
+            changes.append(apply_create_config_json(target))
+        elif preview.code == "CREATE_MODEL_WRAPPER":
+            changes.append(apply_create_model_wrapper(root))
+        else:
+            changes.append(
+                AppliedChange(
+                    code=preview.code,
+                    target=preview.target,
+                    status="skipped",
+                    message="지원하지 않는 Step 9 보완 항목이라 적용하지 않았습니다.",
+                )
+            )
+    return changes
+
+
 def ai_studio_scaffold_missing(project_path: str) -> bool:
     root = resolve_filesystem_path(project_path or ".")
     if not root.exists() or not root.is_dir():
@@ -2689,6 +2854,63 @@ def apply_create_requirements(target: Path) -> AppliedChange:
         target=str(target),
         status="applied",
         message="requirements.txt를 생성했습니다.",
+    )
+
+
+def apply_create_input_example(target: Path) -> AppliedChange:
+    if target.exists():
+        return AppliedChange(
+            code="CREATE_INPUT_EXAMPLE",
+            target=str(target),
+            status="skipped",
+            message="input_example.json이 이미 있어 변경하지 않았습니다.",
+        )
+    target.write_text(json.dumps(default_input_example(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return AppliedChange(
+        code="CREATE_INPUT_EXAMPLE",
+        target=str(target),
+        status="applied",
+        message="input_example.json을 생성했습니다.",
+    )
+
+
+def apply_create_config_json(target: Path) -> AppliedChange:
+    if target.exists():
+        return AppliedChange(
+            code="CREATE_CONFIG_JSON",
+            target=str(target),
+            status="skipped",
+            message="config.json이 이미 있어 변경하지 않았습니다.",
+        )
+    target.write_text(json.dumps(default_ai_studio_config(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return AppliedChange(
+        code="CREATE_CONFIG_JSON",
+        target=str(target),
+        status="applied",
+        message="config.json을 생성했습니다.",
+    )
+
+
+def apply_create_model_wrapper(root: Path) -> AppliedChange:
+    custom_dir = root / "aiu_custom"
+    ensure_read_write_directory(custom_dir)
+    init_path = custom_dir / "__init__.py"
+    if not init_path.exists():
+        init_path.write_text("from .predict import ModelWrapper\n", encoding="utf-8")
+    predict_path = custom_dir / "predict.py"
+    if predict_path.exists():
+        return AppliedChange(
+            code="CREATE_MODEL_WRAPPER",
+            target=str(predict_path),
+            status="skipped",
+            message="ModelWrapper가 이미 있어 변경하지 않았습니다.",
+        )
+    predict_path.write_text(ai_studio_model_wrapper_source(), encoding="utf-8")
+    return AppliedChange(
+        code="CREATE_MODEL_WRAPPER",
+        target=str(predict_path),
+        status="applied",
+        message="aiu_custom/predict.py ModelWrapper 템플릿을 생성했습니다.",
     )
 
 
@@ -4275,9 +4497,23 @@ def format_beginner_apply_result(applied_changes: list[AppliedChange], analysis:
     )
 
 
+def format_serving_apply_result(applied_changes: list[AppliedChange], analysis: ProjectAnalysis) -> str:
+    applied_count = len([change for change in applied_changes if change.status == "applied"])
+    skipped_count = len([change for change in applied_changes if change.status == "skipped"])
+    return (
+        "Step 9 로컬 서빙 보완을 승인했습니다.\n"
+        f"- 적용 완료: {applied_count}개\n"
+        f"- 건너뜀: {skipped_count}개\n"
+        f"- 재검증 서빙 상태: {analysis.local_serving.status}\n"
+        f"- health: {analysis.local_serving.health_endpoint}\n"
+        f"- predict: {analysis.local_serving.predict_endpoint}"
+    )
+
+
 def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
     serving = analysis.local_serving
     job_template_path = Path(analysis.path or ".") / "job_template.yml"
+    serving_previews = build_serving_fix_previews(analysis)
     rows = [
         f"- 상태: {serving.status}",
         f"- 방식: {serving.mode}",
@@ -4295,8 +4531,18 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
     )
     if serving.status == "준비 가능":
         rows.append("- 로컬 서빙 확인 시 호출 URL과 결과를 job_template.yml에 반영합니다.")
+    elif serving.status == "보완 필요" and serving_previews:
+        rows.extend(
+            [
+                "- 자동 보완 가능 항목:",
+                *[f"  - {preview.target}: {preview.title}" for preview in serving_previews],
+                "- 사용자 선택:",
+                "  1. 승인 후 Step 9 자동 보완",
+                "  2. 보완하지 않고 다음 단계로 진행",
+            ]
+        )
     elif serving.status == "보완 필요":
-        rows.append("- 보완 항목을 수정한 뒤 다시 로컬 서빙 테스트를 진행합니다.")
+        rows.append("- 자동 보완 가능한 항목이 없어 수동 확인이 필요합니다.")
     else:
         rows.append("- 차단 항목이 있어 아직 로컬 서빙을 실행하지 않습니다.")
     return "\n".join(rows)

@@ -35,12 +35,15 @@ from deep_agent.cli import (
     MODE_BEGINNER,
     analyze_project,
     apply_fix_previews,
+    apply_serving_fix_previews,
     build_beginner_step_tabs,
     build_fix_previews,
+    build_serving_fix_previews,
     format_bytes,
     format_beginner_apply_result,
     format_beginner_tab,
     format_beginner_fix_preview,
+    format_serving_apply_result,
     format_model_parameters,
     handle_advanced_input,
     handle_intermediate_request,
@@ -1593,6 +1596,8 @@ class BeginnerTuiController:
             return self._handle_approval_choice(command)
         if self.index == 6 and command in {"1", "/env", "/환경", "환경설정", "ai studio", "aistudio"}:
             return self.start_ai_studio_env_setup()
+        if self.index == 8 and command in {"1", "2"}:
+            return self._handle_serving_choice(command)
         if is_wizard_navigation(command, self.total):
             return self._handle_navigation(command)
         if self.agent_mode != "Chatbot":
@@ -2172,6 +2177,29 @@ class BeginnerTuiController:
         message = "번호로 선택하세요. 1=승인 후 생성/수정, 2=수정안 다시 보기, 3=취소"
         self.latest_message = message
         return message
+
+    def _handle_serving_choice(self, command: str) -> str:
+        if command == "2":
+            self.index = min(self.index + 1, self.total - 1)
+            message = "Step 9 자동 보완을 건너뛰고 다음 단계로 이동합니다."
+            self.latest_message = message
+            return self.current_screen()
+        analysis = analyze_project(self.project_path)
+        previews = build_serving_fix_previews(analysis)
+        if not previews:
+            self.index = min(self.index + 1, self.total - 1)
+            message = "Step 9에서 자동 보완할 항목이 없어 스킵했습니다."
+            self.latest_message = message
+            return self.current_screen()
+        self.agent_mode = "Build"
+        applied_changes = apply_serving_fix_previews(self.project_path, previews)
+        refreshed = analyze_project(self.project_path)
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        result = format_serving_apply_result(applied_changes, refreshed)
+        self.agent_mode = "Plan"
+        result = f"{result}\n- Agent 모드: Build에서 Step 9 보완 적용 후 Plan으로 자동 전환했습니다."
+        self.latest_message = result
+        return self.current_screen()
 
     def _handle_navigation(self, command: str) -> str:
         if command in {"다음", "next", "n"}:
