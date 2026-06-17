@@ -725,7 +725,9 @@ class BeginnerWizardTest(unittest.TestCase):
     def test_beginner_step10_mlflow_verification_result_reports_mlruns(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "mlruns").mkdir()
+            run_dir = root / "mlruns" / "0" / "abc123"
+            run_dir.mkdir(parents=True)
+            (run_dir / "meta.yaml").write_text("run_id: abc123\n", encoding="utf-8")
             with patch("deep_agent.cli.run_mlflow_verification") as run_mock:
                 run_mock.return_value = {
                     "status": "ok",
@@ -739,10 +741,30 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("Step 10 로컬 MLflow 실행 검증 결과", output)
             self.assertIn("mlruns 폴더: 생성됨", output)
+            self.assertIn("mlruns run 수: 1", output)
             self.assertIn("run_id: abc123", output)
             self.assertTrue((root / "mlflow-run-verification.json").exists())
             self.assertTrue((root / "job_template.yml").exists())
             self.assertIn("Job Template: 생성됨", output)
+
+    def test_beginner_step10_reports_empty_mlruns_folder(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "mlruns").mkdir()
+            with patch("deep_agent.cli.run_mlflow_verification") as run_mock:
+                run_mock.return_value = {
+                    "status": "error",
+                    "exit_code": 1,
+                    "errors": ["MLflow run을 찾지 못했습니다."],
+                    "mlflow_run": {},
+                    "metric_report": {"metric_count": 0, "param_count": 0},
+                }
+
+                output = run_beginner_mlflow_verification(str(root))
+
+            self.assertIn("mlruns 폴더: 생성됨", output)
+            self.assertIn("mlruns run 수: 0", output)
+            self.assertIn("mlruns 폴더는 있지만 아직 MLflow run 파일이 없습니다", output)
 
     def test_heavy_model_sample_can_be_selected_from_step1(self):
         with TemporaryDirectory() as tmpdir:
@@ -1772,6 +1794,7 @@ class AdvancedModeTest(unittest.TestCase):
             self.assertEqual(report["status"], "ok")
             self.assertEqual(report["run_model"]["exit_code"], 0)
             self.assertTrue(report["mlflow_run"]["run_id"])
+            self.assertGreaterEqual(len(list((root / "mlruns").glob("0/*/meta.yaml"))), 1)
             self.assertGreaterEqual(report["metric_report"]["param_count"], 1)
             self.assertEqual(report["model_test"]["status"], "pass")
             self.assertEqual(report["serving"]["status"], "skipped")
@@ -2906,9 +2929,13 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('yield RunModelButton("RUN MODEL", id="run-model")', source)
         self.assertIn("def _run_local_model_training", source)
         self.assertIn("self.controller.run_local_model_training()", source)
-        self.assertIn("run_button.disabled = not self.controller.run_model_ready", source)
+        self.assertIn("run_button.disabled = self._run_model_busy or not self.controller.run_model_ready", source)
         self.assertIn("#run-model:disabled", source)
         self.assertIn("run_button.set_class", source)
+        self.assertIn("self._run_model_busy = False", source)
+        self.assertIn("RUN MODEL 실행 중...", source)
+        self.assertIn('run_button.label = "RUNNING..." if self._run_model_busy else "RUN MODEL"', source)
+        self.assertIn("Thread(target=self._run_local_model_training_in_thread", source)
 
     def test_tui_sample_button_selection_creates_selected_sample(self):
         with TemporaryDirectory() as tmpdir:

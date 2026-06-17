@@ -4740,6 +4740,7 @@ def format_beginner_mlflow_verification_result(
     job_template_path: Path,
 ) -> str:
     mlruns_path = root / "mlruns"
+    mlruns_run_count = count_mlruns_runs(root)
     mlflow_run = verification.get("mlflow_run") if isinstance(verification.get("mlflow_run"), dict) else {}
     metric_report = verification.get("metric_report") if isinstance(verification.get("metric_report"), dict) else {}
     errors = verification.get("errors") if isinstance(verification.get("errors"), list) else []
@@ -4748,6 +4749,7 @@ def format_beginner_mlflow_verification_result(
         f"- 상태: {verification.get('status')}",
         f"- exit_code: {verification.get('exit_code')}",
         f"- mlruns 폴더: {'생성됨' if mlruns_path.exists() else '미생성'} ({mlruns_path})",
+        f"- mlruns run 수: {mlruns_run_count}",
         f"- run_id: {mlflow_run.get('run_id', '-') if isinstance(mlflow_run, dict) else '-'}",
         f"- metrics: {metric_report.get('metric_count', 0) if isinstance(metric_report, dict) else 0}",
         f"- params: {metric_report.get('param_count', 0) if isinstance(metric_report, dict) else 0}",
@@ -4757,6 +4759,8 @@ def format_beginner_mlflow_verification_result(
     if errors:
         rows.append("- 오류:")
         rows.extend(f"  - {error}" for error in errors[:5])
+    if mlruns_path.exists() and mlruns_run_count == 0:
+        rows.append("- 확인: mlruns 폴더는 있지만 아직 MLflow run 파일이 없습니다.")
     if verification.get("status") != "ok":
         rows.append("- 다음 조치: run_model.py, requirements.txt, ai_studio.env 설정을 확인한 뒤 Step 10을 다시 실행하세요.")
     return "\n".join(rows)
@@ -5513,6 +5517,12 @@ def run_mlflow_verification(project_path: Path, skip_serving: bool = False) -> d
         report["status"] = "error"
         report["exit_code"] = 1
         errors.append("run_model.py 실행 실패")
+        stderr = str(run_result.get("stderr") or "").strip()
+        stdout = str(run_result.get("stdout") or "").strip()
+        if stderr:
+            errors.append("stderr: " + tail_output(stderr))
+        elif stdout:
+            errors.append("stdout: " + tail_output(stdout))
         return report
 
     mlflow_result = inspect_latest_mlflow_run(root)
@@ -5687,11 +5697,7 @@ def inspect_latest_mlruns_file_store(root: Path) -> dict[str, object]:
     mlruns = root / "mlruns"
     if not mlruns.exists():
         return {"status": "error", "reason": "mlruns 폴더를 찾지 못했습니다."}
-    run_dirs = [
-        path
-        for path in mlruns.rglob("*")
-        if path.is_dir() and (path / "meta.yaml").exists() and path.parent.name != "models"
-    ]
+    run_dirs = list_mlruns_run_dirs(root)
     if not run_dirs:
         return {"status": "error", "reason": "mlruns 안에서 run meta.yaml을 찾지 못했습니다."}
     latest = sorted(run_dirs, key=lambda path: path.stat().st_mtime, reverse=True)[0]
@@ -5706,6 +5712,35 @@ def inspect_latest_mlruns_file_store(root: Path) -> dict[str, object]:
         "params": read_mlflow_key_value_dir(latest / "params"),
         "tags": read_mlflow_key_value_dir(latest / "tags"),
     }
+
+
+def list_mlruns_run_dirs(root: Path) -> list[Path]:
+    mlruns = root / "mlruns"
+    if not mlruns.exists():
+        return []
+    run_dirs: list[Path] = []
+    for path in mlruns.rglob("meta.yaml"):
+        run_dir = path.parent
+        if not run_dir.is_dir():
+            continue
+        if run_dir.parent == mlruns:
+            continue
+        if "models" in run_dir.relative_to(mlruns).parts:
+            continue
+        run_dirs.append(run_dir)
+    return run_dirs
+
+
+def count_mlruns_runs(root: Path) -> int:
+    return len(list_mlruns_run_dirs(root))
+
+
+def tail_output(text: str, max_lines: int = 8, max_chars: int = 1200) -> str:
+    lines = text.strip().splitlines()[-max_lines:]
+    output = "\n".join(lines).strip()
+    if len(output) > max_chars:
+        return output[-max_chars:]
+    return output
 
 
 def read_mlflow_key_value_dir(path: Path) -> dict[str, object]:

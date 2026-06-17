@@ -2853,6 +2853,7 @@ def run_tui(project_path: str = "") -> int:
             self._active_chatbot_request_id: int | None = None
             self._active_chatbot_value = ""
             self._cancelled_chatbot_requests: set[int] = set()
+            self._run_model_busy = False
             self._thinking_started_at = 0.0
             self._thinking_timer = None
             self._input_status = ""
@@ -3016,15 +3017,55 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def _run_local_model_training(self) -> None:
+            if self._run_model_busy:
+                self._input_status = "RUN MODEL이 이미 실행 중입니다."
+                self._refresh()
+                self._focus_command()
+                return
             if not self.controller.run_model_ready:
                 self._input_status = "RUN MODEL은 Step 10에서 실행할 수 있습니다."
                 self.controller.run_local_model_training()
                 self._refresh()
                 self._focus_command()
                 return
+            self._run_model_busy = True
             self._input_status = "RUN MODEL 실행 중..."
-            self.query_one(StatusBar).update(self._input_status)
-            self.controller.run_local_model_training()
+            self.controller.agent_mode = "Build"
+            self.controller.latest_message = (
+                "RUN MODEL 실행 중...\n"
+                "- 로컬 모델 학습 파일을 실행합니다.\n"
+                "- MLflow run 생성 여부를 확인합니다.\n"
+                "- 완료 후 Step 10 리포트를 화면에 표시합니다."
+            )
+            self._refresh()
+            self._focus_command()
+            try:
+                Thread(target=self._run_local_model_training_in_thread, daemon=True).start()
+            except Exception as exc:  # pragma: no cover - UI safety boundary
+                self.controller.latest_message = (
+                    "RUN MODEL 실행을 시작하지 못했습니다.\n"
+                    f"- 오류: {exc}"
+                )
+                self._finish_run_model_training()
+
+        def _run_local_model_training_in_thread(self) -> None:
+            try:
+                self.controller.run_local_model_training()
+            except BaseException as exc:  # pragma: no cover - UI safety boundary
+                self.controller.agent_mode = "Plan"
+                self.controller.latest_message = (
+                    "RUN MODEL 실행 중 오류가 발생했습니다.\n"
+                    f"- 오류: {exc}"
+                )
+            finally:
+                try:
+                    self.call_from_thread(self._finish_run_model_training)
+                except RuntimeError:
+                    self._run_model_busy = False
+
+        def _finish_run_model_training(self) -> None:
+            self._run_model_busy = False
+            self._input_status = "RUN MODEL 실행이 완료되었습니다."
             self._refresh()
             self._focus_command()
 
@@ -3381,7 +3422,8 @@ def run_tui(project_path: str = "") -> int:
             multi_button.set_class(self.controller.multi_agent_enabled, "on")
             multi_button.set_class(not self.controller.multi_agent_enabled, "off")
             run_button = self.query_one(RunModelButton)
-            run_button.disabled = not self.controller.run_model_ready
+            run_button.label = "RUNNING..." if self._run_model_busy else "RUN MODEL"
+            run_button.disabled = self._run_model_busy or not self.controller.run_model_ready
             run_button.set_class(self.controller.agent_mode == "Build", "build")
             run_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).replace_text(self.controller.render_log())
