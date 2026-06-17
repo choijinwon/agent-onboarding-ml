@@ -2333,7 +2333,41 @@ class BeginnerTuiController:
             return self.select_run_model_repair(command)
         return self.run_local_model_training()
 
+    @property
+    def run_model_ready(self) -> bool:
+        return (
+            self.selected_launch_mode == MODE_BEGINNER
+            and bool(self.project_path)
+            and bool(self.steps)
+            and self.index >= 9
+        )
+
+    def run_model_unavailable_message(self) -> str:
+        if not self.project_path:
+            return (
+                "RUN MODEL은 Step 10에서 실행합니다.\n"
+                "먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요."
+            )
+        if not self.steps:
+            return (
+                "RUN MODEL은 Step 10에서 실행합니다.\n"
+                "먼저 프로젝트 분석 단계를 시작하세요."
+            )
+        if self.index == 8:
+            return (
+                "RUN MODEL은 Step 10에서 실행합니다.\n"
+                "Step 9에서는 로컬 서빙을 확인하고, 다음 단계로 이동하면 실행할 수 있습니다."
+            )
+        return (
+            "RUN MODEL은 Step 10에서 실행합니다.\n"
+            "먼저 Step 1~8을 순서대로 완료하세요."
+        )
+
     def run_local_model_training(self, *, after_repair: bool = False) -> str:
+        if not after_repair and not self.run_model_ready:
+            message = self.run_model_unavailable_message()
+            self.latest_message = message
+            return self.render_log()
         if not self.project_path:
             message = "먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요."
             self.latest_message = message
@@ -2774,6 +2808,10 @@ def run_tui(project_path: str = "") -> int:
         #run-model.chatbot {
             background: #238636;
         }
+        #run-model:disabled {
+            background: #2a2f35;
+            color: #8b949e;
+        }
         #cancel {
             width: 14;
             height: 3;
@@ -2978,6 +3016,12 @@ def run_tui(project_path: str = "") -> int:
             self._focus_command()
 
         def _run_local_model_training(self) -> None:
+            if not self.controller.run_model_ready:
+                self._input_status = "RUN MODEL은 Step 10에서 실행할 수 있습니다."
+                self.controller.run_local_model_training()
+                self._refresh()
+                self._focus_command()
+                return
             self._input_status = "RUN MODEL 실행 중..."
             self.query_one(StatusBar).update(self._input_status)
             self.controller.run_local_model_training()
@@ -3337,6 +3381,7 @@ def run_tui(project_path: str = "") -> int:
             multi_button.set_class(self.controller.multi_agent_enabled, "on")
             multi_button.set_class(not self.controller.multi_agent_enabled, "off")
             run_button = self.query_one(RunModelButton)
+            run_button.disabled = not self.controller.run_model_ready
             run_button.set_class(self.controller.agent_mode == "Build", "build")
             run_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).replace_text(self.controller.render_log())

@@ -2906,6 +2906,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('yield RunModelButton("RUN MODEL", id="run-model")', source)
         self.assertIn("def _run_local_model_training", source)
         self.assertIn("self.controller.run_local_model_training()", source)
+        self.assertIn("run_button.disabled = not self.controller.run_model_ready", source)
+        self.assertIn("#run-model:disabled", source)
         self.assertIn("run_button.set_class", source)
 
     def test_tui_sample_button_selection_creates_selected_sample(self):
@@ -4129,6 +4131,7 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "train.py").write_text("import mlflow\n")
             (root / "model.onnx").write_text("sample")
             controller = self.beginner_tui(str(root))
+            controller.submit("10")
 
             with patch("deep_agent.tui.run_beginner_mlflow_verification", return_value="RUN MODEL 버튼 실행 결과"):
                 output = controller.run_local_model_training()
@@ -4137,6 +4140,40 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertEqual(controller.index, 9)
             self.assertIn("Current: Tab 10/10", output)
             self.assertIn("RUN MODEL 버튼 실행 결과", controller.latest_message)
+
+    def test_tui_run_model_button_guides_before_step10(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+
+            with patch("deep_agent.tui.run_beginner_mlflow_verification") as verifier:
+                output = controller.run_local_model_training()
+
+            verifier.assert_not_called()
+            self.assertFalse(controller.run_model_ready)
+            self.assertEqual(controller.index, 0)
+            self.assertIn("RUN MODEL은 Step 10에서 실행합니다", output)
+            self.assertIn("Step 1~8", output)
+
+    def test_tui_run_model_button_guides_on_step9(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            controller.submit("9")
+
+            with patch("deep_agent.tui.run_beginner_mlflow_verification") as verifier:
+                output = controller.run_local_model_training()
+
+            verifier.assert_not_called()
+            self.assertFalse(controller.run_model_ready)
+            self.assertEqual(controller.index, 8)
+            self.assertIn("Step 9에서는 로컬 서빙을 확인", output)
 
     def test_tui_run_model_button_requires_project_path(self):
         controller = BeginnerTuiController("")
@@ -4154,6 +4191,7 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "train.py").write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
             controller = self.beginner_tui(str(root))
+            controller.submit("10")
 
             with patch("deep_agent.tui.run_beginner_mlflow_verification", return_value="Step 10 로컬 MLflow 실행 검증 결과\n- status: error\n- run_model.py 실행 실패"):
                 output = controller.run_local_model_training()
@@ -4171,6 +4209,7 @@ class WindowsSetupTest(unittest.TestCase):
             (root / "train.py").write_text("print('train')\n")
             (root / "model.keras").write_text("sample")
             controller = self.beginner_tui(str(root))
+            controller.submit("10")
 
             with patch(
                 "deep_agent.tui.run_beginner_mlflow_verification",
