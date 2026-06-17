@@ -41,6 +41,7 @@ from deep_agent.cli import (
     analyze_project,
     apply_fix_previews,
     apply_serving_fix_previews,
+    build_beginner_intro,
     build_beginner_step_tabs,
     build_fix_previews,
     build_serving_fix_previews,
@@ -1192,6 +1193,8 @@ class BeginnerTuiController:
             return format_tui_intermediate_screen(self.latest_message)
         if self.selected_launch_mode == MODE_ADVANCED:
             return format_tui_advanced_screen(self.latest_message)
+        if not self.steps:
+            return build_beginner_intro()
         return format_beginner_tab(self.index, len(self.steps), self.steps[self.index])
 
     def render_log(self) -> str:
@@ -1218,9 +1221,16 @@ class BeginnerTuiController:
         self.latest_message = ""
         if mode == MODE_BEGINNER:
             self.agent_mode = "Plan"
-            self.set_project(self.project_input)
-            if self.sample_message:
-                self.latest_message = self.sample_message
+            if self.project_input.strip():
+                self.set_project(self.project_input)
+                if self.sample_message:
+                    self.latest_message = self.sample_message
+            else:
+                self.project_path = ""
+                self.sample_message = None
+                self.applied_changes = None
+                self.steps = []
+                self.index = 0
             return self.current_screen()
         if mode == MODE_INTERMEDIATE:
             self.agent_mode = "Chatbot"
@@ -1566,6 +1576,9 @@ class BeginnerTuiController:
             return self.select_chat_code_policy("1")
         if not command and self.awaiting_model_selection:
             return self.select_model("")
+        if not command and self.selected_launch_mode == MODE_BEGINNER and not self.steps:
+            self.latest_message = ""
+            return self.current_screen()
         if not command:
             command = "다음"
 
@@ -1620,6 +1633,12 @@ class BeginnerTuiController:
             message = self.sample_message or ""
             self.latest_message = message
             return self.current_screen()
+
+        if self.selected_launch_mode == MODE_BEGINNER and not self.steps and self.agent_mode != "Chatbot":
+            self.set_project(command)
+            if self.sample_message:
+                self.latest_message = self.sample_message
+            return self.render_log() if self.latest_message else self.current_screen()
 
         if self.index == 3:
             return self._handle_issue_choice(command)

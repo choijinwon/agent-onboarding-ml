@@ -2315,7 +2315,42 @@ class WindowsSetupTest(unittest.TestCase):
 
             self.assertEqual(controller.selected_launch_mode, MODE_BEGINNER)
             self.assertEqual(controller.agent_mode, "Plan")
-            self.assertIn("Step 1. 프로젝트 선택", output)
+            self.assertEqual(controller.project_path, "")
+            self.assertEqual(controller.steps, [])
+            self.assertIn("초급자 모드가 선택되었습니다.", output)
+            self.assertIn("먼저 분석할 프로젝트 경로를 입력하세요.", output)
+            self.assertNotIn("Step 2. 프로젝트 자동 스캔", output)
+
+    def test_tui_beginner_launch_does_not_scan_current_repo_until_project_selected(self):
+        controller = BeginnerTuiController("")
+
+        output = controller.submit("1")
+        empty_output = controller.submit("")
+
+        self.assertEqual(controller.project_path, "")
+        self.assertEqual(controller.steps, [])
+        self.assertIn("초급자 모드가 선택되었습니다.", output)
+        self.assertIn("초급자 모드가 선택되었습니다.", empty_output)
+        self.assertNotIn("파일 수:", output)
+        self.assertNotIn("파일 수:", empty_output)
+
+    def test_tui_beginner_sample_number_runs_after_launch_selection(self):
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+
+                launch_output = controller.submit("1")
+                sample_output = controller.submit("3")
+            finally:
+                os.chdir(cwd)
+
+        self.assertEqual(controller.selected_launch_mode, MODE_BEGINNER)
+        self.assertIn("초급자 모드가 선택되었습니다.", launch_output)
+        self.assertIn("TensorFlow Keras 모델 테스트 샘플을 생성했습니다", sample_output)
+        self.assertIn("Step 1. 프로젝트 선택", sample_output)
+        self.assertTrue(controller.project_path)
 
     def test_tui_launch_mode_selects_intermediate_aliases(self):
         for value in ["2", "미드", "중급자", "intermediate"]:
@@ -4075,10 +4110,18 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Build에서 MLflow 실행 검증 후 Plan으로 자동 전환", controller.latest_message)
 
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
-        controller = self.beginner_tui("")
-        controller.submit("10")
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                controller = BeginnerTuiController("")
+                controller.submit("1")
+                controller.submit("3")
+                controller.submit("10")
 
-        output = controller.submit("다음")
+                output = controller.submit("다음")
+            finally:
+                os.chdir(cwd)
 
         self.assertEqual(controller.index, 0)
         self.assertIn("Current: Tab 1/10", output)
