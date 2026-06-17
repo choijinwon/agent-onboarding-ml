@@ -1034,9 +1034,7 @@ class ConsoleAssistant:
         while 0 <= index < len(steps):
             self.clear_fn()
             self.output_fn(format_beginner_tab(index, len(steps), steps[index]))
-            if index == len(steps) - 1:
-                return
-            prompt = "선택 번호 > " if index in {3, 5, 8} else "다음 > "
+            prompt = "선택 번호 > " if index in {3, 5, 8, 9} else "다음 > "
             raw = self.input_fn(prompt).strip()
             if self.change_mode(raw):
                 self.run_current_mode()
@@ -1099,6 +1097,17 @@ class ConsoleAssistant:
                     index += 1
                     continue
                 self.output_fn("번호로 선택하세요. 1=Step 9 자동 보완, 2=다음 단계")
+                continue
+            if index == 9:
+                if raw == "1":
+                    self.output_fn(run_beginner_mlflow_verification(project_path))
+                    continue
+                if raw in {"", "n", "next", "다음"}:
+                    return
+                if raw in {"q", "quit", "exit", "종료", "취소"}:
+                    self.output_fn("초급자 Wizard를 종료합니다. 파일은 추가로 수정하지 않았습니다.")
+                    return
+                self.output_fn("번호로 선택하세요. 1=로컬 MLflow 실행 검증, Enter=완료")
                 continue
             if raw in {"", "n", "next", "다음"}:
                 index += 1
@@ -4552,6 +4561,8 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
     report_path = Path(analysis.path or ".") / "ml-agent-report.json"
     register_plan_path = Path(analysis.path or ".") / "mlflow-registration-plan.json"
     job_template_path = Path(analysis.path or ".") / "job_template.yml"
+    mlruns_path = Path(analysis.path or ".") / "mlruns"
+    verification_path = Path(analysis.path or ".") / "mlflow-run-verification.json"
     rows = [
         "- 최종 결과 요약:",
         f"  - 프로젝트: {analysis.path}",
@@ -4559,6 +4570,7 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
         f"  - MLflow: {'정상' if analysis.has_mlflow_dependency or analysis.mlflow_usage_files else '보완 필요'}",
         f"  - Job Template: {'준비 가능' if analysis.job_template_ready else '보완 필요'}",
         f"  - 로컬 서빙: {analysis.local_serving.status}",
+        f"  - 로컬 MLflow 저장소: {'생성됨' if mlruns_path.exists() else '미생성'} ({mlruns_path})",
         f"  - 문제 수: {len(analysis.issue_details)}개",
     ]
     if analysis.model_parameters:
@@ -4582,6 +4594,9 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
             f"  - 실행: ml-agent register {analysis.path}",
             "  - MLFLOW_TRACKING_URL이 비어 있으면 file:./mlruns 로컬 저장소를 사용합니다.",
             f"  - 등록 계획 파일: {register_plan_path}",
+            "- Step 10 선택:",
+            "  1. 로컬 MLflow 실행 검증 및 mlruns 생성",
+            f"  - 검증 결과 파일: {verification_path}",
             "- Job Template YAML:",
             f"  - 저장 경로: {job_template_path}",
             f"  - 생성 명령: ml-agent serve {analysis.path}",
@@ -4591,6 +4606,42 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
             "- 콘솔에는 위 요약을 표시했고, 파일 저장은 사용자가 리포트 생성을 실행할 때 수행합니다.",
         ]
     )
+    return "\n".join(rows)
+
+
+def run_beginner_mlflow_verification(project_path: str) -> str:
+    root = resolve_filesystem_path(project_path or ".")
+    verification = run_mlflow_verification(root, skip_serving=True)
+    verification_path = root / "mlflow-run-verification.json"
+    if root.exists() and root.is_dir():
+        write_verification_file(verification_path, verification)
+    return format_beginner_mlflow_verification_result(root, verification, verification_path)
+
+
+def format_beginner_mlflow_verification_result(
+    root: Path,
+    verification: dict[str, object],
+    verification_path: Path,
+) -> str:
+    mlruns_path = root / "mlruns"
+    mlflow_run = verification.get("mlflow_run") if isinstance(verification.get("mlflow_run"), dict) else {}
+    metric_report = verification.get("metric_report") if isinstance(verification.get("metric_report"), dict) else {}
+    errors = verification.get("errors") if isinstance(verification.get("errors"), list) else []
+    rows = [
+        "Step 10 로컬 MLflow 실행 검증 결과",
+        f"- 상태: {verification.get('status')}",
+        f"- exit_code: {verification.get('exit_code')}",
+        f"- mlruns 폴더: {'생성됨' if mlruns_path.exists() else '미생성'} ({mlruns_path})",
+        f"- run_id: {mlflow_run.get('run_id', '-') if isinstance(mlflow_run, dict) else '-'}",
+        f"- metrics: {metric_report.get('metric_count', 0) if isinstance(metric_report, dict) else 0}",
+        f"- params: {metric_report.get('param_count', 0) if isinstance(metric_report, dict) else 0}",
+        f"- 결과 파일: {verification_path}",
+    ]
+    if errors:
+        rows.append("- 오류:")
+        rows.extend(f"  - {error}" for error in errors[:5])
+    if verification.get("status") != "ok":
+        rows.append("- 다음 조치: run_model.py, requirements.txt, ai_studio.env 설정을 확인한 뒤 Step 10을 다시 실행하세요.")
     return "\n".join(rows)
 
 

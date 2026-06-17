@@ -47,6 +47,7 @@ from deep_agent.cli import (
     format_model_parameters,
     handle_advanced_input,
     handle_intermediate_request,
+    run_beginner_mlflow_verification,
     ensure_standard_ml_dl_template,
     list_existing_work_projects,
     copy_text_to_clipboard,
@@ -1598,6 +1599,8 @@ class BeginnerTuiController:
             return self.start_ai_studio_env_setup()
         if self.index == 8 and command in {"1", "2"}:
             return self._handle_serving_choice(command)
+        if self.index == 9 and command == "1":
+            return self._handle_report_choice(command)
         if is_wizard_navigation(command, self.total):
             return self._handle_navigation(command)
         if self.agent_mode != "Chatbot":
@@ -2199,6 +2202,14 @@ class BeginnerTuiController:
         self.agent_mode = "Plan"
         result = f"{result}\n- Agent 모드: Build에서 Step 9 보완 적용 후 Plan으로 자동 전환했습니다."
         self.latest_message = result
+        return self.current_screen()
+
+    def _handle_report_choice(self, command: str) -> str:
+        self.agent_mode = "Build"
+        result = run_beginner_mlflow_verification(self.project_path)
+        self.agent_mode = "Plan"
+        self.latest_message = f"{result}\n- Agent 모드: Build에서 MLflow 실행 검증 후 Plan으로 자동 전환했습니다."
+        self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
         return self.current_screen()
 
     def _handle_navigation(self, command: str) -> str:

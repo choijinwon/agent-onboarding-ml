@@ -57,6 +57,7 @@ from deep_agent.cli import (
     resolve_existing_sample_project,
     resolve_existing_work_project,
     resolve_beginner_project_input,
+    run_beginner_mlflow_verification,
     run_model_source,
     sample_projects_root,
 )
@@ -452,6 +453,25 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("uvicorn", requirements_text)
             self.assertTrue(any("Step 9 로컬 서빙 보완을 승인했습니다" in output for output in outputs))
 
+    def test_beginner_console_step10_runs_local_mlflow_verification_on_choice_one(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            inputs = iter([str(root), "10", "1", "종료"])
+            outputs: list[str] = []
+            assistant = ConsoleAssistant(
+                input_fn=lambda prompt: next(inputs),
+                output_fn=outputs.append,
+                clear_fn=lambda: None,
+            )
+
+            with patch("deep_agent.cli.run_beginner_mlflow_verification", return_value="Step 10 로컬 MLflow 실행 검증 결과"):
+                assistant.run_beginner_mode()
+
+            self.assertTrue(any("Step 10 로컬 MLflow 실행 검증 결과" in output for output in outputs))
+
     def test_beginner_wizard_is_read_only_first(self):
         output = build_beginner_wizard("/workspace/my-model")
 
@@ -691,12 +711,28 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("Step 10. 분석 리포트 생성", output)
             self.assertIn("최종 결과 요약", output)
-            self.assertIn("등록 상태: 등록 가능", output)
-            self.assertIn("로컬 서빙: 준비 가능", output)
-            self.assertIn("남은 문제: 없음", output)
-            self.assertIn("저장 경로:", output)
-            self.assertIn("ml-agent-report.json", output)
-            self.assertIn("저장 명령: ml-agent report", output)
+            self.assertIn("로컬 MLflow 저장소: 미생성", output)
+            self.assertIn("1. 로컬 MLflow 실행 검증 및 mlruns 생성", output)
+
+    def test_beginner_step10_mlflow_verification_result_reports_mlruns(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "mlruns").mkdir()
+            with patch("deep_agent.cli.run_mlflow_verification") as run_mock:
+                run_mock.return_value = {
+                    "status": "ok",
+                    "exit_code": 0,
+                    "errors": [],
+                    "mlflow_run": {"run_id": "abc123"},
+                    "metric_report": {"metric_count": 2, "param_count": 3},
+                }
+
+                output = run_beginner_mlflow_verification(str(root))
+
+            self.assertIn("Step 10 로컬 MLflow 실행 검증 결과", output)
+            self.assertIn("mlruns 폴더: 생성됨", output)
+            self.assertIn("run_id: abc123", output)
+            self.assertTrue((root / "mlflow-run-verification.json").exists())
 
     def test_heavy_model_sample_can_be_selected_from_step1(self):
         with TemporaryDirectory() as tmpdir:
@@ -3933,6 +3969,23 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertTrue((root / "serving_app.py").exists())
             self.assertIn("fastapi", requirements.read_text(encoding="utf-8").lower())
             self.assertIn("uvicorn", requirements.read_text(encoding="utf-8").lower())
+
+    def test_tui_beginner_step10_choice_one_runs_local_mlflow_verification(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            controller.submit("10")
+
+            with patch("deep_agent.tui.run_beginner_mlflow_verification", return_value="Step 10 로컬 MLflow 실행 검증 결과"):
+                output = controller.submit("1")
+
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertIn("Current: Tab 10/10", output)
+            self.assertIn("Step 10 로컬 MLflow 실행 검증 결과", controller.latest_message)
+            self.assertIn("Build에서 MLflow 실행 검증 후 Plan으로 자동 전환", controller.latest_message)
 
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
         controller = self.beginner_tui("")
