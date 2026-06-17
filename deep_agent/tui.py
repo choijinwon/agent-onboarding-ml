@@ -21,7 +21,12 @@ from deep_agent.stores.chat_session_store import (
     load_chat_context_summary,
     save_chat_context_summary,
 )
-from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki
+from deep_agent.stores.prompt_store import (
+    append_used_prompt_to_wiki,
+    export_prompt_templates_to_wiki,
+    format_wiki_recent_prompt_for_tui,
+    format_wiki_today_for_tui,
+)
 
 from deep_agent.cli import (
     AppliedChange,
@@ -59,12 +64,14 @@ from deep_agent.cli import (
     resolve_beginner_project_input,
 )
 from deep_agent.runtime import DeepAgentsRuntime, build_deepagents_system_prompt
-from deep_agent.qwen_chat import QwenChatConfig
+from deep_agent.qwen_chat import QwenChatConfig, chat_with_qwen
 
 
 EXIT_COMMANDS = {"/exit", "exit", "quit", "q", "종료"}
 HELP_COMMANDS = {"/help", "help", "도움말", "/도움말", "?"}
 COMPACT_COMMANDS = {"/compact", "/요약", "/context compact", "context compact", "컨텍스트 압축"}
+WIKI_COMMANDS = {"/wiki", "/위키", "wiki", "위키"}
+WIKI_LAST_COMMANDS = {"/wiki last", "/위키 최근", "wiki last", "위키 최근"}
 AGENT_MODES = ("Plan", "Build", "Chatbot")
 AGENT_MODE_DISPLAY = {
     "Plan": "PLAN",
@@ -148,6 +155,10 @@ class CancelButton:
 
 
 class ClearButton:
+    pass
+
+
+class MultiAgentButton:
     pass
 
 
@@ -353,6 +364,9 @@ def format_tui_help_screen(
         "         Ctrl+Enter             입력 제출",
         "         CLEAR 버튼             input 전체 삭제",
         "         Ctrl+L / Ctrl+U        input 전체 삭제",
+        "         MULTI ON/OFF 버튼      멀티에이전트 사용 전환",
+        "         /wiki                 오늘 저장된 Agent 응답 목록",
+        "         /wiki last            최근 Agent 응답 화면 표시",
         "         /mode beginner         초급자 모드 전환",
         "         /mode intermediate     중급자 모드 전환",
         "         /mode advanced         고급자 모드 전환",
@@ -1134,6 +1148,22 @@ class BeginnerTuiController:
             self.activate_launch_mode(self.selected_launch_mode)
 
     @property
+    def multi_agent_enabled(self) -> bool:
+        return self.app_config.get_bool("ENABLE_MULTI_AGENT")
+
+    def toggle_multi_agent(self) -> str:
+        enabled = not self.multi_agent_enabled
+        self.app_config.values["ENABLE_MULTI_AGENT"] = "true" if enabled else "false"
+        self.deepagents_runtime = DeepAgentsRuntime(self.app_config)
+        message = (
+            "멀티에이전트가 ON으로 변경되었습니다. 복잡한 분석은 더 깊게 처리하지만 응답이 느릴 수 있습니다."
+            if enabled
+            else "멀티에이전트가 OFF로 변경되었습니다. CHAT 일반 질문은 Qwen 단일 호출로 빠르게 응답합니다."
+        )
+        self.latest_message = message
+        return message
+
+    @property
     def total(self) -> int:
         return len(self.steps) if self.steps else 0
 
@@ -1713,6 +1743,15 @@ class BeginnerTuiController:
         return None
 
     def handle_chat_message(self, command: str) -> str:
+        normalized_command = " ".join(command.strip().lower().split())
+        if normalized_command in WIKI_LAST_COMMANDS:
+            response = format_wiki_recent_prompt_for_tui(self.app_config)
+            self.latest_message = response
+            return response
+        if normalized_command in WIKI_COMMANDS:
+            response = format_wiki_today_for_tui(self.app_config)
+            self.latest_message = response
+            return response
         if command.strip() in COMPACT_COMMANDS:
             response = self.compact_chat_context(reason="manual")
             self.latest_message = response
@@ -1720,10 +1759,10 @@ class BeginnerTuiController:
             return response
         if is_greeting(command):
             response = greeting_response()
+            self._save_chat_session(command, response, [], None)
+            response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode="Chat"))
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, [])
-            self._save_chat_session(command, response, [], None)
-            self._save_used_prompt(command, response, agent_mode="Chat")
             return response
         chat_apply_approved = is_chat_apply_approved(command)
         template_requested = is_standard_template_request(command)
@@ -1732,13 +1771,26 @@ class BeginnerTuiController:
         fix_requested = is_fix_request(command) or coding_requested or template_requested or bool(blocked_reasons)
         if fix_requested and not self.project_path:
             response = "코드 수정 기능을 사용하려면 먼저 프로젝트 폴더를 선택하세요. FILE 버튼 또는 /folder 명령으로 선택할 수 있습니다."
+            self._save_chat_session(command, response, [], None)
+            response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode="Build"))
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, [])
-            self._save_chat_session(command, response, [], None)
-            self._save_used_prompt(command, response, agent_mode="Build")
             return response
         use_autofix = should_use_autofix_chat(command) or chat_apply_approved
         runtime_mode = "Build" if (chat_apply_approved or coding_requested) else ("AutoFix" if use_autofix else "Chat")
+        if not self.multi_agent_enabled and runtime_mode == "Chat":
+            response = chat_with_qwen(
+                self._runtime_prompt_with_context(command),
+                config=self.qwen_config,
+                project_path=self.project_path,
+                agent_mode="Chat",
+            )
+            self._save_chat_session(command, response, [], None)
+            response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode="Chat"))
+            self.latest_message = response
+            self._append_or_replace_chat_log(command, response, [])
+            self._capture_agent_response_choices(response)
+            return response
         result = self._invoke_deepagents(command, agent_mode=runtime_mode)
         applied_changes: list[AppliedChange] = []
         if template_requested and chat_apply_approved:
@@ -1748,40 +1800,41 @@ class BeginnerTuiController:
                 applied_changes.extend(self._apply_chat_code_policy(command, result.content, include_review=False))
                 final_analysis = analyze_project(self.project_path)
                 response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
+                self._save_chat_session(command, response, applied_changes, final_analysis)
+                response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode=runtime_mode))
                 self.latest_message = response
                 self._append_or_replace_chat_log(command, response, applied_changes)
-                self._save_chat_session(command, response, applied_changes, final_analysis)
-                self._save_used_prompt(command, response, agent_mode=runtime_mode)
                 self._capture_agent_response_choices(response)
                 return response
             policy_response = self._start_chat_code_policy(command, result.content)
-            self._append_or_replace_chat_log(command, policy_response, [])
             self._save_chat_session(command, policy_response, [], analyze_project(self.project_path))
-            self._save_used_prompt(command, policy_response, agent_mode=runtime_mode)
+            policy_response = self._with_wiki_notice(policy_response, self._save_used_prompt(command, policy_response, agent_mode=runtime_mode))
+            self.latest_message = policy_response
+            self._append_or_replace_chat_log(command, policy_response, [])
             return policy_response
         if (result.used_deepagents and use_autofix) or (chat_apply_approved and not result.used_deepagents):
             applied_changes.extend(self._apply_fixable_issues_after_chat())
             final_analysis = analyze_project(self.project_path)
             response = self._format_chatbot_response(result.content, applied_changes, final_analysis)
+            self._save_chat_session(command, response, applied_changes, final_analysis)
+            response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode=runtime_mode))
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, applied_changes)
-            self._save_chat_session(command, response, applied_changes, final_analysis)
-            self._save_used_prompt(command, response, agent_mode=runtime_mode)
             self._capture_agent_response_choices(response)
             return response
         if result.used_deepagents:
             response = result.content
+            self._save_chat_session(command, response, applied_changes, None)
+            response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode=runtime_mode))
             self.latest_message = response
             self._append_or_replace_chat_log(command, response, applied_changes)
-            self._save_chat_session(command, response, applied_changes, None)
-            self._save_used_prompt(command, response, agent_mode=runtime_mode)
             self._capture_agent_response_choices(response)
             return response
         response = f"{result.content}\n파일은 수정하지 않았습니다."
+        self._save_chat_session(command, response, applied_changes, analyze_project(self.project_path) if use_autofix else None)
+        response = self._with_wiki_notice(response, self._save_used_prompt(command, response, agent_mode=runtime_mode))
         self.latest_message = response
         self._append_or_replace_chat_log(command, response, applied_changes)
-        self._save_chat_session(command, response, applied_changes, analyze_project(self.project_path) if use_autofix else None)
-        self._save_used_prompt(command, response, agent_mode=runtime_mode)
         self._capture_agent_response_choices(response)
         return response
 
@@ -1867,12 +1920,14 @@ class BeginnerTuiController:
             self.latest_message = message
             return message
         if command == "1":
+            self.awaiting_chat_code_policy = False
             return self._apply_pending_chat_code_policy(include_review=False)
         if command == "2":
             message = self._format_review_required_preview(plan)
             self.latest_message = message
             return message
         if command == "3":
+            self.awaiting_chat_code_policy = False
             return self._apply_pending_chat_code_policy(include_review=True)
         if command == "4":
             self.awaiting_chat_code_policy = False
@@ -1907,11 +1962,28 @@ class BeginnerTuiController:
             message = "대기 중인 수정안이 없습니다."
             self.latest_message = message
             return message
+        pending_command = self.pending_chat_command
+        pending_agent_content = self.pending_chat_agent_content
+        self.awaiting_chat_code_policy = False
+        self.awaiting_agent_response_choice = False
+        self.agent_response_choices = []
         previews = list(plan.safe)
         if include_review:
             previews.extend(plan.review_required)
-        applied_changes = self._apply_chat_previews(previews)
-        final_analysis = analyze_project(self.project_path)
+        try:
+            applied_changes = self._apply_chat_previews(previews)
+            final_analysis = analyze_project(self.project_path)
+        except Exception as exc:
+            self.agent_mode = "Plan"
+            self._append_chat_error(pending_command, exc)
+            message = (
+                "수정 적용 중 오류가 발생했습니다.\n"
+                "- 파일 적용은 중단했고 Plan 모드로 돌아왔습니다.\n"
+                f"- 오류: {exc}"
+            )
+            self.pending_chat_code_policy = None
+            self.latest_message = message
+            return message
         rows = [
             "수정 정책: 승인 기반 자동수정",
             "- Build 모드로 전환해 승인된 항목만 적용했습니다.",
@@ -1921,15 +1993,13 @@ class BeginnerTuiController:
             rows.append("수정 차단")
             rows.extend(f"- {reason}" for reason in plan.blocked)
         rows.append("")
-        rows.append(self._format_chatbot_response(self.pending_chat_agent_content, applied_changes, final_analysis))
+        rows.append(self._format_chatbot_response(pending_agent_content, applied_changes, final_analysis))
         response = "\n".join(rows)
-        self.awaiting_chat_code_policy = False
         self.pending_chat_code_policy = None
         self.latest_message = response
-        self._append_or_replace_chat_log(self.pending_chat_command, response, applied_changes)
-        self._save_chat_session(self.pending_chat_command, response, applied_changes, final_analysis)
-        self._save_used_prompt(self.pending_chat_command, response, agent_mode="Build")
-        self._capture_agent_response_choices(response)
+        self._append_or_replace_chat_log(pending_command, response, applied_changes)
+        self._save_chat_session(pending_command, response, applied_changes, final_analysis)
+        self._save_used_prompt(pending_command, response, agent_mode="Build")
         return response
 
     def _apply_chat_code_policy(
@@ -2090,8 +2160,8 @@ class BeginnerTuiController:
             },
         )
 
-    def _save_used_prompt(self, user_message: str, agent_response: str, *, agent_mode: str) -> None:
-        append_used_prompt_to_wiki(
+    def _save_used_prompt(self, user_message: str, agent_response: str, *, agent_mode: str) -> list[Path]:
+        return append_used_prompt_to_wiki(
             self.app_config,
             {
                 "project_path": self.project_path,
@@ -2101,7 +2171,20 @@ class BeginnerTuiController:
                 "launch_mode": self.selected_launch_mode or "",
                 "selected_model": self.qwen_model,
                 "response_summary": agent_response,
+                "agent_response": agent_response,
             },
+        )
+
+    def _with_wiki_notice(self, response: str, paths: list[Path]) -> str:
+        dated_markdown = next((path for path in paths if path.suffix == ".md" and path.parent.name == "used"), None)
+        markdown_path = dated_markdown or next((path for path in paths if path.suffix == ".md"), None)
+        if markdown_path is None:
+            return response
+        return (
+            f"{response}\n\n"
+            "Wiki 저장됨\n"
+            f"- 파일: {markdown_path}\n"
+            "- 화면에서 다시 보기: /wiki last"
         )
 
     def _handle_chat_fix_request(self, command: str, unavailable_reason: str = "") -> str:
@@ -2153,19 +2236,30 @@ class BeginnerTuiController:
 
     def _handle_approval_choice(self, command: str) -> str:
         if command == "1":
-            analysis = analyze_project(self.project_path)
-            previews = build_fix_previews(analysis)
-            if not previews:
-                self.index += 1
-                message = "자동 수정할 항목이 없어 Step 6을 스킵했습니다. 파일은 수정하지 않았습니다."
-                self.latest_message = message
-                return self.current_screen()
             self.agent_mode = "Build"
-            self.applied_changes = apply_fix_previews(self.project_path, previews)
-            self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
-            result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
-            self.index += 1
-            self.agent_mode = "Plan"
+            try:
+                analysis = analyze_project(self.project_path)
+                previews = build_fix_previews(analysis)
+                if not previews:
+                    self.index += 1
+                    message = "자동 수정할 항목이 없어 Step 6을 스킵했습니다. 파일은 수정하지 않았습니다."
+                    self.latest_message = message
+                    return self.current_screen()
+                self.applied_changes = apply_fix_previews(self.project_path, previews)
+                self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+                result = format_beginner_apply_result(self.applied_changes, analyze_project(self.project_path))
+                self.index += 1
+            except Exception as exc:
+                self.index = 5
+                self._append_chat_error("Step 6 승인 적용", exc)
+                self.latest_message = (
+                    "Step 6 수정 적용 중 오류가 발생했습니다.\n"
+                    "- 파일 적용을 중단하고 Plan 모드로 돌아왔습니다.\n"
+                    f"- 오류: {exc}"
+                )
+                return self.current_screen()
+            finally:
+                self.agent_mode = "Plan"
             result = f"{result}\n- Agent 모드: Build에서 수정 적용 후 Plan으로 자동 전환했습니다."
             self.latest_message = result
             return self.current_screen()
@@ -2232,7 +2326,7 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CancelButton, ClearButton, CommandInput, FileButton, LogView, ModeSelector, SampleButton, SendButton, StatusBar
+    global AIOnboardingTuiApp, CancelButton, ClearButton, CommandInput, FileButton, LogView, ModeSelector, MultiAgentButton, SampleButton, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
@@ -2349,6 +2443,9 @@ def run_tui(project_path: str = "") -> int:
         pass
 
     class ClearButton(Button):
+        pass
+
+    class MultiAgentButton(Button):
         pass
 
     class AIOnboardingTuiApp(App[None]):
@@ -2475,6 +2572,22 @@ def run_tui(project_path: str = "") -> int:
         #clear.chatbot {
             background: #223a2b;
         }
+        #multi-agent {
+            width: 18;
+            height: 3;
+            margin-right: 1;
+            background: #30363d;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #multi-agent.off {
+            background: #1f2a36;
+            color: #58a6ff;
+        }
+        #multi-agent.on {
+            background: #3a2f18;
+            color: #f0b429;
+        }
         #cancel {
             width: 14;
             height: 3;
@@ -2533,6 +2646,7 @@ def run_tui(project_path: str = "") -> int:
                         yield FileButton("FILE", id="file")
                         yield SampleButton("SAMPLE", id="sample")
                         yield ClearButton("CLEAR", id="clear")
+                        yield MultiAgentButton("MULTI ON", id="multi-agent")
                         yield CancelButton("CANCEL", id="cancel", disabled=True)
                         yield SendButton("SEND  Enter", id="send")
                 yield StatusBar("", id="status")
@@ -2653,6 +2767,10 @@ def run_tui(project_path: str = "") -> int:
                 event.stop()
                 self._clear_command_input()
                 return
+            if event.button.id == "multi-agent":
+                event.stop()
+                self._toggle_multi_agent()
+                return
             if event.button.id == "cancel":
                 event.stop()
                 self._cancel_chatbot_request()
@@ -2661,6 +2779,12 @@ def run_tui(project_path: str = "") -> int:
                 return
             event.stop()
             self._submit_command_input()
+
+        def _toggle_multi_agent(self) -> None:
+            message = self.controller.toggle_multi_agent()
+            self._input_status = message
+            self._refresh()
+            self._focus_command()
 
         def _cancel_chatbot_request(self) -> None:
             request_id = self._active_chatbot_request_id
@@ -3010,6 +3134,10 @@ def run_tui(project_path: str = "") -> int:
             clear_button = self.query_one(ClearButton)
             clear_button.set_class(self.controller.agent_mode == "Build", "build")
             clear_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
+            multi_button = self.query_one(MultiAgentButton)
+            multi_button.label = "MULTI ON" if self.controller.multi_agent_enabled else "MULTI OFF"
+            multi_button.set_class(self.controller.multi_agent_enabled, "on")
+            multi_button.set_class(not self.controller.multi_agent_enabled, "off")
             self.query_one(LogView).replace_text(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
@@ -3046,6 +3174,7 @@ __all__ = [
     "format_folder_choices",
     "format_sample_choices",
     "ModeSelector",
+    "MultiAgentButton",
     "SendButton",
     "LogView",
     "StatusBar",

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import types
 from contextlib import redirect_stdout
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,7 +27,13 @@ from deep_agent.path_utils import filesystem_path_candidates, is_windows_absolut
 from deep_agent.runtime import DeepAgentsRunResult, DeepAgentsRuntime, build_deepagents_system_prompt, extract_deepagents_content
 from deep_agent.stores.chat_session_store import append_chat_session_event, mask_sensitive_text
 from deep_agent.stores.error_log_store import analyze_error_log, list_error_logs, save_error_log
-from deep_agent.stores.prompt_store import append_used_prompt_to_wiki, export_prompt_templates_to_wiki, load_prompt_templates
+from deep_agent.stores.prompt_store import (
+    append_used_prompt_to_wiki,
+    dated_used_prompts_paths,
+    export_prompt_templates_to_wiki,
+    format_wiki_recent_prompt_for_tui,
+    load_prompt_templates,
+)
 from deep_agent.qwen_chat import QwenChatConfig, chat_with_qwen
 from deep_agent.cli import (
     ConsoleAssistant,
@@ -86,6 +93,7 @@ from deep_agent.tui import (
     is_fix_request,
     missing_textual_message,
     model_selection_placeholder,
+    MultiAgentButton,
     agent_response_choice_placeholder,
     sample_selection_placeholder,
     normalize_input_path,
@@ -448,6 +456,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("선택 번호 > ", prompts)
             self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "job_template.yml").exists())
             requirements_text = requirements.read_text(encoding="utf-8").lower()
             self.assertIn("fastapi", requirements_text)
             self.assertIn("uvicorn", requirements_text)
@@ -674,7 +683,7 @@ class BeginnerWizardTest(unittest.TestCase):
 
             self.assertIn("Step 9. 로컬 서빙 테스트", output)
             self.assertIn("자동 보완 가능 항목", output)
-            self.assertIn("1. 승인 후 Step 9 자동 보완", output)
+            self.assertIn("1. 승인 후 Step 9 자동 보완 + Job Template 생성", output)
             self.assertIn("serving_app.py", output)
 
     def test_serving_fix_previews_apply_safe_step9_files(self):
@@ -694,6 +703,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertTrue((root / "input_example.json").exists())
             self.assertTrue((root / "config.json").exists())
             self.assertTrue((root / "aiu_custom" / "predict.py").exists())
+            self.assertTrue((root / "job_template.yml").exists())
+            self.assertIn("kind: JobTemplate", (root / "job_template.yml").read_text(encoding="utf-8"))
             requirements_text = requirements.read_text(encoding="utf-8").lower()
             self.assertIn("fastapi", requirements_text)
             self.assertIn("uvicorn", requirements_text)
@@ -712,7 +723,7 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("Step 10. 분석 리포트 생성", output)
             self.assertIn("최종 결과 요약", output)
             self.assertIn("로컬 MLflow 저장소: 미생성", output)
-            self.assertIn("1. 로컬 MLflow 실행 검증 및 mlruns 생성", output)
+            self.assertIn("1. 로컬 MLflow 실행 검증 + mlruns 생성 + Job Template 갱신", output)
 
     def test_beginner_step10_mlflow_verification_result_reports_mlruns(self):
         with TemporaryDirectory() as tmpdir:
@@ -733,6 +744,8 @@ class BeginnerWizardTest(unittest.TestCase):
             self.assertIn("mlruns 폴더: 생성됨", output)
             self.assertIn("run_id: abc123", output)
             self.assertTrue((root / "mlflow-run-verification.json").exists())
+            self.assertTrue((root / "job_template.yml").exists())
+            self.assertIn("Job Template: 생성됨", output)
 
     def test_heavy_model_sample_can_be_selected_from_step1(self):
         with TemporaryDirectory() as tmpdir:
@@ -2803,6 +2816,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('SampleButton("SAMPLE", id="sample")', source)
         self.assertIn("ClearButton", source)
         self.assertIn('ClearButton("CLEAR", id="clear")', source)
+        self.assertIn("MultiAgentButton", source)
+        self.assertIn('MultiAgentButton("MULTI ON", id="multi-agent")', source)
         self.assertIn("CancelButton", source)
         self.assertIn('CancelButton("CANCEL", id="cancel"', source)
         self.assertIn('Vertical(id="input-area")', source)
@@ -2817,6 +2832,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("self.controller.start_sample_selection()", source)
         self.assertIn('event.button.id == "clear"', source)
         self.assertIn("self._clear_command_input()", source)
+        self.assertIn('event.button.id == "multi-agent"', source)
+        self.assertIn("self._toggle_multi_agent()", source)
         self.assertIn('event.button.id == "cancel"', source)
         self.assertIn("self._cancel_chatbot_request()", source)
         self.assertIn('event.button.id != "send"', source)
@@ -2831,6 +2848,14 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("def _clear_command_input", source)
         self.assertIn('command.value = ""', source)
         self.assertIn("clear_button.set_class", source)
+
+    def test_tui_supports_multi_agent_toggle_button(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("class MultiAgentButton(Button)", source)
+        self.assertIn('yield MultiAgentButton("MULTI ON", id="multi-agent")', source)
+        self.assertIn('multi_button.label = "MULTI ON" if self.controller.multi_agent_enabled else "MULTI OFF"', source)
+        self.assertIn("chat_with_qwen(", source)
 
     def test_tui_sample_button_selection_creates_selected_sample(self):
         with TemporaryDirectory() as tmpdir:
@@ -3592,6 +3617,8 @@ class WindowsSetupTest(unittest.TestCase):
                 os.chdir(cwd)
 
             self.assertIn("PLAN은 읽기 전용", output)
+            self.assertIn("Wiki 저장됨", output)
+            self.assertIn("/wiki last", output)
             self.assertNotIn("최종 등록 상태", output)
             self.assertEqual(fake.calls[-1], ("PLAN BUILD CHAT 차이를 알려줘", str(root), "Chat"))
             session_file = next((Path(tmpdir) / ".aiu" / "sessions").glob("chat-session-*.jsonl"))
@@ -3602,10 +3629,45 @@ class WindowsSetupTest(unittest.TestCase):
             used_prompt_payload = json.loads(used_prompt_file.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(used_prompt_payload["user_prompt"], "PLAN BUILD CHAT 차이를 알려줘")
             self.assertEqual(used_prompt_payload["agent_mode"], "Chat")
+            self.assertIn("agent_response", used_prompt_payload)
             self.assertIn(
                 "PLAN BUILD CHAT 차이를 알려줘",
                 (Path(tmpdir) / "deep_agent" / "wiki" / "prompts" / "used_prompts.md").read_text(encoding="utf-8"),
             )
+            wiki_last = controller.submit("/wiki last")
+            self.assertIn("Wiki 최근 Agent 응답", wiki_last)
+            self.assertIn("PLAN은 읽기 전용", wiki_last)
+
+    def test_tui_multi_agent_toggle_routes_general_chat_to_direct_qwen(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def invoke(self, prompt, *, project_path="", agent_mode="Plan"):
+                self.calls.append((prompt, project_path, agent_mode))
+                return DeepAgentsRunResult("DeepAgents 응답", True)
+
+        with TemporaryDirectory() as tmpdir:
+            cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                root = Path(tmpdir) / "project"
+                root.mkdir()
+                fake = FakeRuntime()
+                controller = self.beginner_tui(str(root), deepagents_runtime=fake)
+                controller.select_agent_mode("Chatbot")
+
+                toggle_message = controller.toggle_multi_agent()
+                with patch("deep_agent.tui.chat_with_qwen", return_value="Qwen 단일 호출 응답") as qwen_mock:
+                    output = controller.submit("간단히 설명해줘")
+            finally:
+                os.chdir(cwd)
+
+            self.assertFalse(controller.multi_agent_enabled)
+            self.assertIn("멀티에이전트가 OFF", toggle_message)
+            self.assertIn("Qwen 단일 호출 응답", output)
+            self.assertEqual(fake.calls, [])
+            qwen_mock.assert_called_once()
 
     def test_compacted_runtime_prompt_includes_summary_recent_and_current_request(self):
         prompt = build_compacted_runtime_prompt(
@@ -3760,6 +3822,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("DeepAgents 수정 완료", output)
             self.assertIn("수정 정책: 승인 기반 자동수정", output)
             self.assertTrue(controller.awaiting_chat_code_policy is False)
+            self.assertTrue(controller.awaiting_agent_response_choice is False)
             self.assertIn("자동 수정 결과", approved)
             self.assertEqual(fake.calls[-1], ("코드 자동 수정해줘", str(root), "AutoFix"))
             self.assertIn("mlflow", requirements.read_text().lower())
@@ -3950,6 +4013,26 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertNotIn("import mlflow", train.read_text())
             self.assertTrue((root / "run_model.py").exists())
 
+    def test_tui_beginner_step6_apply_error_returns_to_plan_without_freeze(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            train = root / "train.py"
+            requirements.write_text("tensorflow==2.17.0\n")
+            train.write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = self.beginner_tui(str(root))
+            for _ in range(5):
+                controller.submit("다음")
+
+            with patch("deep_agent.tui.apply_fix_previews", side_effect=RuntimeError("apply failed")):
+                output = controller.submit("1")
+
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertEqual(controller.index, 5)
+            self.assertIn("Step 6 수정 적용 중 오류", controller.latest_message)
+            self.assertIn("Current: Tab 6/10", output)
+
     def test_tui_beginner_step9_approval_repairs_serving_then_returns_to_plan(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3967,6 +4050,7 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Current: Tab 9/10", output)
             self.assertIn("Build에서 Step 9 보완 적용 후 Plan으로 자동 전환", controller.latest_message)
             self.assertTrue((root / "serving_app.py").exists())
+            self.assertTrue((root / "job_template.yml").exists())
             self.assertIn("fastapi", requirements.read_text(encoding="utf-8").lower())
             self.assertIn("uvicorn", requirements.read_text(encoding="utf-8").lower())
 
@@ -4177,17 +4261,24 @@ class PromptAndSkillStoreTest(unittest.TestCase):
                     "launch_mode": "beginner",
                     "selected_model": "qwen3.6",
                     "response_summary": "분석 완료",
+                    "agent_response": "분석 완료\n전체 응답입니다.",
                 },
             )
 
             jsonl_path = root / "deep_agent" / "wiki" / "prompts" / "used_prompts.jsonl"
             markdown_path = root / "deep_agent" / "wiki" / "prompts" / "used_prompts.md"
-            self.assertEqual(paths, [jsonl_path, markdown_path])
+            dated_jsonl_path, dated_markdown_path = dated_used_prompts_paths(config, datetime.fromisoformat(json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[-1])["timestamp"]))
+            self.assertEqual(paths, [jsonl_path, markdown_path, dated_jsonl_path, dated_markdown_path])
             payload = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(payload["user_prompt"], "프로젝트 분석해줘")
             self.assertEqual(payload["agent_mode"], "AutoFix")
+            self.assertEqual(payload["agent_response"], "분석 완료\n전체 응답입니다.")
             self.assertIn("프로젝트 분석해줘", markdown_path.read_text(encoding="utf-8"))
             self.assertIn("분석 완료", markdown_path.read_text(encoding="utf-8"))
+            self.assertTrue(dated_jsonl_path.exists())
+            self.assertTrue(dated_markdown_path.exists())
+            self.assertIn("### Agent Response", dated_markdown_path.read_text(encoding="utf-8"))
+            self.assertIn("전체 응답입니다.", format_wiki_recent_prompt_for_tui(config))
 
     def test_cli_start_exports_prompt_templates_to_wiki(self):
         with TemporaryDirectory() as tmpdir:

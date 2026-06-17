@@ -2822,7 +2822,25 @@ def apply_serving_fix_previews(project_path: str, previews: list[FixPreview]) ->
                     message="지원하지 않는 Step 9 보완 항목이라 적용하지 않았습니다.",
                 )
             )
+    changes.append(ensure_job_template(root, analyze_project(str(root))))
     return changes
+
+
+def ensure_job_template(root: Path, analysis: ProjectAnalysis, serving_result: dict[str, object] | None = None) -> AppliedChange:
+    if not root.exists() or not root.is_dir():
+        return AppliedChange(
+            code="CREATE_JOB_TEMPLATE",
+            target=str(root / "job_template.yml"),
+            status="skipped",
+            message="프로젝트 폴더가 없어 Job Template을 생성하지 않았습니다.",
+        )
+    path = write_job_template_file(root, analysis, serving_result=serving_result)
+    return AppliedChange(
+        code="CREATE_JOB_TEMPLATE",
+        target=str(path),
+        status="applied",
+        message="Job Template YAML을 생성했습니다.",
+    )
 
 
 def ai_studio_scaffold_missing(project_path: str) -> bool:
@@ -4546,7 +4564,7 @@ def format_beginner_local_serving(analysis: ProjectAnalysis) -> str:
                 "- 자동 보완 가능 항목:",
                 *[f"  - {preview.target}: {preview.title}" for preview in serving_previews],
                 "- 사용자 선택:",
-                "  1. 승인 후 Step 9 자동 보완",
+                "  1. 승인 후 Step 9 자동 보완 + Job Template 생성",
                 "  2. 보완하지 않고 다음 단계로 진행",
             ]
         )
@@ -4595,7 +4613,7 @@ def format_beginner_report(analysis: ProjectAnalysis) -> str:
             "  - MLFLOW_TRACKING_URL이 비어 있으면 file:./mlruns 로컬 저장소를 사용합니다.",
             f"  - 등록 계획 파일: {register_plan_path}",
             "- Step 10 선택:",
-            "  1. 로컬 MLflow 실행 검증 및 mlruns 생성",
+            "  1. 로컬 MLflow 실행 검증 + mlruns 생성 + Job Template 갱신",
             f"  - 검증 결과 파일: {verification_path}",
             "- Job Template YAML:",
             f"  - 저장 경로: {job_template_path}",
@@ -4613,15 +4631,19 @@ def run_beginner_mlflow_verification(project_path: str) -> str:
     root = resolve_filesystem_path(project_path or ".")
     verification = run_mlflow_verification(root, skip_serving=True)
     verification_path = root / "mlflow-run-verification.json"
+    job_template_path = root / "job_template.yml"
     if root.exists() and root.is_dir():
         write_verification_file(verification_path, verification)
-    return format_beginner_mlflow_verification_result(root, verification, verification_path)
+        analysis = analyze_project(str(root))
+        write_job_template_file(root, analysis, serving_result=verification.get("serving") if isinstance(verification.get("serving"), dict) else None)
+    return format_beginner_mlflow_verification_result(root, verification, verification_path, job_template_path)
 
 
 def format_beginner_mlflow_verification_result(
     root: Path,
     verification: dict[str, object],
     verification_path: Path,
+    job_template_path: Path,
 ) -> str:
     mlruns_path = root / "mlruns"
     mlflow_run = verification.get("mlflow_run") if isinstance(verification.get("mlflow_run"), dict) else {}
@@ -4636,6 +4658,7 @@ def format_beginner_mlflow_verification_result(
         f"- metrics: {metric_report.get('metric_count', 0) if isinstance(metric_report, dict) else 0}",
         f"- params: {metric_report.get('param_count', 0) if isinstance(metric_report, dict) else 0}",
         f"- 결과 파일: {verification_path}",
+        f"- Job Template: {'생성됨' if job_template_path.exists() else '미생성'} ({job_template_path})",
     ]
     if errors:
         rows.append("- 오류:")
