@@ -4147,6 +4147,48 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요", output)
         self.assertEqual(controller.agent_mode, "Plan")
 
+    def test_tui_run_model_failure_offers_repair_and_rerun_choice(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = self.beginner_tui(str(root))
+
+            with patch("deep_agent.tui.run_beginner_mlflow_verification", return_value="Step 10 로컬 MLflow 실행 검증 결과\n- status: error\n- run_model.py 실행 실패"):
+                output = controller.run_local_model_training()
+
+            self.assertTrue(controller.awaiting_run_model_repair)
+            self.assertIn("오류 자동 보완", output)
+            self.assertIn("1. 자동 보완 후 다시 실행", output)
+            self.assertIn("requirements.txt", output)
+
+    def test_tui_run_model_repair_choice_applies_fix_and_reruns(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            requirements = root / "requirements.txt"
+            requirements.write_text("tensorflow==2.17.0\n")
+            (root / "train.py").write_text("print('train')\n")
+            (root / "model.keras").write_text("sample")
+            controller = self.beginner_tui(str(root))
+
+            with patch(
+                "deep_agent.tui.run_beginner_mlflow_verification",
+                side_effect=[
+                    "Step 10 로컬 MLflow 실행 검증 결과\n- status: error\n- run_model.py 실행 실패",
+                    "Step 10 로컬 MLflow 실행 검증 결과\n- status: ok",
+                ],
+            ):
+                controller.run_local_model_training()
+                output = controller.submit("1")
+
+            self.assertFalse(controller.awaiting_run_model_repair)
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertIn("RUN MODEL 자동 보완", output)
+            self.assertIn("다시 RUN MODEL을 실행했습니다", output)
+            self.assertIn("status: ok", output)
+            self.assertIn("mlflow", requirements.read_text().lower())
+
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
         with TemporaryDirectory() as tmpdir:
             cwd = Path.cwd()

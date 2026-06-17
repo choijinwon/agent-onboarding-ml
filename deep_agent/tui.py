@@ -1127,6 +1127,7 @@ class BeginnerTuiController:
     pending_chat_code_policy: ChatCodePolicyPlan | None = None
     pending_chat_command: str = ""
     pending_chat_agent_content: str = ""
+    awaiting_run_model_repair: bool = False
     awaiting_ai_studio_env: bool = False
     ai_studio_env_index: int = 0
     ai_studio_env_values: dict[str, str] = field(default_factory=dict)
@@ -1578,6 +1579,8 @@ class BeginnerTuiController:
             return self.select_agent_response_choice("")
         if not command and self.awaiting_chat_code_policy:
             return self.select_chat_code_policy("1")
+        if not command and self.awaiting_run_model_repair:
+            return self.repair_and_rerun_local_model()
         if not command and self.awaiting_model_selection:
             return self.select_model("")
         if not command and self.selected_launch_mode == MODE_BEGINNER and not self.steps:
@@ -1613,6 +1616,8 @@ class BeginnerTuiController:
             return self.select_model(command)
         if self.awaiting_chat_code_policy and command in {"1", "2", "3", "4"}:
             return self.select_chat_code_policy(command)
+        if self.awaiting_run_model_repair and command in {"1", "2", "3"}:
+            return self.select_run_model_repair(command)
         if self.awaiting_agent_response_choice and command.isdigit():
             return self.select_agent_response_choice(command)
 
@@ -1625,6 +1630,8 @@ class BeginnerTuiController:
             return self.select_sample(command)
         if self.awaiting_chat_code_policy:
             return self.select_chat_code_policy(command)
+        if self.awaiting_run_model_repair:
+            return self.select_run_model_repair(command)
         if self.awaiting_agent_response_choice:
             return self.select_agent_response_choice(command)
 
@@ -2322,13 +2329,16 @@ class BeginnerTuiController:
         return self.current_screen()
 
     def _handle_report_choice(self, command: str) -> str:
+        if self.awaiting_run_model_repair and command in {"1", "2", "3"}:
+            return self.select_run_model_repair(command)
         return self.run_local_model_training()
 
-    def run_local_model_training(self) -> str:
+    def run_local_model_training(self, *, after_repair: bool = False) -> str:
         if not self.project_path:
             message = "먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요."
             self.latest_message = message
             return self.render_log()
+        self.awaiting_run_model_repair = False
         self.agent_mode = "Build"
         try:
             result = run_beginner_mlflow_verification(self.project_path)
@@ -2340,11 +2350,130 @@ class BeginnerTuiController:
             )
         finally:
             self.agent_mode = "Plan"
+        result = self._append_run_model_repair_options(result, after_repair=after_repair)
         self.latest_message = f"{result}\n- Agent 모드: Build에서 MLflow 실행 검증 후 Plan으로 자동 전환했습니다."
         self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
         if self.steps:
             self.index = min(9, len(self.steps) - 1)
-        return self.current_screen()
+        return self.render_log()
+
+    def _append_run_model_repair_options(self, result: str, *, after_repair: bool = False) -> str:
+        if after_repair:
+            return result
+        if not self._run_model_failed(result):
+            return result
+        analysis = analyze_project(self.project_path)
+        fix_previews = build_fix_previews(analysis)
+        serving_previews = build_serving_fix_previews(analysis)
+        if not fix_previews and not serving_previews:
+            self.awaiting_run_model_repair = False
+            return (
+                f"{result}\n\n"
+                "오류 자동 보완\n"
+                "- 현재 자동 수정 가능한 항목을 찾지 못했습니다.\n"
+                "- 오류 내용을 확인한 뒤 run_model.py, requirements.txt, ai_studio.env를 점검하세요."
+            )
+        self.awaiting_run_model_repair = True
+        rows = [
+            result,
+            "",
+            "오류 자동 보완",
+            "- RUN MODEL 실행 중 오류가 발생해 수정 가능한 항목을 다시 분석했습니다.",
+            "- 삭제나 모델 artifact 교체는 수행하지 않습니다.",
+        ]
+        if fix_previews:
+            rows.append("- 등록 보완 항목:")
+            rows.extend(f"  - {preview.target}: {preview.title}" for preview in fix_previews)
+        if serving_previews:
+            rows.append("- 로컬 서빙 보완 항목:")
+            rows.extend(f"  - {preview.target}: {preview.title}" for preview in serving_previews)
+        rows.extend(
+            [
+                "- 선택:",
+                "  1. 자동 보완 후 다시 실행",
+                "  2. 오류만 보기",
+                "  3. 취소",
+            ]
+        )
+        return "\n".join(rows)
+
+    def _run_model_failed(self, result: str) -> bool:
+        lowered = result.lower()
+        return any(
+            token in lowered
+            for token in (
+                "status: error",
+                "status: needs_action",
+                "run_model.py 실행 실패",
+                "오류가 발생",
+                "error",
+                "failed",
+            )
+        )
+
+    def select_run_model_repair(self, command: str) -> str:
+        if command == "1":
+            return self.repair_and_rerun_local_model()
+        if command == "2":
+            self.awaiting_run_model_repair = False
+            message = "오류 내용을 유지합니다. 파일은 수정하지 않았습니다."
+            self.latest_message = message
+            return self.current_screen()
+        if command == "3":
+            self.awaiting_run_model_repair = False
+            message = "RUN MODEL 자동 보완을 취소했습니다. 파일은 수정하지 않았습니다."
+            self.latest_message = message
+            return self.current_screen()
+        message = "번호로 선택하세요. 1=자동 보완 후 다시 실행, 2=오류만 보기, 3=취소"
+        self.latest_message = message
+        return message
+
+    def repair_and_rerun_local_model(self) -> str:
+        if not self.project_path:
+            self.awaiting_run_model_repair = False
+            message = "먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요."
+            self.latest_message = message
+            return self.render_log()
+        self.awaiting_run_model_repair = False
+        self.agent_mode = "Build"
+        try:
+            analysis = analyze_project(self.project_path)
+            fix_previews = build_fix_previews(analysis)
+            serving_previews = build_serving_fix_previews(analysis)
+            applied_changes = []
+            if fix_previews:
+                applied_changes.extend(apply_fix_previews(self.project_path, fix_previews))
+            if serving_previews:
+                applied_changes.extend(apply_serving_fix_previews(self.project_path, serving_previews))
+            self.applied_changes = applied_changes
+            repair_summary = self._format_run_model_repair_summary(applied_changes)
+        except Exception as exc:
+            self.agent_mode = "Plan"
+            self.latest_message = (
+                "RUN MODEL 자동 보완 중 오류가 발생했습니다.\n"
+                f"- 오류: {exc}\n"
+                "- 파일 적용은 중단했고 Plan 모드로 돌아왔습니다."
+            )
+            return self.current_screen()
+        finally:
+            self.agent_mode = "Plan"
+        self.run_local_model_training(after_repair=True)
+        self.latest_message = f"{repair_summary}\n\n{self.latest_message}"
+        return self.render_log()
+
+    def _format_run_model_repair_summary(self, applied_changes: list[AppliedChange]) -> str:
+        applied_count = len([change for change in applied_changes if change.status == "applied"])
+        skipped_count = len([change for change in applied_changes if change.status == "skipped"])
+        if not applied_changes:
+            return "RUN MODEL 자동 보완\n- 적용 가능한 항목이 없어 파일을 수정하지 않았습니다."
+        rows = [
+            "RUN MODEL 자동 보완",
+            f"- 적용 완료: {applied_count}개",
+            f"- 건너뜀: {skipped_count}개",
+            "- 다시 RUN MODEL을 실행했습니다.",
+        ]
+        rows.extend(f"  - {change.target}: {change.message}" for change in applied_changes[:8])
+        return "\n".join(rows)
 
     def _handle_navigation(self, command: str) -> str:
         if command in {"다음", "next", "n"}:
