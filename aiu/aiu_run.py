@@ -2854,6 +2854,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('SampleButton("SAMPLE", id="sample")', source)
         self.assertIn("ClearButton", source)
         self.assertIn('ClearButton("CLEAR", id="clear")', source)
+        self.assertIn("RunModelButton", source)
+        self.assertIn('RunModelButton("RUN MODEL", id="run-model")', source)
         self.assertIn("MultiAgentButton", source)
         self.assertIn('MultiAgentButton("MULTI ON", id="multi-agent")', source)
         self.assertIn("CancelButton", source)
@@ -2870,6 +2872,8 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn("self.controller.start_sample_selection()", source)
         self.assertIn('event.button.id == "clear"', source)
         self.assertIn("self._clear_command_input()", source)
+        self.assertIn('event.button.id == "run-model"', source)
+        self.assertIn("self._run_local_model_training()", source)
         self.assertIn('event.button.id == "multi-agent"', source)
         self.assertIn("self._toggle_multi_agent()", source)
         self.assertIn('event.button.id == "cancel"', source)
@@ -2894,6 +2898,15 @@ class WindowsSetupTest(unittest.TestCase):
         self.assertIn('yield MultiAgentButton("MULTI ON", id="multi-agent")', source)
         self.assertIn('multi_button.label = "MULTI ON" if self.controller.multi_agent_enabled else "MULTI OFF"', source)
         self.assertIn("chat_with_qwen(", source)
+
+    def test_tui_supports_run_model_button(self):
+        source = (Path(__file__).resolve().parents[1] / "deep_agent" / "tui.py").read_text(encoding="utf-8")
+
+        self.assertIn("class RunModelButton(Button)", source)
+        self.assertIn('yield RunModelButton("RUN MODEL", id="run-model")', source)
+        self.assertIn("def _run_local_model_training", source)
+        self.assertIn("self.controller.run_local_model_training()", source)
+        self.assertIn("run_button.set_class", source)
 
     def test_tui_sample_button_selection_creates_selected_sample(self):
         with TemporaryDirectory() as tmpdir:
@@ -4108,6 +4121,31 @@ class WindowsSetupTest(unittest.TestCase):
             self.assertIn("Current: Tab 10/10", output)
             self.assertIn("Step 10 로컬 MLflow 실행 검증 결과", controller.latest_message)
             self.assertIn("Build에서 MLflow 실행 검증 후 Plan으로 자동 전환", controller.latest_message)
+
+    def test_tui_run_model_button_executes_local_mlflow_verification(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "requirements.txt").write_text("mlflow==2.17.0\n")
+            (root / "train.py").write_text("import mlflow\n")
+            (root / "model.onnx").write_text("sample")
+            controller = self.beginner_tui(str(root))
+
+            with patch("deep_agent.tui.run_beginner_mlflow_verification", return_value="RUN MODEL 버튼 실행 결과"):
+                output = controller.run_local_model_training()
+
+            self.assertEqual(controller.agent_mode, "Plan")
+            self.assertEqual(controller.index, 9)
+            self.assertIn("Current: Tab 10/10", output)
+            self.assertIn("RUN MODEL 버튼 실행 결과", controller.latest_message)
+
+    def test_tui_run_model_button_requires_project_path(self):
+        controller = BeginnerTuiController("")
+        controller.submit("1")
+
+        output = controller.run_local_model_training()
+
+        self.assertIn("먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요", output)
+        self.assertEqual(controller.agent_mode, "Plan")
 
     def test_tui_beginner_next_on_step10_returns_to_step1(self):
         with TemporaryDirectory() as tmpdir:

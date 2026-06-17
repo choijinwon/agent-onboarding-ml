@@ -163,6 +163,10 @@ class MultiAgentButton:
     pass
 
 
+class RunModelButton:
+    pass
+
+
 class AIOnboardingTuiApp:
     pass
 
@@ -2318,11 +2322,28 @@ class BeginnerTuiController:
         return self.current_screen()
 
     def _handle_report_choice(self, command: str) -> str:
+        return self.run_local_model_training()
+
+    def run_local_model_training(self) -> str:
+        if not self.project_path:
+            message = "먼저 Step 1에서 샘플 또는 프로젝트 폴더를 선택하세요."
+            self.latest_message = message
+            return self.render_log()
         self.agent_mode = "Build"
-        result = run_beginner_mlflow_verification(self.project_path)
-        self.agent_mode = "Plan"
+        try:
+            result = run_beginner_mlflow_verification(self.project_path)
+        except Exception as exc:
+            result = (
+                "로컬 모델 학습 실행 중 오류가 발생했습니다.\n"
+                f"- 오류: {exc}\n"
+                "- 파일 적용은 중단했고 Plan 모드로 돌아왔습니다."
+            )
+        finally:
+            self.agent_mode = "Plan"
         self.latest_message = f"{result}\n- Agent 모드: Build에서 MLflow 실행 검증 후 Plan으로 자동 전환했습니다."
         self.steps = build_beginner_step_tabs(self.project_path, applied_changes=self.applied_changes)
+        if self.steps:
+            self.index = min(9, len(self.steps) - 1)
         return self.current_screen()
 
     def _handle_navigation(self, command: str) -> str:
@@ -2345,7 +2366,7 @@ def run_tui(project_path: str = "") -> int:
         print(missing_textual_message())
         return 2
 
-    global AIOnboardingTuiApp, CancelButton, ClearButton, CommandInput, FileButton, LogView, ModeSelector, MultiAgentButton, SampleButton, SendButton, StatusBar
+    global AIOnboardingTuiApp, CancelButton, ClearButton, CommandInput, FileButton, LogView, ModeSelector, MultiAgentButton, RunModelButton, SampleButton, SendButton, StatusBar
 
     from textual import events
     from textual.app import App, ComposeResult
@@ -2465,6 +2486,9 @@ def run_tui(project_path: str = "") -> int:
         pass
 
     class MultiAgentButton(Button):
+        pass
+
+    class RunModelButton(Button):
         pass
 
     class AIOnboardingTuiApp(App[None]):
@@ -2607,6 +2631,20 @@ def run_tui(project_path: str = "") -> int:
             background: #3a2f18;
             color: #f0b429;
         }
+        #run-model {
+            width: 20;
+            height: 3;
+            margin-right: 1;
+            background: #1f6f43;
+            color: #ffffff;
+            text-style: bold;
+        }
+        #run-model.build {
+            background: #b7791f;
+        }
+        #run-model.chatbot {
+            background: #238636;
+        }
         #cancel {
             width: 14;
             height: 3;
@@ -2665,6 +2703,7 @@ def run_tui(project_path: str = "") -> int:
                         yield FileButton("FILE", id="file")
                         yield SampleButton("SAMPLE", id="sample")
                         yield ClearButton("CLEAR", id="clear")
+                        yield RunModelButton("RUN MODEL", id="run-model")
                         yield MultiAgentButton("MULTI ON", id="multi-agent")
                         yield CancelButton("CANCEL", id="cancel", disabled=True)
                         yield SendButton("SEND  Enter", id="send")
@@ -2790,6 +2829,10 @@ def run_tui(project_path: str = "") -> int:
                 event.stop()
                 self._toggle_multi_agent()
                 return
+            if event.button.id == "run-model":
+                event.stop()
+                self._run_local_model_training()
+                return
             if event.button.id == "cancel":
                 event.stop()
                 self._cancel_chatbot_request()
@@ -2802,6 +2845,13 @@ def run_tui(project_path: str = "") -> int:
         def _toggle_multi_agent(self) -> None:
             message = self.controller.toggle_multi_agent()
             self._input_status = message
+            self._refresh()
+            self._focus_command()
+
+        def _run_local_model_training(self) -> None:
+            self._input_status = "RUN MODEL 실행 중..."
+            self.query_one(StatusBar).update(self._input_status)
+            self.controller.run_local_model_training()
             self._refresh()
             self._focus_command()
 
@@ -3157,6 +3207,9 @@ def run_tui(project_path: str = "") -> int:
             multi_button.label = "MULTI ON" if self.controller.multi_agent_enabled else "MULTI OFF"
             multi_button.set_class(self.controller.multi_agent_enabled, "on")
             multi_button.set_class(not self.controller.multi_agent_enabled, "off")
+            run_button = self.query_one(RunModelButton)
+            run_button.set_class(self.controller.agent_mode == "Build", "build")
+            run_button.set_class(self.controller.agent_mode == "Chatbot", "chatbot")
             self.query_one(LogView).replace_text(self.controller.render_log())
             selector = self.query_one(ModeSelector)
             if self.controller.selected_launch_mode is None:
@@ -3194,6 +3247,7 @@ __all__ = [
     "format_sample_choices",
     "ModeSelector",
     "MultiAgentButton",
+    "RunModelButton",
     "SendButton",
     "LogView",
     "StatusBar",
